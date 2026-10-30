@@ -1,4 +1,7 @@
+import { useLearningArtifact, learningMarkdownRefs } from '../learning/useLearningArtifact';
 import { ResearchEffortControl } from '../components/ResearchEffortControl';
+import { ResearchHarnessControl, useResearchHarnessOptions, type ResearchHarnessOptions } from '../components/ResearchHarnessControl';
+import { ResearchHarnessPanel } from '../components/ResearchHarnessPanel';
 import { useResearchEffort } from '../hooks/useResearchEffort';
 import type { ResearchEffort } from '@shared/researchReasoning';
 import { DocumentVisualScope, DocumentVisualActions } from '../components/DocumentVisualScope';
@@ -45,23 +48,34 @@ import {
 } from '@shared/deepResearchVersions';
 import { DECORATIVE_IMAGE_STYLES } from '@shared/imageStyles';
 import { toReadingCopy } from '@shared/readingCopy';
-import { stripLeadingAbstract } from '@shared/writingDocument';
+import { stripLeadingAbstract, researchDocumentProse } from '@shared/writingDocument';
 import type { DeepResearchSnapshot } from '../app/viewSnapshots';
 import { useListPlacement } from '../listPlacement';
 import { readingBlocks, topBlockIndex, useReadingPlace, type ReadingPlace } from '../readingPlace';
 import { HoverLabelButton, Icon, RestoringPane, modelLabel } from '../components/ui';
 import { WorkspaceTabStrip } from '../components/library/LibraryWorkspaceTabs';
 import { SectionHeader } from '../components/SectionHeader';
+import {
+  GalleryFilterMenu,
+  GalleryFilterReset,
+  GallerySortMenu,
+  passesFilter,
+  readFilterFromStates,
+  readStatesFromFilter,
+  type GalleryFilterOption,
+  type ReadState,
+} from '../components/GalleryFilters';
 import { ModelPicker } from '../components/ModelPicker';
 import { confirm } from '../components/feedback';
 import { SourceCitationModal, type CitationTarget, type OpenCitationLibraryWork } from '../components/SourceCitationModal';
 import { SaveToNotesModal } from '../components/SaveToNotesModal';
 import { TranslationModal } from '../components/TranslationModal';
-import { Markdown } from '../components/Markdown';
+import { ResearchMarkdown as Markdown } from '../components/ResearchSourceNotice';
 import { DraftActionBar, DraftResultMain, SupportMatrix } from './writingShared';
 import { DeepResearchQueueStrip, type QueueStripItem } from '../components/DeepResearchQueueStrip';
 import { DecorativeImageCard } from '../components/DecorativeImageCard';
-import { AudioPanel } from '../components/AudioPanel';
+import { ListenButton } from '../components/narration/Listen';
+import { ReadAlong } from '../components/narration/ReadAlong';
 import { FindInPage } from '../components/FindInPage';
 import { NodiViewContextSource } from '../components/NodiViewContextSource';
 import {
@@ -301,6 +315,7 @@ export function DeepResearchView({
   onCompleteGuideTargetConsumed?: () => void;
 }) {
   const variant: DeepResearchVariant = isTeaching ? 'unit' : isGenealogy ? 'genealogy' : isStudy ? 'study' : 'academic';
+  const isAcademic = variant === 'academic';
   const copy = DEEP_RESEARCH_COPY[variant];
   // A report can only be the surface if there was one open; the pair is stored
   // together, and a reader with nothing in it would render the gallery anyway.
@@ -325,6 +340,7 @@ export function DeepResearchView({
   // The thinking level for that model, shared with the Research chat's memory: the level
   // last chosen for it, or its middle level.
   const [thinkingEffort, setThinkingEffort] = useResearchEffort(settings, selectedModel ?? null);
+  const harnessOptions = useResearchHarnessOptions(settings, 'deep-research');
   const [deepSectionLimit, setDeepSectionLimit] = useState<DeepResearchSectionLimit>('auto');
   const [deepSectionLength, setDeepSectionLength] = useState<DeepResearchSectionLength>('auto');
   const [sectionLengthValid, setSectionLengthValid] = useState(true);
@@ -335,7 +351,9 @@ export function DeepResearchView({
   const [studyReportMode, setStudyReportMode] = useState<'research' | 'complete_guide'>('research');
   const [guideState, setGuideState] = useState<CompleteGuideComposerState>(EMPTY_COMPLETE_GUIDE_STATE);
   const [guideReady, setGuideReady] = useState(false);
-  const [kindFilter, setKindFilter] = useState<'all' | 'reports' | 'guides'>('all');
+  const [kindFilter, setKindFilter] = useState<Array<'reports' | 'guides'>>([]);
+  const [approachFilter, setApproachFilter] = useState<DeepResearchApproach[]>([]);
+  const [languageFilter, setLanguageFilter] = useState<string[]>([]);
   const [guideEvidence, setGuideEvidence] = useState<{ itemId: string; open: () => void } | null>(null);
   const guideMode = isStudy && !isTeaching && studyReportMode === 'complete_guide';
   const [imageStyle, setImageStyle] = useState<DecorativeImageStyle>(settings.imageStyle);
@@ -361,7 +379,10 @@ export function DeepResearchView({
   // Gallery controls. Restored as initial values only: a reactive `snapshot` prop
   // would fight the reader for their own filters on every render of the shell.
   const [search, setSearch] = useState(() => snapshot?.search ?? '');
-  const [readFilter, setReadFilter] = useState<ReadFilter>(() => snapshot?.readFilter ?? 'all');
+  // Several boxes may be ticked; the snapshot and the stored preference keep the old
+  // tri-state form (see readFilterFromStates).
+  const [readStates, setReadStates] = useState<ReadState[]>(() => readStatesFromFilter(snapshot?.readFilter));
+  const readFilter: ReadFilter = readFilterFromStates(readStates);
   const [sortKey, setSortKey] = useState<SortKey>(() => snapshot?.sortKey ?? 'recent');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => snapshot?.viewMode ?? 'grid');
   const [galleryAnchorId, setGalleryAnchorId] = useState<string | null>(() => snapshot?.placement?.anchorId ?? null);
@@ -377,6 +398,7 @@ export function DeepResearchView({
   const [openDraft, setOpenDraft] = useState<WritingWorkshopSavedDraft | null>(null);
   const [showMatrix, setShowMatrix] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  useLearningArtifact('deep-research', mode === 'reader' ? openDraft?.id : null, learningMarkdownRefs(openDraft?.draft.draftMarkdown ?? ''));
   const [citation, setCitation] = useState<CitationTarget>(null);
   const [savingToNotes, setSavingToNotes] = useState(false);
   const [translationOpen, setTranslationOpen] = useState(false);
@@ -447,7 +469,7 @@ export function DeepResearchView({
     }
     setGalleryAnchorId(null);
     report.current?.({ placement: null });
-  }, [readFilter, search, sortKey]);
+  }, [readStates, search, sortKey, kindFilter, approachFilter, languageFilter]);
 
   // Materials → "Crear guía de estudio": open the composer with those sources ticked.
   useEffect(() => {
@@ -610,6 +632,7 @@ export function DeepResearchView({
       ...(!isStudy && !isTeaching && !isGenealogy ? { notebookId } : {}),
       approach,
       deepResearchVersion: normalizeDeepResearchRequestVersion(deepResearchVersion),
+      ...(isAcademic ? { harnessVersion: harnessOptions.version, explorationMode: harnessOptions.exploration, webSearch: harnessOptions.web } : {}),
       language,
       sectionLimit: deepSectionLimit,
       sectionLength: deepSectionLength,
@@ -895,7 +918,7 @@ export function DeepResearchView({
 
   const copyDraft = async () => {
     if (!openDraft) return;
-    await navigator.clipboard.writeText(appliedTranslation?.markdown ?? openDraft.draft.draftMarkdown);
+    await navigator.clipboard.writeText(researchDocumentProse(appliedTranslation?.markdown ?? openDraft.draft.draftMarkdown, Boolean(openDraft.draft.limitations?.length)));
     setMessage(t('Borrador copiado.'));
   };
 
@@ -905,8 +928,8 @@ export function DeepResearchView({
   const copyForListening = async () => {
     if (!openDraft) return;
     const text = appliedTranslation
-      ? toReadingCopy(appliedTranslation.markdown)
-      : toReadingCopy(openDraft.draft.draftMarkdown, { title: openDraft.draft.title });
+      ? toReadingCopy(researchDocumentProse(appliedTranslation.markdown, Boolean(openDraft.draft.limitations?.length)))
+      : toReadingCopy(researchDocumentProse(openDraft.draft.draftMarkdown, Boolean(openDraft.draft.limitations?.length)), { title: openDraft.draft.title });
     await navigator.clipboard.writeText(text);
     setMessage(t('Texto copiado sin citas ni referencias.'));
   };
@@ -924,17 +947,59 @@ export function DeepResearchView({
       const matchesSearch = !q
         || (draft.title ?? '').toLowerCase().includes(q)
         || (draft.brief.objective ?? '').toLowerCase().includes(q);
-      const matchesReadState = readFilter === 'all'
-        || (readFilter === 'read' ? !!draft.readAt : !draft.readAt);
-      const matchesKind = kindFilter === 'all' || (kindFilter === 'guides') === Boolean(draft.draft.completeGuide);
-      return matchesSearch && matchesReadState && matchesKind;
+      const matchesReadState = passesFilter(readStates, draft.readAt ? 'read' : 'unread');
+      const matchesKind = passesFilter(kindFilter, draft.draft.completeGuide ? 'guides' : 'reports');
+      // A study guide has no research approach, so an approach filter leaves guides out.
+      const matchesApproach = approachFilter.length === 0
+        || (!draft.draft.completeGuide && approachFilter.includes(draftApproach(draft)));
+      const matchesLanguage = passesFilter(languageFilter, draft.brief.language);
+      return matchesSearch && matchesReadState && matchesKind && matchesApproach && matchesLanguage;
     });
     const sorted = [...filtered];
     if (sortKey === 'title') sorted.sort((a, b) => (a.title ?? '').localeCompare(b.title ?? ''));
     else if (sortKey === 'oldest') sorted.sort((a, b) => (a.updatedAt ?? '').localeCompare(b.updatedAt ?? ''));
     else sorted.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
     return sorted;
-  }, [savedDrafts, search, readFilter, sortKey, kindFilter]);
+  }, [savedDrafts, search, readStates, sortKey, kindFilter, approachFilter, languageFilter]);
+
+  // Options are counted over the whole gallery, not the filtered cut, so a number never
+  // drops to zero just because a neighbouring filter is on. Approaches and languages
+  // are offered only when the gallery holds more than one, or one is already ticked —
+  // a menu whose single entry matches everything is noise.
+  const filterOptions = useMemo(() => {
+    const count = <T extends string>(values: T[]) => {
+      const counts = new Map<T, number>();
+      for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+      return counts;
+    };
+    const reports = savedDrafts.filter((draft) => !draft.draft.completeGuide);
+    const readCounts = count(savedDrafts.map((draft): ReadState => (draft.readAt ? 'read' : 'unread')));
+    const approachCounts = count(reports.map(draftApproach));
+    const languageCounts = count(savedDrafts.flatMap((draft): string[] => (draft.brief.language ? [draft.brief.language] : [])));
+    const read: GalleryFilterOption<ReadState>[] = [
+      { value: 'unread', label: t('No leídos'), count: readCounts.get('unread') ?? 0 },
+      { value: 'read', label: t('Leídos'), count: readCounts.get('read') ?? 0 },
+    ];
+    const kind: GalleryFilterOption<'reports' | 'guides'>[] = [
+      { value: 'reports', label: t('Informes'), count: reports.length },
+      { value: 'guides', label: t('Guías de estudio'), count: savedDrafts.length - reports.length },
+    ];
+    const approach: GalleryFilterOption<DeepResearchApproach>[] = DEEP_RESEARCH_APPROACH_OPTIONS
+      .filter((option) => approachCounts.has(option.id) || approachFilter.includes(option.id))
+      .map((option) => ({ value: option.id, label: t(option.label), count: approachCounts.get(option.id) ?? 0 }));
+    const language: GalleryFilterOption[] = PROMPT_LANGUAGE_OPTIONS
+      .filter((option) => languageCounts.has(option.id) || languageFilter.includes(option.id))
+      .map((option) => ({ value: option.id, label: option.label, count: languageCounts.get(option.id) ?? 0 }));
+    return { read, kind, approach, language };
+  }, [savedDrafts, approachFilter, languageFilter]);
+
+  const activeFilterCount = readStates.length + kindFilter.length + approachFilter.length + languageFilter.length;
+  const clearFilters = () => {
+    setReadStates([]);
+    setKindFilter([]);
+    setApproachFilter([]);
+    setLanguageFilter([]);
+  };
 
   // The strip mirrors the one durable lane. This keeps its visible ids identical to
   // the ids the main process can cancel, including after an application restart.
@@ -1098,6 +1163,7 @@ export function DeepResearchView({
   return (
     <div className="theme-workspace-surface h-full flex flex-col min-h-0">
       {workspaceTabs}
+      {isAcademic && <ResearchHarnessPanel mode="deep-research" onResumed={() => void refreshSavedDrafts()} />}
       <SectionHeader
         icon="telescope"
         title={t(copy.heading)}
@@ -1116,7 +1182,7 @@ export function DeepResearchView({
             {selecting && selected.size > 0 && <span className="text-xs text-indigo-300">({selected.size})</span>}
           </button>
         )}
-        <button className="btn btn-primary gap-1.5" onClick={() => setComposerOpen(true)}>
+        <button data-testid="deep-research-new" className="btn btn-primary gap-1.5" onClick={() => setComposerOpen(true)}>
           <Icon name="plus" /> {t(copy.newAction)}
         </button>
         </>)}
@@ -1150,36 +1216,55 @@ export function DeepResearchView({
             placeholder={t(copy.searchPlaceholder)}
           />
         </div>
-        <select
-          className="input !py-1.5 text-xs"
-          value={readFilter}
-          onChange={(e) => setReadFilter(e.target.value as ReadFilter)}
-          aria-label={t('Filtrar por estado')}
-          title={t('Filtrar por estado')}
-        >
-          <option value="all">{t('Leído + no leído')}</option>
-          <option value="read">{t('Solo leído')}</option>
-          <option value="unread">{t('Solo no leído')}</option>
-        </select>
+        <GalleryFilterMenu
+          label={t('Estado')}
+          icon="eye"
+          options={filterOptions.read}
+          selected={readStates}
+          onChange={setReadStates}
+          testId="deep-research-read-filter"
+        />
         {isStudy && !isTeaching && (
-          <select
-            className="input !py-1.5 text-xs"
-            value={kindFilter}
-            onChange={(e) => setKindFilter(e.target.value as 'all' | 'reports' | 'guides')}
-            aria-label={t('Filtrar por tipo')}
-            title={t('Filtrar por tipo')}
-            data-testid="deep-research-kind-filter"
-          >
-            <option value="all">{t('Informes y guías')}</option>
-            <option value="reports">{t('Solo informes')}</option>
-            <option value="guides">{t('Solo guías de estudio')}</option>
-          </select>
+          <GalleryFilterMenu
+            label={t('Tipo')}
+            icon="layers"
+            options={filterOptions.kind}
+            selected={kindFilter}
+            onChange={setKindFilter}
+            testId="deep-research-kind-filter"
+          />
         )}
-        <select className="input !py-1.5 text-xs" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
-          <option value="recent">{t('Más recientes')}</option>
-          <option value="oldest">{t('Más antiguos')}</option>
-          <option value="title">{t('Por título (A–Z)')}</option>
-        </select>
+        {(filterOptions.approach.length > 1 || approachFilter.length > 0) && (
+          <GalleryFilterMenu
+            label={t('Enfoque')}
+            icon="compass"
+            options={filterOptions.approach}
+            selected={approachFilter}
+            onChange={setApproachFilter}
+            testId="deep-research-approach-filter"
+          />
+        )}
+        {(filterOptions.language.length > 1 || languageFilter.length > 0) && (
+          <GalleryFilterMenu
+            label={t('Idioma')}
+            icon="languages"
+            options={filterOptions.language}
+            selected={languageFilter}
+            onChange={setLanguageFilter}
+            testId="deep-research-language-filter"
+          />
+        )}
+        <GalleryFilterReset count={activeFilterCount} onClear={clearFilters} />
+        <GallerySortMenu
+          options={[
+            { value: 'recent', label: t('Más recientes') },
+            { value: 'oldest', label: t('Más antiguos') },
+            { value: 'title', label: t('Por título (A–Z)') },
+          ]}
+          value={sortKey}
+          onChange={setSortKey}
+          testId="deep-research-sort"
+        />
         <div className="flex overflow-hidden rounded-lg border border-neutral-700">
           <button
             className={`px-2.5 py-1.5 text-xs ${viewMode === 'grid' ? 'bg-indigo-900/40 text-indigo-200' : 'text-neutral-400 hover:bg-neutral-900'}`}
@@ -1254,13 +1339,13 @@ export function DeepResearchView({
             <div className="max-w-md text-sm text-neutral-500">
               {loadingSavedDrafts
                 ? t(copy.loading)
-                : readFilter !== 'all'
+                : activeFilterCount > 0
                   ? t('No hay elementos con estos filtros.')
                   : search.trim()
                   ? t(copy.noMatch)
                   : t(copy.empty)}
             </div>
-            {!search.trim() && readFilter === 'all' && !loadingSavedDrafts && (
+            {!search.trim() && activeFilterCount === 0 && !loadingSavedDrafts && (
               <button className="btn btn-primary gap-1.5" onClick={() => setComposerOpen(true)}>
                 <Icon name="plus" /> {t(copy.newAction)}
               </button>
@@ -1340,6 +1425,7 @@ export function DeepResearchView({
           model={selectedModel}
           thinkingEffort={thinkingEffort}
           onThinkingEffort={setThinkingEffort}
+          harnessOptions={harnessOptions}
           sectionLimit={deepSectionLimit}
           sectionLength={deepSectionLength}
           onSectionLength={setDeepSectionLength}
@@ -1470,6 +1556,11 @@ function compactModelName(model: NonNullable<WritingWorkshopSavedDraft['model']>
     }
   }
   return modelLabel(model).replace('Google Gemini · ', 'Gemini ');
+}
+
+/** The approach a saved report was written with; historical drafts have none and read as General. */
+function draftApproach(saved: WritingWorkshopSavedDraft): DeepResearchApproach {
+  return normalizeDeepResearchApproach(saved.draft.deepResearchApproach ?? saved.brief.deepResearchApproach);
 }
 
 function ReportGenerationTags({ saved, compact = false }: { saved: WritingWorkshopSavedDraft; compact?: boolean }) {
@@ -2230,7 +2321,7 @@ function ReaderView({
   return (
     <div className="h-full flex flex-col min-h-0">
       <NodiViewContextSource title={contextTitle} text={contextMarkdown} />
-      <header className="flex flex-wrap items-center gap-2 border-b border-neutral-800 px-4 py-2.5">
+      <header data-testid="deep-research-reader-toolbar" className="flex flex-wrap items-center gap-2 border-b border-neutral-800 px-4 py-2.5">
         <button className="btn btn-ghost gap-1.5" onClick={onBack}>
           <Icon name="chevronLeft" /> {t('Volver a la galería')}
         </button>
@@ -2254,6 +2345,7 @@ function ReaderView({
         />
         {onExportCheatSheet && (
           <HoverLabelButton
+            iconOnly
             icon="flashcards"
             label={t('Descargar la ficha de repaso (PDF)')}
             onClick={onExportCheatSheet}
@@ -2262,10 +2354,14 @@ function ReaderView({
             className="btn-ghost h-9 min-h-9 border border-neutral-700"
           />
         )}
+        <span className="flex h-9 min-h-9 items-center rounded-lg border border-neutral-700 px-1">
+          <ListenButton testId="deep-research-audio-toggle" size={15} target={{ kind: 'deep_research', id: saved.id, title: saved.title }} />
+        </span>
         <DocumentVisualActions />
         <ReaderFontControls targetRef={documentRef} scrollerRef={mainRef} initialSize={initialReaderFontSize} />
         <ReaderHighlighterControl value={highlighterColor} onChange={setHighlighterColor} />
         <HoverLabelButton
+          iconOnly
           icon={hasReaderMark ? 'bookmarkFill' : 'bookmark'}
           label={t('Ir al marcador de lectura')}
           onClick={() => markActionsRef.current?.goToMark()}
@@ -2276,33 +2372,34 @@ function ReaderView({
             is already looking, rather than back in the gallery they would have to
             return to first. */}
         <HoverLabelButton
+          iconOnly
           icon={saved.readAt ? 'eyeOff' : 'check'}
           label={saved.readAt ? t('Marcar como no leído') : t('Marcar como leído')}
           onClick={onToggleRead}
-          showLabel={!!saved.readAt}
+          aria-pressed={!!saved.readAt}
           className={`btn-ghost h-9 min-h-9 border ${saved.readAt ? 'border-emerald-700/60 text-emerald-300' : 'border-neutral-700'}`}
         />
         <HoverLabelButton
+          iconOnly
           icon="languages"
           label={t('Traducir')}
           onClick={onTranslate}
           className="btn-ghost h-9 min-h-9 border border-neutral-700"
         />
         <HoverLabelButton
+          iconOnly
           icon="layers"
           label={saved.draft.completeGuide ? t('Cobertura de la guía') : t('Matriz de apoyo')}
           onClick={onToggleMatrix}
-          showLabel={showMatrix}
+          aria-pressed={showMatrix}
           className={`btn-ghost h-9 min-h-9 border ${showMatrix ? 'border-indigo-700/60 text-indigo-200' : 'border-neutral-700'}`}
         />
-        {/* Clicked with the mouse, the button hands focus back: a focused toolbar
-            button keeps its label open, and a label that wide re-wraps the row under
-            whatever the reader reaches for next. Keyboard activation (detail 0) keeps
-            its focus, which is the whole point of having it there. */}
         <HoverLabelButton
+          iconOnly
           icon={fullscreen ? 'minimize' : 'maximize'}
           label={fullscreen ? t('Salir de pantalla completa') : t('Lectura a pantalla completa')}
-          onClick={(event) => { if (event.detail > 0) event.currentTarget.blur(); onToggleFullscreen(); }}
+          onClick={onToggleFullscreen}
+          aria-pressed={fullscreen}
           data-testid="deep-research-fullscreen-toggle"
           className={`btn-ghost h-9 min-h-9 border ${fullscreen ? 'border-indigo-700/60 text-indigo-200' : 'border-neutral-700'}`}
         />
@@ -2326,7 +2423,6 @@ function ReaderView({
               interactive
               onChange={onImageChange}
             />
-            <AudioPanel entityKind="deep_research" entityId={saved.id} />
             <div
               ref={documentRef}
               className="deep-research-reader-document relative"
@@ -2334,6 +2430,7 @@ function ReaderView({
               style={{ '--deep-research-font-size': `${initialReaderFontSize}px` } as CSSProperties}
             >
               {appliedTranslation ? <Markdown content={appliedTranslation.markdown} onCitation={onCitation} onStudyDocument={onOpenStudyDocument} onStudyMaterial={onOpenStudyMaterial} onStudyRecording={onOpenStudyRecording} onGuideEvidence={onGuideEvidence} /> : <DraftResultMain
+                sourceNotices
                 draft={saved.draft}
                 exporting={exporting}
                 savingDraft={false}
@@ -2367,9 +2464,10 @@ function ReaderView({
           onAnnotationError={setAnnotationError}
           onMarkChange={setHasReaderMark}
         />
+        <ReadAlong rootRef={documentRef} scrollRef={mainRef} matches={(key) => key === `deep_research:${saved.id}`} />
         {showMatrix && (
           <aside className="w-80 shrink-0 overflow-y-auto border-l border-neutral-800 p-4 max-lg:hidden">
-            {saved.draft.completeGuide ? <CompleteGuideCoveragePanel meta={saved.draft.completeGuide} /> : <SupportMatrix draft={saved.draft} onCitation={onCitation} />}
+            {saved.draft.completeGuide ? <CompleteGuideCoveragePanel meta={saved.draft.completeGuide} /> : <SupportMatrix sourceNotices draft={saved.draft} onCitation={onCitation} />}
           </aside>
         )}
       </div>
@@ -2383,6 +2481,7 @@ function ReaderView({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function ComposerModal({
+  harnessOptions,
   documentSkills,
   isAcademic = false,
   settings,
@@ -2429,6 +2528,7 @@ export function ComposerModal({
   guidePanel,
   guideReady = false,
 }: {
+  harnessOptions?: ResearchHarnessOptions;
   documentSkills: ReturnType<typeof useDocumentSkills>;
   isAcademic?: boolean;
   settings: AppSettings;
@@ -2491,6 +2591,7 @@ export function ComposerModal({
         role="dialog"
         aria-modal="true"
         aria-label={t(copy.newAction)}
+        data-testid="deep-research-composer"
         className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-neutral-700 bg-white shadow-2xl dark:bg-neutral-950"
         onMouseDown={(event) => event.stopPropagation()}
       >
@@ -2685,6 +2786,7 @@ export function ComposerModal({
             </label>
             <ResearchEffortControl variant="field" label className="w-full !py-2 text-sm" testId="deep-research-thinking" model={model ?? null} value={thinkingEffort} onChange={onThinkingEffort} disabled={!model} />
           </div>
+          {isAcademic && harnessOptions && <ResearchHarnessControl options={harnessOptions} web />}
           {!isAcademic && <DocumentSkillsControl value={documentSkills.policy} onChange={documentSkills.setPolicy} onValidityChange={documentSkills.setValid} />}
           <div className="flex flex-wrap items-center gap-2">
             <button

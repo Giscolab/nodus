@@ -23,7 +23,7 @@ Choose the path that best matches your contribution:
 - **Feature request** for a new capability or improvement
 - **New vault type** for a specialized workspace proposal
 - **Product feedback** belongs in the permanent
-  [shared feedback thread](https://github.com/Drakonis96/nodus/issues/272);
+  [shared feedback thread](https://github.com/jorgepb96/nodus/issues/272);
   add a comment there instead of opening a new issue
 
 The desktop app exposes the same four paths under **Suggest / Report**. Bug
@@ -84,7 +84,18 @@ npm run test:e2e
 The full end-to-end suite launches the real desktop app and is most reliable on
 macOS, which is also the platform used by the main CI job.
 
+CI compiles the current commit once on Linux, runs the complete test inventory across six
+isolated Linux groups, and runs all five real-app E2E checks across three parallel groups.
+Lint and TypeScript run alongside the build and remain required. The final
+`test` check verifies complete execution as well as successful capability checks
+on Linux, macOS and Windows. See [CI execution and measurement](docs/ci-performance.md)
+for the inventory reports, cache behavior, and performance validation procedure.
+
 ## Publishing releases
+
+Every release, hotfixes included, follows the [release policy](docs/release-policy.md):
+how to choose the version, which identifiers to update, how to write the What's New
+modal and the notes, and when to merge and publish.
 
 Stable and Beta are separate GitHub Actions entry points backed by the shared
 `release-build.yml` implementation:
@@ -101,11 +112,32 @@ also be run manually by supplying the exact tag. The channel/version validator
 stops a stable tag from entering Beta or a beta tag from entering Stable before
 any native build begins.
 
+Full CI and platform packaging run in parallel. Linux prepares one verified app
+on Ubuntu 22.04, then generates DEB, RPM and AppImage on isolated runners in
+parallel. Publication requires all primary platforms, their updater manifests,
+full CI and, for Stable, the Zotero plugin. Intel starts in a separate workflow
+after publication and appends its signed assets later. See
+[Release execution and measurement](docs/release-performance.md) for installer
+validation and timing definitions.
+
+Nodus Support is published independently after Nodus. Its signed app downloads
+do not require the repair qualification catalog to be populated; repair actions
+and recovery artifacts retain their qualification checks. To backfill an existing
+release after fixing the publisher, dispatch `release-support.yml` from the fixed
+commit with that release's channel and tag. The selected commit's package version
+must match the published tag. Safety checks and packaging use that same commit.
+
+Linux AppImages support both the built-in Electron updater and external
+AppImageUpdate tools. See [AppImage update compatibility](docs/appimage-updates.md)
+for the finalization sequence, preserved download aliases and Linux checks.
+
 Desktop updates download automatically, but installation and restart require
 the explicit **Install and restart** action on every supported platform. An
 ordinary app quit never installs a pending update. The downloaded update remains
-accessible from the header and Settings after choosing **Later**. On launch, the
-header banner shows the update check, available version, and download progress
+accessible from Settings after choosing **Later**. The banner below the header
+reappears during backup and installation, including when installation starts
+from Settings after postponing the update. On launch, the banner shows the update
+check, available version, and download progress
 without blocking the workspace. It disappears when no update is available; an
 initial check or download error is shown briefly and dismissed after five seconds.
 Subsequent checks and downloads stay silent until an update is ready to install.
@@ -178,8 +210,12 @@ downgrade or automatic data rollback as a migration strategy.
 ## Pull requests
 
 Every pull request must address an existing issue. Open or find the issue first
-and reference it in the pull request. A pull request without a related issue may
-remain unmerged until one is opened.
+and link it from **Development**, or use `Closes #123` / `Fixes #123` in the PR
+description when targeting the default branch. A plain `#123` mention does not
+create a linked issue. The required **Issue linked** check blocks merging until
+the link exists. After changing a sidebar link, maintainers can run **PR checks**
+manually or comment `retry` on the PR to refresh the result. There is no hourly
+scan.
 
 Keep each pull request focused on one coherent change. In the pull request:
 
@@ -192,11 +228,28 @@ Keep each pull request focused on one coherent change. In the pull request:
 - Call out migrations, privacy effects, network access, or compatibility risks.
 - Update documentation and translations when behavior changes.
 
-All required CI checks, including **CLA / signature**, must pass. Every human
-author and coauthor must accept the [Contributor License Agreement](CLA.md)
+All required CI checks, including **Issue linked** and **CLA / signature**, must
+pass. Every human author and coauthor must accept the [Contributor License Agreement](CLA.md)
 before a pull request can be merged. Maintainers may ask for a smaller scope,
 additional tests, or changes needed to preserve the project's privacy and
 evidence standards.
+
+After the checks for the current revision finish, the bot mentions the author
+with the failing checks, links, and short log excerpts where available. It
+updates repeated failures for that revision instead of posting duplicates.
+When every applicable check passes, it mentions the repository owner and author
+once each. This means the PR is ready for maintainer review and merge
+consideration; it does not promise or perform a merge. Drafts receive the issue
+check but no notification comments.
+
+Editing, reopening, or marking a PR ready for review can retry its failed CI
+once per revision, when the activity comes from its author or a maintainer.
+New commits run CI normally. Maintainers can comment `retry` or `/retry` for
+another failed-jobs retry, or use **Actions → PR checks → Run workflow** with
+the retry option and PR number. Successful CI jobs are retained; CLA and
+external checks follow their own instructions.
+
+Maintainer setup and operation: [PR checks automation](docs/pr-checks.md).
 
 ## Licensing
 
@@ -225,7 +278,7 @@ Use commit email addresses associated with the correct GitHub accounts. Missing
 account mappings, incomplete contributor data, and unsigned accounts block the
 check. Maintainers must accept too. AI-assisted contributions are welcome: the
 person submitting them must review them, accept the CLA, and have the authority
-to grant the required rights. Recognized Claude/Codex tool attributions do not
+to grant the required rights. Recognized Claude/Codex/Copilot tool attributions do not
 need a separate signature; they never exempt the responsible human or another
 human coauthor. Unrecognized or misattributed identities must be corrected;
 never remove a real author's attribution to avoid obtaining their acceptance.

@@ -271,6 +271,7 @@ export function ModelPicker({
   triggerModelOnly = false,
   ariaLabel,
   className = '',
+  models: choices,
 }: {
   settings: AppSettings;
   value: ModelRef | null;
@@ -287,13 +288,16 @@ export function ModelPicker({
   /** Accessible control name; the current provider and model are appended as its value. */
   ariaLabel?: string;
   className?: string;
+  /** The models to offer instead of the favorites, for a surface with its own list. */
+  models?: ModelRef[];
 }) {
-  const favorites = sortModelRefs(settings.favorites ?? []);
+  const favorites = choices ?? settings.favorites ?? [];
   const capability = requiredCapability ?? (requireExtraction ? 'extraction' : null);
   const blocked = (m: ModelRef) => capability ? !modelRefSupportsCapability(m, capability) : false;
   const optionText = (m: ModelRef) => (blocked(m) ? `${modelLabel(m)} — ${t('rol no certificado')}` : modelLabel(m));
   const serialize = (m: ModelRef) => `${m.provider}::${m.model}`;
   const valueIsFavorite = value ? favorites.some((model) => sameModel(model, value)) : false;
+  const models = sortModelRefs(value && !valueIsFavorite ? [value, ...favorites] : favorites);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -318,7 +322,6 @@ export function ModelPicker({
   }, [open]);
 
   if (menu) {
-    const models = value && !valueIsFavorite ? [value, ...favorites] : favorites;
     const normalizedQuery = query.trim().toLocaleLowerCase();
     const filteredModels = models.filter((model) => matchesModelSearch(`${model.provider} ${model.model} ${optionText(model)}`, query));
     const emptyOptionLabel = emptyLabel ? t(emptyLabel) : t('Sin modelo seleccionado');
@@ -408,8 +411,7 @@ export function ModelPicker({
       title={t('Seleccionar modelo')}
     >
       <option value="" disabled={!allowEmpty}>{emptyLabel ? t(emptyLabel) : t('Sin modelo seleccionado')}</option>
-      {value && !valueIsFavorite && <option value={serialize(value)}>{optionText(value)}</option>}
-      {favorites.map((m) => (
+      {models.map((m) => (
         <option key={serialize(m)} value={serialize(m)} disabled={blocked(m)}>
           {optionText(m)}
         </option>

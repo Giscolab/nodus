@@ -183,9 +183,11 @@ try {
     await updateModal.waitFor({ state: 'detached' });
   }
   await page.locator('[data-tour="nav-library"]').click();
-  // Everyone meets the Library guide the first time they open Library, and its
-  // backdrop swallows every pointer event aimed at the view behind it.
+  // The academic Library walkthrough remains available explicitly; its backdrop
+  // owns pointer events only after the user opens help.
   const libraryTutorial = page.getByTestId('library-tutorial-modal');
+  assert.equal(await libraryTutorial.count(), 0, 'academic library walkthrough is opt-in');
+  await page.getByTestId('library-open-tutorial').click();
   await libraryTutorial.waitFor({ state: 'visible' });
   await page.getByTestId('library-tutorial-close').click();
   await libraryTutorial.waitFor({ state: 'detached' });
@@ -738,7 +740,7 @@ try {
   await vaultIdeasModal.getByRole('button', { name: 'Cerrar' }).click();
   await vaultIdeasModal.waitFor({ state: 'detached' });
   const vaultWorkRow = page.getByTestId(`vault-library-item-${itemId}`);
-  await vaultWorkRow.getByRole('button', { name: 'Abrir lector limpio' }).click();
+  await vaultWorkRow.getByRole('button', { name: 'Abrir Markdown' }).click();
   await page.locator('[data-testid^="library-workspace-tab-document-"]').first().waitFor({ state: 'visible' });
   assert.equal(await page.getByTestId('work-ideas-modal').count(), 0, 'the reader action does not reopen the analysis modal');
   const readerFormatDialog = page.getByTestId('library-reader-format-dialog');

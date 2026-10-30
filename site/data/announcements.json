@@ -2,10 +2,486 @@
   "version": 1,
   "notices": [
     {
+      "id": "2026-10-29-nodus-reader-ios",
+      "date": "2026-10-29",
+      "severity": "info",
+      "url": "https://testflight.apple.com/join/SjCk8AZ1",
+      "copy": {
+        "es": {
+          "title": "Lee tus libros y artículos desde el móvil: Nodus Reader ya está en beta",
+          "body": "Nodus Reader, nuestra app gratuita y de código abierto para leer y escuchar tu biblioteca, ya está en beta pública en TestFlight para iPhone, iPad y Mac. Abre EPUB, PDF, TXT, Markdown, HTML y RTF, añade marcadores, subrayados y notas, y escucha la narración con voces generadas por completo en tu dispositivo. La lectura inteligente de PDF reconstruye el orden de lectura y aplica OCR en el dispositivo. Sin cuenta, anuncios, seguimiento ni compras. La interfaz está en inglés y español por ahora; tus comentarios en TestFlight definirán lo que viene.",
+          "linkLabel": "Probar la beta en TestFlight"
+        },
+        "en": {
+          "title": "Read your books and papers from your phone: Nodus Reader is in beta",
+          "body": "Nodus Reader, our free, open-source app for reading and listening to your library, is now in public beta on TestFlight for iPhone, iPad and Mac. Open EPUB, PDF, TXT, Markdown, HTML and RTF, add bookmarks, highlights and notes, and listen with voices generated entirely on your device. Intelligent Reading for PDF rebuilds the reading order and runs OCR on your device. No account, ads, tracking or purchases. The interface is in English and Spanish for now; feedback sent through TestFlight shapes what comes next.",
+          "linkLabel": "Join the beta on TestFlight"
+        },
+        "fr": {
+          "title": "Lisez vos livres et vos articles depuis votre téléphone : Nodus Reader est en bêta",
+          "body": "Nodus Reader, notre application gratuite et open source pour lire et écouter votre bibliothèque, est en bêta publique sur TestFlight pour iPhone, iPad et Mac. Ouvrez des fichiers EPUB, PDF, TXT, Markdown, HTML et RTF, ajoutez des signets, des surlignages et des notes, et écoutez la narration avec des voix générées entièrement sur votre appareil. La lecture intelligente des PDF reconstruit l’ordre de lecture et exécute l’OCR sur l’appareil. Sans compte, publicité, suivi ni achat. L’interface est en anglais et en espagnol pour l’instant ; vos retours via TestFlight orienteront la suite.",
+          "linkLabel": "Rejoindre la bêta sur TestFlight"
+        },
+        "de": {
+          "title": "Lies deine Bücher und Artikel auf dem Handy: Nodus Reader ist jetzt in der Beta",
+          "body": "Nodus Reader, unsere kostenlose Open-Source-App zum Lesen und Hören deiner Bibliothek, ist als öffentliche Beta in TestFlight für iPhone, iPad und Mac verfügbar. Öffne EPUB-, PDF-, TXT-, Markdown-, HTML- und RTF-Dateien, setze Lesezeichen, Markierungen und Notizen und höre die Erzählung mit Stimmen, die vollständig auf deinem Gerät entstehen. Intelligentes Lesen rekonstruiert die Lesereihenfolge von PDFs und führt OCR auf deinem Gerät aus. Ohne Konto, Werbung, Tracking oder Käufe. Die Oberfläche ist vorerst auf Englisch und Spanisch; dein Feedback über TestFlight bestimmt, wie es weitergeht.",
+          "linkLabel": "Beta in TestFlight testen"
+        },
+        "pt": {
+          "title": "Lê os teus livros e artigos no telemóvel: o Nodus Reader está em beta",
+          "body": "O Nodus Reader, a nossa aplicação gratuita e de código aberto para ler e ouvir a tua biblioteca, já está em beta pública no TestFlight para iPhone, iPad e Mac. Abre ficheiros EPUB, PDF, TXT, Markdown, HTML e RTF, adiciona marcadores, realces e notas, e ouve a narração com vozes geradas inteiramente no teu dispositivo. A leitura inteligente de PDF reconstrói a ordem de leitura e aplica OCR no dispositivo. Sem conta, anúncios, rastreio nem compras. A interface está em inglês e espanhol por agora; os teus comentários no TestFlight vão definir o que vem a seguir.",
+          "linkLabel": "Experimentar a beta no TestFlight"
+        },
+        "pt-BR": {
+          "title": "Leia seus livros e artigos no celular: o Nodus Reader está em beta",
+          "body": "O Nodus Reader, nosso app gratuito e de código aberto para ler e ouvir sua biblioteca, já está em beta pública no TestFlight para iPhone, iPad e Mac. Abra arquivos EPUB, PDF, TXT, Markdown, HTML e RTF, adicione marcadores, destaques e notas, e ouça a narração com vozes geradas inteiramente no seu dispositivo. A leitura inteligente de PDF reconstrói a ordem de leitura e aplica OCR no dispositivo. Sem conta, anúncios, rastreamento ou compras. A interface está em inglês e espanhol por enquanto; seus comentários no TestFlight vão definir o que vem a seguir.",
+          "linkLabel": "Testar a beta no TestFlight"
+        },
+        "it": {
+          "title": "Leggi i tuoi libri e articoli dal telefono: Nodus Reader è in beta",
+          "body": "Nodus Reader, la nostra app gratuita e open source per leggere e ascoltare la tua biblioteca, è ora in beta pubblica su TestFlight per iPhone, iPad e Mac. Apri file EPUB, PDF, TXT, Markdown, HTML e RTF, aggiungi segnalibri, evidenziazioni e note, e ascolta la narrazione con voci generate interamente sul tuo dispositivo. La lettura intelligente dei PDF ricostruisce l’ordine di lettura ed esegue l’OCR sul dispositivo. Senza account, pubblicità, tracciamento né acquisti. L’interfaccia è in inglese e spagnolo per ora; i tuoi commenti su TestFlight definiranno ciò che arriverà.",
+          "linkLabel": "Prova la beta su TestFlight"
+        },
+        "tr": {
+          "title": "Kitaplarını ve makalelerini telefondan oku: Nodus Reader beta yayında",
+          "body": "Kütüphaneni okumak ve dinlemek için ücretsiz, açık kaynaklı uygulamamız Nodus Reader, iPhone, iPad ve Mac için TestFlight’ta herkese açık beta olarak yayında. EPUB, PDF, TXT, Markdown, HTML ve RTF dosyalarını aç; yer imi, vurgu ve not ekle; tamamen cihazında oluşturulan seslerle dinle. PDF için Akıllı Okuma okuma sırasını yeniden kurar ve OCR’ı cihazında çalıştırır. Hesap, reklam, izleme veya satın alma yok. Arayüz şimdilik İngilizce ve İspanyolca; TestFlight üzerinden gönderdiğin geri bildirimler bundan sonrasını şekillendirecek.",
+          "linkLabel": "TestFlight’ta betayı dene"
+        },
+        "zh-CN": {
+          "title": "在手机上读你的书和论文：Nodus Reader 开启公测",
+          "body": "Nodus Reader 是我们为阅读和聆听你的藏书而打造的免费开源应用，现已在 TestFlight 面向 iPhone、iPad 和 Mac 开启公测。打开 EPUB、PDF、TXT、Markdown、HTML 和 RTF 文件，添加书签、高亮和笔记，并用完全在你设备上生成的语音聆听。PDF 智能阅读会重建阅读顺序，并在设备上运行 OCR。无账户、广告、追踪或购买。目前界面仅提供英文和西班牙文；你在 TestFlight 中的反馈将决定接下来的方向。",
+          "linkLabel": "通过 TestFlight 加入测试"
+        },
+        "zh-TW": {
+          "title": "在手機上讀你的書和論文：Nodus Reader 展開公測",
+          "body": "Nodus Reader 是我們為閱讀和聆聽你的藏書而打造的免費開源應用程式，現已在 TestFlight 為 iPhone、iPad 和 Mac 展開公測。開啟 EPUB、PDF、TXT、Markdown、HTML 和 RTF 檔案，加入書籤、螢光標記和筆記，並用完全在你裝置上產生的語音聆聽。PDF 智慧閱讀會重建閱讀順序，並在裝置上執行 OCR。無帳號、廣告、追蹤或購買。目前介面僅提供英文和西班牙文；你在 TestFlight 中的回饋將決定接下來的方向。",
+          "linkLabel": "透過 TestFlight 加入測試"
+        },
+        "ja": {
+          "title": "スマホで本や論文を読む：Nodus Reader のベータを公開",
+          "body": "Nodus Reader は、蔵書を読んで聴くための無料のオープンソースアプリです。iPhone、iPad、Mac 向けのパブリックベータを TestFlight で公開しました。EPUB、PDF、TXT、Markdown、HTML、RTF を開き、ブックマーク、ハイライト、ノートを追加し、デバイス上で生成される音声で聴けます。PDF のインテリジェントリーディングは読み順を再構築し、デバイス上で OCR を実行します。アカウント、広告、トラッキング、購入はありません。インターフェースは今のところ英語とスペイン語のみです。TestFlight で送ったフィードバックが今後の開発に反映されます。",
+          "linkLabel": "TestFlight でベータに参加"
+        },
+        "ko": {
+          "title": "휴대폰으로 책과 논문을 읽으세요: Nodus Reader 베타 공개",
+          "body": "Nodus Reader는 서재를 읽고 듣기 위한 무료 오픈 소스 앱으로, iPhone, iPad, Mac용 공개 베타를 TestFlight에서 시작합니다. EPUB, PDF, TXT, Markdown, HTML, RTF 파일을 열고 북마크, 하이라이트, 노트를 추가하며, 기기에서 생성되는 음성으로 들을 수 있습니다. PDF 지능형 읽기는 읽기 순서를 재구성하고 기기에서 OCR을 실행합니다. 계정, 광고, 추적, 구매가 없습니다. 인터페이스는 당분간 영어와 스페인어로만 제공됩니다. TestFlight로 보내 주신 피드백이 앞으로의 방향을 결정합니다.",
+          "linkLabel": "TestFlight에서 베타 참여"
+        }
+      }
+    },
+    {
+      "id": "2026-10-27-nodus-drift-ios",
+      "date": "2026-10-27",
+      "severity": "info",
+      "url": "https://testflight.apple.com/join/kAXnsjJS",
+      "copy": {
+        "es": {
+          "title": "Nodus Drift ya está en beta pública para iPhone y iPad",
+          "body": "Nodus Drift, nuestra mezcladora de sonidos ambientales gratuita para iPhone y iPad, ya está en beta pública en TestFlight. Es una app complementaria de Nodus: combina hasta seis de sus 89 sonidos, todos disponibles sin conexión, programa un temporizador de sueño y relájate en una escena de meditación a pantalla completa con Nodi. Sin cuenta, anuncios, seguimiento ni compras. La beta está solo en inglés por ahora; tus comentarios en TestFlight definirán lo que viene.",
+          "linkLabel": "Probar la beta en TestFlight"
+        },
+        "en": {
+          "title": "Nodus Drift is now in public beta on iPhone and iPad",
+          "body": "Nodus Drift, our free ambient sound mixer for iPhone and iPad, is now in public beta on TestFlight. It's a companion app to Nodus: blend up to six of its 89 sounds, all of which work entirely offline, set a sleep timer and unwind in a full-screen meditation scene with Nodi. No account, ads, tracking or purchases. The beta is in English only for now; feedback sent through TestFlight shapes what comes next.",
+          "linkLabel": "Join the beta on TestFlight"
+        },
+        "fr": {
+          "title": "Nodus Drift est en bêta publique sur iPhone et iPad",
+          "body": "Nodus Drift, notre mixeur de sons d’ambiance gratuit pour iPhone et iPad, est désormais en bêta publique sur TestFlight. C’est une app complémentaire de Nodus : mixez jusqu’à six de ses 89 sons, tous utilisables hors ligne, programmez une minuterie de sommeil et détendez-vous dans une scène de méditation plein écran avec Nodi. Sans compte, publicité, suivi ni achat. La bêta est uniquement en anglais pour l’instant ; vos retours via TestFlight orienteront la suite.",
+          "linkLabel": "Rejoindre la bêta sur TestFlight"
+        },
+        "de": {
+          "title": "Nodus Drift ist jetzt als öffentliche Beta für iPhone und iPad verfügbar",
+          "body": "Nodus Drift, unser kostenloser Ambient-Sound-Mixer für iPhone und iPad, ist jetzt als öffentliche Beta in TestFlight verfügbar. Es ist eine Begleitapp zu Nodus: Mische bis zu sechs seiner 89 Sounds (alle funktionieren vollständig offline), stelle einen Einschlaftimer ein und entspanne in einer bildschirmfüllenden Meditationsszene mit Nodi. Ohne Konto, Werbung, Tracking oder Käufe. Die Beta ist vorerst nur auf Englisch; dein Feedback über TestFlight bestimmt, wie es weitergeht.",
+          "linkLabel": "Beta in TestFlight testen"
+        },
+        "pt": {
+          "title": "O Nodus Drift já está em beta pública para iPhone e iPad",
+          "body": "O Nodus Drift, o nosso misturador de sons ambiente gratuito para iPhone e iPad, já está em beta pública no TestFlight. É uma aplicação complementar do Nodus: combina até seis dos seus 89 sons, todos disponíveis sem ligação à internet, define um temporizador de sono e relaxa numa cena de meditação em ecrã inteiro com o Nodi. Sem conta, anúncios, rastreio nem compras. A beta está apenas em inglês por agora; os teus comentários no TestFlight vão definir o que vem a seguir.",
+          "linkLabel": "Experimentar a beta no TestFlight"
+        },
+        "pt-BR": {
+          "title": "Nodus Drift já está em beta pública para iPhone e iPad",
+          "body": "Nodus Drift, nosso mixer de sons ambiente gratuito para iPhone e iPad, já está em beta pública no TestFlight. É um app complementar do Nodus: misture até seis dos seus 89 sons, todos disponíveis sem internet, programe um timer de sono e relaxe em uma cena de meditação em tela cheia com o Nodi. Sem conta, anúncios, rastreamento ou compras. A beta está apenas em inglês por enquanto; seus comentários no TestFlight vão definir o que vem a seguir.",
+          "linkLabel": "Testar a beta no TestFlight"
+        },
+        "it": {
+          "title": "Nodus Drift è ora in beta pubblica su iPhone e iPad",
+          "body": "Nodus Drift, il nostro mixer di suoni d’ambiente gratuito per iPhone e iPad, è ora in beta pubblica su TestFlight. È un’app complementare di Nodus: combina fino a sei dei suoi 89 suoni, tutti utilizzabili offline, imposta un timer per il sonno e rilassati in una scena di meditazione a schermo intero con Nodi. Senza account, pubblicità, tracciamento né acquisti. La beta è solo in inglese per ora; i tuoi commenti su TestFlight definiranno ciò che arriverà.",
+          "linkLabel": "Prova la beta su TestFlight"
+        },
+        "tr": {
+          "title": "Nodus Drift artık iPhone ve iPad’de herkese açık beta olarak yayında",
+          "body": "Nodus Drift, iPhone ve iPad için ücretsiz ortam sesi karıştırıcımız, artık TestFlight’ta herkese açık beta olarak yayında. Nodus’a eşlik eden bir uygulama: tamamen çevrimdışı çalışan 89 sesten en fazla altısını karıştır, uyku zamanlayıcısı kur ve Nodi ile tam ekran meditasyon sahnesinde rahatla. Hesap, reklam, izleme veya satın alma yok. Beta şimdilik yalnızca İngilizce; TestFlight üzerinden gönderdiğin geri bildirimler bundan sonrasını şekillendirecek.",
+          "linkLabel": "TestFlight’ta betayı dene"
+        },
+        "zh-CN": {
+          "title": "Nodus Drift 现已在 iPhone 和 iPad 上开启公测",
+          "body": "Nodus Drift 是我们为 iPhone 和 iPad 打造的自由环境音混音器，现已在 TestFlight 开启公测。它是 Nodus 的配套应用：可从 89 种完全离线可用的声音中混合最多六种，设置睡眠定时器，并与 Nodi 一起进入全屏冥想场景。无账户、广告、追踪或购买。目前测试版仅提供英文；你在 TestFlight 中的反馈将决定接下来的方向。",
+          "linkLabel": "通过 TestFlight 加入测试"
+        },
+        "zh-TW": {
+          "title": "Nodus Drift 現已在 iPhone 和 iPad 上展開公測",
+          "body": "Nodus Drift 是我們為 iPhone 和 iPad 打造的自由環境音混音器，現已在 TestFlight 展開公測。它是 Nodus 的配套應用程式：可從 89 種完全離線可用的聲音中混合最多六種，設定睡眠計時器，並與 Nodi 一起進入全螢幕冥想場景。無帳號、廣告、追蹤或購買。目前測試版僅提供英文；你在 TestFlight 中的回饋將決定接下來的方向。",
+          "linkLabel": "透過 TestFlight 加入測試"
+        },
+        "ja": {
+          "title": "Nodus Drift、iPhone と iPad でパブリックベータ公開",
+          "body": "Nodus Drift は、iPhone と iPad 向けの無料の環境音ミキサーで、TestFlight でパブリックベータを公開しました。Nodus のコンパニオンアプリです。完全オフラインで使える 89 種類のサウンドから最大 6 つを重ね、スリープタイマーを設定し、Nodi と一緒に全画面の瞑想シーンでくつろげます。アカウント、広告、トラッキング、購入はありません。ベータ版は今のところ英語のみです。TestFlight で送ったフィードバックが今後の開発に反映されます。",
+          "linkLabel": "TestFlight でベータに参加"
+        },
+        "ko": {
+          "title": "Nodus Drift, iPhone과 iPad에서 공개 베타 시작",
+          "body": "Nodus Drift는 iPhone과 iPad용 무료 환경음 믹서로, 이제 TestFlight에서 공개 베타를 시작합니다. Nodus의 컴패니언 앱입니다. 완전히 오프라인으로 작동하는 89가지 사운드 중 최대 6가지를 섞고, 수면 타이머를 설정하고, Nodi와 함께 전체 화면 명상 장면에서 쉬어 보세요. 계정, 광고, 추적, 구매가 없습니다. 베타는 당분간 영어로만 제공됩니다. TestFlight로 보내 주신 피드백이 앞으로의 방향을 결정합니다.",
+          "linkLabel": "TestFlight에서 베타 참여"
+        }
+      }
+    },
+    {
+      "id": "2026-10-19-model-guide",
+      "date": "2026-10-19",
+      "severity": "info",
+      "url": "https://nodusresearch.com/models/",
+      "copy": {
+        "es": {
+          "title": "Nueva guía de modelos recomendados",
+          "body": "Hemos publicado nodusresearch.com/models, una guía con los modelos recomendados para cada tarea de Nodus Research: modelos locales según tu equipo, embeddings, Research Chat, extracción de ideas y Deep Research. La iremos actualizando a medida que salgan modelos nuevos.",
+          "linkLabel": "Ver la guía de modelos"
+        },
+        "en": {
+          "title": "New guide to recommended models",
+          "body": "We've published nodusresearch.com/models, a guide to the recommended models for each task in Nodus Research: local models for your hardware, embeddings, Research Chat, idea extraction and Deep Research. We'll keep updating it as new models come out.",
+          "linkLabel": "Open the model guide"
+        },
+        "fr": {
+          "title": "Nouveau guide des modèles recommandés",
+          "body": "Nous avons publié nodusresearch.com/models, un guide des modèles recommandés pour chaque tâche de Nodus Research : modèles locaux selon votre matériel, embeddings, Research Chat, extraction d’idées et Deep Research. Nous le mettrons à jour au fil des nouveaux modèles.",
+          "linkLabel": "Voir le guide des modèles"
+        },
+        "de": {
+          "title": "Neuer Leitfaden zu empfohlenen Modellen",
+          "body": "Unter nodusresearch.com/models findest du jetzt einen Leitfaden mit den empfohlenen Modellen für jede Aufgabe in Nodus Research: lokale Modelle passend zu deiner Hardware, Embeddings, Research Chat, Ideenextraktion und Deep Research. Wir aktualisieren ihn, sobald neue Modelle erscheinen.",
+          "linkLabel": "Modell-Leitfaden öffnen"
+        },
+        "pt": {
+          "title": "Novo guia de modelos recomendados",
+          "body": "Publicámos nodusresearch.com/models, um guia com os modelos recomendados para cada tarefa do Nodus Research: modelos locais de acordo com o teu equipamento, embeddings, Research Chat, extração de ideias e Deep Research. Vamos atualizá-lo à medida que forem saindo novos modelos.",
+          "linkLabel": "Ver o guia de modelos"
+        },
+        "pt-BR": {
+          "title": "Novo guia de modelos recomendados",
+          "body": "Publicamos nodusresearch.com/models, um guia com os modelos recomendados para cada tarefa do Nodus Research: modelos locais de acordo com o seu computador, embeddings, Research Chat, extração de ideias e Deep Research. Vamos atualizá-lo conforme novos modelos forem lançados.",
+          "linkLabel": "Ver o guia de modelos"
+        },
+        "it": {
+          "title": "Nuova guida ai modelli consigliati",
+          "body": "Abbiamo pubblicato nodusresearch.com/models, una guida ai modelli consigliati per ogni attività di Nodus Research: modelli locali in base al tuo hardware, embedding, Research Chat, estrazione di idee e Deep Research. La aggiorneremo man mano che usciranno nuovi modelli.",
+          "linkLabel": "Apri la guida ai modelli"
+        },
+        "tr": {
+          "title": "Önerilen modeller için yeni rehber",
+          "body": "nodusresearch.com/models adresinde Nodus Research’teki her görev için önerilen modelleri gösteren bir rehber yayımladık: donanımınıza uygun yerel modeller, embedding modelleri, Research Chat, fikir çıkarma ve Deep Research. Yeni modeller çıktıkça rehberi güncelleyeceğiz.",
+          "linkLabel": "Model rehberini açın"
+        },
+        "zh-CN": {
+          "title": "推荐模型指南上线",
+          "body": "我们发布了 nodusresearch.com/models，为 Nodus Research 的每项任务列出推荐模型：适合你设备的本地模型、嵌入模型、Research Chat、观点提取和 Deep Research。新模型发布后，我们会持续更新这份指南。",
+          "linkLabel": "查看模型指南"
+        },
+        "zh-TW": {
+          "title": "推薦模型指南上線",
+          "body": "我們發布了 nodusresearch.com/models，為 Nodus Research 的每項任務列出推薦模型：適合你裝置的本機模型、嵌入模型、Research Chat、觀點擷取和 Deep Research。新模型推出後，我們會持續更新這份指南。",
+          "linkLabel": "查看模型指南"
+        },
+        "ja": {
+          "title": "推奨モデルのガイドを公開しました",
+          "body": "nodusresearch.com/models で、Nodus Research の各タスクに推奨するモデルをまとめたガイドを公開しました。お使いのハードウェアに合ったローカルモデル、埋め込みモデル、Research Chat、アイデア抽出、Deep Research を扱っています。新しいモデルが出るたびに更新していきます。",
+          "linkLabel": "モデルガイドを見る"
+        },
+        "ko": {
+          "title": "추천 모델 가이드를 공개했습니다",
+          "body": "nodusresearch.com/models에서 Nodus Research의 작업별 추천 모델을 정리한 가이드를 공개했습니다. 사용 중인 하드웨어에 맞는 로컬 모델, 임베딩 모델, Research Chat, 아이디어 추출, Deep Research를 다룹니다. 새 모델이 나올 때마다 계속 업데이트하겠습니다.",
+          "linkLabel": "모델 가이드 보기"
+        }
+      }
+    },
+    {
+      "id": "2026-10-14-github-star",
+      "date": "2026-10-14",
+      "severity": "info",
+      "url": "https://github.com/jorgepb96/nodus",
+      "copy": {
+        "es": {
+          "title": "Apoya Nodus",
+          "body": "Si Nodus te resulta útil, dale una estrella en GitHub para apoyar el proyecto.",
+          "linkLabel": "Dar una estrella"
+        },
+        "en": {
+          "title": "Support Nodus",
+          "body": "If Nodus is useful to you, give it a star on GitHub to support the project.",
+          "linkLabel": "Give a star"
+        },
+        "fr": {
+          "title": "Soutenez Nodus",
+          "body": "Si Nodus vous est utile, donnez-lui une étoile sur GitHub pour soutenir le projet.",
+          "linkLabel": "Donner une étoile"
+        },
+        "de": {
+          "title": "Unterstütze Nodus",
+          "body": "Wenn dir Nodus hilft, gib dem Projekt einen Stern auf GitHub, um es zu unterstützen.",
+          "linkLabel": "Stern auf GitHub vergeben"
+        },
+        "pt": {
+          "title": "Apoia o Nodus",
+          "body": "Se o Nodus te é útil, dá-lhe uma estrela no GitHub para apoiar o projeto.",
+          "linkLabel": "Dar uma estrela"
+        },
+        "pt-BR": {
+          "title": "Apoie o Nodus",
+          "body": "Se o Nodus é útil para você, dê uma estrela no GitHub para apoiar o projeto.",
+          "linkLabel": "Dar uma estrela"
+        },
+        "it": {
+          "title": "Sostieni Nodus",
+          "body": "Se Nodus ti è utile, lascia una stella su GitHub per sostenere il progetto.",
+          "linkLabel": "Lascia una stella"
+        },
+        "tr": {
+          "title": "Nodus’u destekleyin",
+          "body": "Nodus’u faydalı buluyorsanız, projeyi desteklemek için GitHub’da bir yıldız verin.",
+          "linkLabel": "Yıldız verin"
+        },
+        "zh-CN": {
+          "title": "支持 Nodus",
+          "body": "如果 Nodus 对你有帮助，请在 GitHub 上为项目点一颗星，支持它的发展。",
+          "linkLabel": "点一颗星"
+        },
+        "zh-TW": {
+          "title": "支持 Nodus",
+          "body": "如果 Nodus 對你有幫助，請在 GitHub 上為專案加上一顆星，支持它的發展。",
+          "linkLabel": "加上一顆星"
+        },
+        "ja": {
+          "title": "Nodus を応援する",
+          "body": "Nodus が役に立ったら、GitHub でスターを付けてプロジェクトを応援してください。",
+          "linkLabel": "スターを付ける"
+        },
+        "ko": {
+          "title": "Nodus를 응원해 주세요",
+          "body": "Nodus가 도움이 된다면 GitHub에서 Star를 눌러 프로젝트를 응원해 주세요.",
+          "linkLabel": "Star 누르기"
+        }
+      }
+    },
+    {
+      "id": "2026-10-14-request-feature",
+      "date": "2026-10-14",
+      "severity": "info",
+      "url": "https://github.com/jorgepb96/nodus/issues",
+      "copy": {
+        "es": {
+          "title": "Propón una nueva función",
+          "body": "¿Echas en falta alguna función en Nodus? Abre un issue en GitHub y cuéntanos qué necesitas.",
+          "linkLabel": "Abrir un issue"
+        },
+        "en": {
+          "title": "Suggest a new feature",
+          "body": "Missing a feature in Nodus? Open an issue on GitHub and tell us what you need.",
+          "linkLabel": "Open an issue"
+        },
+        "fr": {
+          "title": "Proposez une nouvelle fonctionnalité",
+          "body": "Il vous manque une fonctionnalité dans Nodus ? Ouvrez une issue sur GitHub et dites-nous ce dont vous avez besoin.",
+          "linkLabel": "Ouvrir une issue"
+        },
+        "de": {
+          "title": "Schlage eine neue Funktion vor",
+          "body": "Fehlt dir eine Funktion in Nodus? Erstelle ein Issue auf GitHub und beschreibe, was du brauchst.",
+          "linkLabel": "Issue erstellen"
+        },
+        "pt": {
+          "title": "Propõe uma nova funcionalidade",
+          "body": "Falta-te alguma funcionalidade no Nodus? Abre uma issue no GitHub e conta-nos o que precisas.",
+          "linkLabel": "Abrir uma issue"
+        },
+        "pt-BR": {
+          "title": "Sugira um novo recurso",
+          "body": "Sente falta de algum recurso no Nodus? Abra uma issue no GitHub e conte o que você precisa.",
+          "linkLabel": "Abrir uma issue"
+        },
+        "it": {
+          "title": "Proponi una nuova funzione",
+          "body": "Ti manca una funzione in Nodus? Apri una issue su GitHub e raccontaci di cosa hai bisogno.",
+          "linkLabel": "Apri una issue"
+        },
+        "tr": {
+          "title": "Yeni bir özellik önerin",
+          "body": "Nodus’ta eksik bulduğunuz bir özellik mi var? GitHub’da bir issue açın ve neye ihtiyacınız olduğunu anlatın.",
+          "linkLabel": "Issue açın"
+        },
+        "zh-CN": {
+          "title": "建议新功能",
+          "body": "希望 Nodus 添加某项功能？请在 GitHub 上提交 issue，告诉我们你的需求。",
+          "linkLabel": "提交 issue"
+        },
+        "zh-TW": {
+          "title": "建議新功能",
+          "body": "希望 Nodus 新增某項功能？請在 GitHub 上提出 issue，告訴我們你的需求。",
+          "linkLabel": "提出 issue"
+        },
+        "ja": {
+          "title": "新機能を提案する",
+          "body": "Nodus に追加してほしい機能はありますか？GitHub で issue を作成して、必要な機能を教えてください。",
+          "linkLabel": "issue を作成する"
+        },
+        "ko": {
+          "title": "새로운 기능을 제안해 주세요",
+          "body": "Nodus에 필요한 기능이 있나요? GitHub에서 issue를 열고 어떤 기능이 필요한지 알려 주세요.",
+          "linkLabel": "issue 열기"
+        }
+      }
+    },
+    {
+      "id": "2026-10-08-nodus-presenter-ios",
+      "date": "2026-10-08",
+      "severity": "info",
+      "url": "https://apps.apple.com/app/nodus-presenter/id6818107823",
+      "copy": {
+        "es": {
+          "title": "Nodus Presenter ya está disponible en iOS",
+          "body": "Usa tu iPhone o iPad como mando para las presentaciones de Nodus. Escanea el código QR de Nodus Presenter en tu ordenador para pasar diapositivas, consultar tus notas y controlar el puntero, el temporizador y los vídeos. Sabemos que muchos estáis esperando la app móvil principal de Nodus: seguimos trabajando en ella, pero requiere mucho trabajo y aún necesita tiempo. Nodus Presenter es una app complementaria dedicada a las presentaciones. Llega primero a iOS; la versión para Android llegará más adelante. Gracias por vuestra paciencia y apoyo.",
+          "linkLabel": "Descargar en la App Store"
+        },
+        "en": {
+          "title": "Nodus Presenter is now available on iOS",
+          "body": "Use your iPhone or iPad as a remote for Nodus presentations. Scan the QR code in Nodus Presenter on your computer to change slides, read your notes and control the pointer, timer and videos. We know many of you are waiting for the main Nodus mobile app: we are still working on it, but it takes a lot of work and needs more time. Nodus Presenter is a companion app dedicated to presentations. It launches on iOS first; the Android version will follow later. Thank you for your patience and support.",
+          "linkLabel": "Download on the App Store"
+        },
+        "fr": {
+          "title": "Nodus Presenter est disponible sur iOS",
+          "body": "Utilisez votre iPhone ou iPad comme télécommande pour vos présentations Nodus. Scannez le code QR de Nodus Presenter sur votre ordinateur pour changer de diapositive, lire vos notes et contrôler le pointeur, le minuteur et les vidéos. Beaucoup attendent l’app mobile principale de Nodus : nous y travaillons toujours, mais elle demande beaucoup de travail et encore du temps. Nodus Presenter est une app complémentaire dédiée aux présentations. Elle arrive d’abord sur iOS ; la version Android suivra. Merci pour votre patience et votre soutien.",
+          "linkLabel": "Télécharger sur l’App Store"
+        },
+        "de": {
+          "title": "Nodus Presenter ist jetzt für iOS verfügbar",
+          "body": "Nutze dein iPhone oder iPad als Fernbedienung für Nodus-Präsentationen. Scanne den QR-Code in Nodus Presenter am Computer, um Folien zu wechseln, Notizen zu lesen und Zeiger, Timer und Videos zu steuern. Wir wissen, dass viele auf die mobile Nodus-Hauptapp warten: Wir arbeiten weiter daran, doch die Entwicklung erfordert viel Arbeit und braucht noch Zeit. Nodus Presenter ist eine Begleitapp für Präsentationen. Sie erscheint zuerst für iOS; die Android-Version folgt später. Danke für eure Geduld und Unterstützung.",
+          "linkLabel": "Im App Store herunterladen"
+        },
+        "pt": {
+          "title": "O Nodus Presenter já está disponível no iOS",
+          "body": "Usa o teu iPhone ou iPad como comando para as apresentações do Nodus. Lê o código QR do Nodus Presenter no computador para mudar de diapositivo, consultar as notas e controlar o ponteiro, o temporizador e os vídeos. Sabemos que muitos esperam a aplicação móvel principal do Nodus: continuamos a trabalhar nela, mas exige muito trabalho e ainda precisa de tempo. O Nodus Presenter é uma aplicação complementar dedicada às apresentações. Chega primeiro ao iOS; a versão para Android chegará mais tarde. Obrigado pela vossa paciência e apoio.",
+          "linkLabel": "Descarregar na App Store"
+        },
+        "pt-BR": {
+          "title": "O Nodus Presenter já está disponível no iOS",
+          "body": "Use seu iPhone ou iPad como controle para as apresentações do Nodus. Escaneie o código QR do Nodus Presenter no computador para mudar de slide, consultar suas notas e controlar o ponteiro, o temporizador e os vídeos. Sabemos que muitos esperam o aplicativo móvel principal do Nodus: continuamos trabalhando nele, mas exige muito trabalho e ainda precisa de tempo. O Nodus Presenter é um aplicativo complementar dedicado às apresentações. Chega primeiro ao iOS; a versão para Android chegará mais tarde. Obrigado pela paciência e pelo apoio.",
+          "linkLabel": "Baixar na App Store"
+        },
+        "it": {
+          "title": "Nodus Presenter è disponibile su iOS",
+          "body": "Usa il tuo iPhone o iPad come telecomando per le presentazioni di Nodus. Scansiona il codice QR di Nodus Presenter sul computer per cambiare diapositiva, leggere le note e controllare puntatore, timer e video. Sappiamo che molti aspettano l’app mobile principale di Nodus: continuiamo a lavorarci, ma richiede molto lavoro e ha ancora bisogno di tempo. Nodus Presenter è un’app complementare dedicata alle presentazioni. Arriva prima su iOS; la versione Android seguirà più avanti. Grazie per la pazienza e il sostegno.",
+          "linkLabel": "Scarica dall’App Store"
+        },
+        "tr": {
+          "title": "Nodus Presenter artık iOS’ta",
+          "body": "iPhone veya iPad’inizi Nodus sunumları için uzaktan kumanda olarak kullanın. Slayt değiştirmek, notlarınızı okumak ve işaretçiyi, zamanlayıcıyı ve videoları kontrol etmek için bilgisayarınızdaki Nodus Presenter’ın QR kodunu tarayın. Birçoğunuzun Nodus’un ana mobil uygulamasını beklediğini biliyoruz: üzerinde çalışmaya devam ediyoruz, ancak geliştirme süreci çok emek ve daha fazla zaman gerektiriyor. Nodus Presenter, sunumlara özel bir yardımcı uygulamadır. Önce iOS’ta çıkıyor; Android sürümü daha sonra gelecek. Sabrınız ve desteğiniz için teşekkürler.",
+          "linkLabel": "App Store’dan indirin"
+        },
+        "zh-CN": {
+          "title": "Nodus Presenter 现已登陆 iOS",
+          "body": "用你的 iPhone 或 iPad 遥控 Nodus 演示。扫描电脑上 Nodus Presenter 的二维码，即可切换幻灯片、查看笔记，并控制指示器、计时器和视频。我们知道许多人都在等待 Nodus 的主移动应用：我们仍在开发，但这项工作需要投入大量精力，也还需要时间。Nodus Presenter 是一款专为演示设计的配套应用，先在 iOS 上推出，Android 版将在之后发布。感谢大家的耐心与支持。",
+          "linkLabel": "在 App Store 下载"
+        },
+        "zh-TW": {
+          "title": "Nodus Presenter 現已在 iOS 上推出",
+          "body": "用你的 iPhone 或 iPad 遙控 Nodus 簡報。掃描電腦上 Nodus Presenter 的 QR 碼，即可切換投影片、查看筆記，並控制指標、計時器和影片。我們知道許多人都在等待 Nodus 的主要行動應用程式：我們仍在開發，但這項工作需要投入大量心力，也還需要時間。Nodus Presenter 是一款專為簡報設計的搭配應用程式，先在 iOS 上推出，Android 版將在之後發布。感謝大家的耐心與支持。",
+          "linkLabel": "在 App Store 下載"
+        },
+        "ja": {
+          "title": "Nodus Presenter が iOS で公開されました",
+          "body": "iPhone や iPad を Nodus のプレゼンテーション用リモコンとして使えます。パソコンの Nodus Presenter に表示される QR コードを読み取ると、スライドの切り替え、ノートの確認、ポインター・タイマー・動画の操作ができます。Nodus のメインモバイルアプリを待っている方が多いことも承知しています。開発は続けていますが、多くの作業が必要で、まだ時間がかかります。Nodus Presenter はプレゼンテーション専用の補助アプリです。まず iOS で公開し、Android 版は後日リリースします。お待ちいただき、応援してくださってありがとうございます。",
+          "linkLabel": "App Store でダウンロード"
+        },
+        "ko": {
+          "title": "Nodus Presenter가 iOS에 출시되었습니다",
+          "body": "iPhone이나 iPad를 Nodus 프레젠테이션 리모컨으로 사용하세요. 컴퓨터의 Nodus Presenter에서 QR 코드를 스캔하면 슬라이드를 넘기고, 노트를 확인하고, 포인터와 타이머, 동영상을 제어할 수 있습니다. 많은 분이 Nodus의 메인 모바일 앱을 기다리고 계신다는 것을 알고 있습니다. 계속 개발하고 있지만 많은 작업이 필요하고 아직 시간이 더 필요합니다. Nodus Presenter는 프레젠테이션 전용 보조 앱입니다. iOS에 먼저 출시하며 Android 버전은 추후 출시됩니다. 기다려 주시고 응원해 주셔서 감사합니다.",
+          "linkLabel": "App Store에서 다운로드"
+        }
+      }
+    },
+    {
+      "id": "2026-10-02-workspace-redesign-survey",
+      "date": "2026-10-02",
+      "severity": "info",
+      "url": "https://docs.google.com/forms/d/e/1FAIpQLSfuoi5sKXI5hYcge6m1YKyLNS4v-6fVt4hlStGJls3Y8OaAqw/viewform?usp=header",
+      "copy": {
+        "es": {
+          "title": "Ayúdanos a rediseñar Nodus Workspace (editor de escritura)",
+          "body": "Empezamos con un gran cambio: Workspace tendrá un nuevo nombre, una interfaz completamente rediseñada y más funciones. Queremos replantear cómo escribes, organizas notas e ideas, conectas fuentes y trabajas con tu investigación en Nodus, con un mayor énfasis en ayudarte a desarrollar y redactar tus notas o artículos. Antes de reconstruirlo, nos gustaría saber qué esperas de este espacio, qué limitaciones encuentras y qué funciones lo harían realmente útil para tu forma de trabajar.",
+          "linkLabel": "Responder la encuesta"
+        },
+        "en": {
+          "title": "Help us redesign Nodus Workspace (writing editor)",
+          "body": "We’re starting with a major change: the Workspace will get a new name, a completely redesigned interface, and a broader set of features.\nThe aim is to rethink how you write, organize notes and ideas, connect sources, and work with your research inside Nodus, with a stronger focus on helping you develop and write your notes or papers. Before we rebuild it, we’d like to know what you expect from this space, what currently feels limiting, and which features would make it genuinely useful for your workflow.",
+          "linkLabel": "Take the survey"
+        },
+        "fr": {
+          "title": "Aidez-nous à repenser Nodus Workspace (éditeur de rédaction)",
+          "body": "Un grand changement se prépare : Workspace aura un nouveau nom, une interface entièrement repensée et plus de fonctions. Nous voulons revoir la façon dont vous écrivez, organisez notes et idées, reliez vos sources et travaillez sur vos recherches dans Nodus, en vous aidant davantage à développer et rédiger vos notes ou articles. Avant de le reconstruire, nous aimerions savoir ce que vous attendez de cet espace, ce qui vous limite et quelles fonctions le rendraient vraiment utile à votre façon de travailler.",
+          "linkLabel": "Répondre à l’enquête"
+        },
+        "de": {
+          "title": "Hilf uns, Nodus Workspace neu zu gestalten (Schreibeditor)",
+          "body": "Eine große Änderung steht an: Workspace bekommt einen neuen Namen, eine völlig neue Oberfläche und mehr Funktionen. Wir wollen neu denken, wie du in Nodus schreibst, Notizen und Ideen ordnest, Quellen verknüpfst und mit deiner Forschung arbeitest. Dabei möchten wir dich stärker beim Entwickeln und Schreiben deiner Notizen oder Arbeiten unterstützen. Vor dem Umbau möchten wir wissen, was du von diesem Bereich erwartest, was dich derzeit einschränkt und welche Funktionen ihn für deine Arbeit wirklich nützlich machen würden.",
+          "linkLabel": "An der Umfrage teilnehmen"
+        },
+        "pt": {
+          "title": "Ajuda-nos a redesenhar o Nodus Workspace (editor de escrita)",
+          "body": "Começamos com uma grande mudança: o Workspace terá um novo nome, uma interface totalmente redesenhada e mais funcionalidades. Queremos repensar como escreves, organizas notas e ideias, ligas fontes e trabalhas na tua investigação no Nodus, com maior foco em ajudar-te a desenvolver e redigir as tuas notas ou artigos. Antes de o reconstruirmos, gostaríamos de saber o que esperas deste espaço, o que te limita atualmente e que funcionalidades o tornariam realmente útil para a tua forma de trabalhar.",
+          "linkLabel": "Responder ao inquérito"
+        },
+        "pt-BR": {
+          "title": "Ajude-nos a redesenhar o Nodus Workspace (editor de escrita)",
+          "body": "Começamos com uma grande mudança: o Workspace terá um novo nome, uma interface totalmente redesenhada e mais recursos. Queremos repensar como você escreve, organiza notas e ideias, conecta fontes e trabalha com sua pesquisa no Nodus, com maior foco em ajudar você a desenvolver e redigir suas notas ou artigos. Antes de reconstruí-lo, gostaríamos de saber o que você espera deste espaço, o que limita seu trabalho hoje e quais recursos o tornariam realmente útil para sua forma de trabalhar.",
+          "linkLabel": "Responder à pesquisa"
+        },
+        "it": {
+          "title": "Aiutaci a riprogettare Nodus Workspace (editor di scrittura)",
+          "body": "Iniziamo con un grande cambiamento: Workspace avrà un nuovo nome, un’interfaccia completamente riprogettata e più funzioni. Vogliamo ripensare come scrivi, organizzi note e idee, colleghi fonti e lavori alla tua ricerca in Nodus, aiutandoti di più a sviluppare e scrivere le tue note o i tuoi articoli. Prima di ricostruirlo, vorremmo sapere cosa ti aspetti da questo spazio, cosa ti limita oggi e quali funzioni lo renderebbero davvero utile per il tuo modo di lavorare.",
+          "linkLabel": "Rispondi al sondaggio"
+        },
+        "tr": {
+          "title": "Nodus Workspace’i yeniden tasarlamamıza yardımcı olun (yazı editörü)",
+          "body": "Büyük bir değişiklikle başlıyoruz: Workspace yeni bir ada, tamamen yenilenmiş bir arayüze ve daha fazla özelliğe kavuşacak. Nodus’ta nasıl yazdığınızı, not ve fikirlerinizi düzenlediğinizi, kaynakları ilişkilendirdiğinizi ve araştırmanızla çalıştığınızı yeniden düşünmek; not veya makalelerinizi geliştirip yazmanıza daha çok destek olmak istiyoruz. Yeniden oluşturmadan önce bu alandan ne beklediğinizi, şu anda sizi nelerin sınırladığını ve hangi özelliklerin onu iş akışınız için gerçekten yararlı kılacağını öğrenmek istiyoruz.",
+          "linkLabel": "Ankete katılın"
+        },
+        "zh-CN": {
+          "title": "帮助我们重新设计 Nodus Workspace（写作编辑器）",
+          "body": "我们将从一项重大改变开始：Workspace 将采用新名称、全新设计的界面和更丰富的功能。我们希望重新思考你如何在 Nodus 中写作、整理笔记与想法、关联来源并开展研究，更着重于帮助你完善和撰写笔记或论文。在重新构建之前，我们想了解你对这个空间的期待、目前有哪些限制，以及哪些功能能让它真正融入你的工作流程。",
+          "linkLabel": "填写问卷"
+        },
+        "zh-TW": {
+          "title": "幫助我們重新設計 Nodus Workspace（寫作編輯器）",
+          "body": "我們將從一項重大改變開始：Workspace 將採用新名稱、全新設計的介面和更豐富的功能。我們希望重新思考你如何在 Nodus 中寫作、整理筆記與想法、連結來源並進行研究，更著重於幫助你完善和撰寫筆記或論文。在重新建構之前，我們想了解你對這個空間的期待、目前有哪些限制，以及哪些功能能讓它真正融入你的工作流程。",
+          "linkLabel": "填寫問卷"
+        },
+        "ja": {
+          "title": "Nodus Workspace（執筆エディター）の再設計にご協力ください",
+          "body": "大きな変更に着手します。Workspace は名称を変更し、インターフェースを全面的に再設計して、機能を拡充します。Nodus での執筆、ノートやアイデアの整理、資料の関連付け、研究の進め方を見直し、ノートや論文の内容を練り、書き上げる作業をより重点的に支援することが目標です。再構築する前に、このスペースに何を期待するか、現在どこに制約を感じているか、どのような機能があれば皆さんの作業に本当に役立つかを教えてください。",
+          "linkLabel": "アンケートに回答する"
+        },
+        "ko": {
+          "title": "Nodus Workspace(글쓰기 편집기) 재설계에 의견을 주세요",
+          "body": "큰 변화부터 시작합니다. Workspace는 새로운 이름, 완전히 새로 설계된 인터페이스, 더 다양한 기능을 갖추게 됩니다. Nodus에서 글을 쓰고, 노트와 아이디어를 정리하고, 자료를 연결하고, 연구를 진행하는 방식을 다시 생각하며, 특히 노트나 논문의 내용을 발전시키고 작성하는 데 더 집중해 도움을 드리고자 합니다. 새롭게 구축하기 전에 이 공간에 무엇을 기대하는지, 현재 어떤 점이 제약으로 느껴지는지, 어떤 기능이 여러분의 작업 흐름에 실질적인 도움이 될지 알고 싶습니다.",
+          "linkLabel": "설문조사에 참여하기"
+        }
+      }
+    },
+    {
       "id": "2026-09-local-models-nvidia-gpus",
       "date": "2026-09-16",
       "severity": "warning",
-      "url": "https://github.com/Drakonis96/nodus/issues/851",
+      "url": "https://github.com/jorgepb96/nodus/issues/851",
       "expiresAt": "2026-10-16",
       "copy": {
         "es": {
@@ -74,7 +550,7 @@
       "id": "contribute-to-nodus",
       "date": "2026-09-13",
       "severity": "info",
-      "url": "https://github.com/Drakonis96/nodus",
+      "url": "https://github.com/jorgepb96/nodus",
       "copy": {
         "es": {
           "title": "Ayuda a construir Nodus Research",
@@ -142,7 +618,7 @@
       "id": "2026-09-09-github-star",
       "date": "2026-09-09",
       "severity": "info",
-      "url": "https://github.com/Drakonis96/nodus",
+      "url": "https://github.com/jorgepb96/nodus",
       "copy": {
         "es": {
           "title": "¿Te gusta Nodus?",
@@ -278,7 +754,7 @@
       "id": "2026-08-21-github-star",
       "date": "2026-08-21",
       "severity": "info",
-      "url": "https://github.com/Drakonis96/nodus",
+      "url": "https://github.com/jorgepb96/nodus",
       "copy": {
         "es": {
           "title": "¿Te gusta Nodus?",
@@ -483,7 +959,7 @@
       "id": "2026-08-nodus-4-agpl-license",
       "date": "2026-08-13",
       "severity": "warning",
-      "url": "https://github.com/Drakonis96/nodus/blob/main/LICENSE",
+      "url": "https://github.com/jorgepb96/nodus/blob/main/LICENSE",
       "minVersion": "4.0.0",
       "copy": {
         "es": {

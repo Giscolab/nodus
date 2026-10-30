@@ -1,3 +1,4 @@
+import { researchSourcePresentation, researchHistorySourceNotices } from '@shared/researchSourceNotices';
 import type { ResearchNotebookInput, ResearchNotebookPreparation, ResolvedResearchScope } from '@shared/researchCorpus';
 import type { ResearchChatRequest } from '@shared/types';
 import { notebookPreparationStatus, validateRetrievalSettings } from '@shared/researchCorpus';
@@ -5,10 +6,10 @@ import { getDb } from '../db/database';
 import { getActiveVault } from '../vaults/vaultRegistry';
 import * as notebooks from '../db/researchNotebooksRepo';
 import { researchCorpusInventory } from './researchCorpusInventory';
-import { researchFingerprint, resolveNotebookScope, selectResearchDocuments } from './researchCorpusScope';
-import { resolveResearchSourceScope } from './researchSourceScope';
+import { researchFingerprint, researchScopeAuthorization, resolveNotebookScope, selectResearchDocuments } from './researchCorpusScope';
+import { resolveResearchSourceWorkIds } from './researchSourceScope';
 import { notifyAuthoredResearchSourceChanged } from './researchCorpusEvents';
-import { embeddingConfigurationUsable, getResearchPreparationInventory, pinPublishedResearchDocument, prepareResearchDocuments } from './documentaryPreparation';
+import { embeddingConfigurationUsable, getResearchPreparationInventory, pinPublishedResearchDocuments, prepareResearchDocuments } from './documentaryPreparation';
 import { effectiveEmbeddingConfig } from './aiClient';
 import { readResearchAttachmentSource } from './researchAttachmentSources';
 
@@ -60,7 +61,7 @@ export function resolveResearchNotebook(id: string): ResolvedResearchScope {
   const inventory = researchCorpusInventory();
   const notebook = notebooks.getResearchNotebook(id);
   if (!notebook) throw new Error('Notebook not found');
-  const scope = resolveNotebookScope(getActiveVault().id, notebook, inventory.documents.map(pinPublishedResearchDocument), inventory.collections);
+  const scope = resolveNotebookScope(getActiveVault().id, notebook, pinPublishedResearchDocuments(inventory.documents), inventory.collections);
   notebooks.recordResearchScope(scope);
   return scope;
 }
@@ -73,13 +74,21 @@ export function registerNotebookRun(id: string, controller: AbortController): ()
 }
 
 const pinnedScope = Symbol('backendResearchScope');
-type ScopedRequest = ResearchChatRequest & { [pinnedScope]?: ResolvedResearchScope };
+const pinnedSourceRestriction = Symbol('backendResearchSourceRestriction');
+type ScopedRequest = ResearchChatRequest & { [pinnedScope]?: ResolvedResearchScope; [pinnedSourceRestriction]?: boolean };
 export function requestNotebookScope(input: ResearchChatRequest): ResolvedResearchScope | null { return (input as ScopedRequest)[pinnedScope] ?? null; }
+/** Academic authorization pins the entire library through sourceFilter too. Remember whether
+ * the user narrowed it, so an invoked skill may use its own sources on a whole-library turn. */
+export function hasResearchSourceRestriction(input: ResearchChatRequest): boolean {
+  return (input as ScopedRequest)[pinnedSourceRestriction] ?? (!!requestNotebookScope(input)?.notebookId || input.selection.sourceFilter?.enabled === true);
+}
 export function resolveAcademicResearchScope(filter?: ResearchChatRequest['selection']['sourceFilter'], attachments?: Pick<ResearchChatRequest, 'conversationId' | 'attachmentIds'>): ResolvedResearchScope {
   if (attachments?.attachmentIds !== undefined && (!Array.isArray(attachments.attachmentIds) || attachments.attachmentIds.length > 20)) throw new Error('Invalid research attachments');
   const vault = getActiveVault();
-  const allowed = filter?.enabled ? resolveResearchSourceScope(filter, true) : null;
-  const documents = researchCorpusInventory().documents.filter(document => document.workId && (!allowed || allowed.workIds.has(document.workId))).map(pinPublishedResearchDocument).sort((a, b) => a.id.localeCompare(b.id));
+  // Only the admitted works are read here; the whole source scope (ideas, themes, authors, edges)
+  // was computed and dropped on every scope check.
+  const allowed = filter?.enabled ? resolveResearchSourceWorkIds(filter) : null;
+  const documents = pinPublishedResearchDocuments(researchCorpusInventory().documents.filter(document => document.workId && (!allowed || allowed.has(document.workId)))).sort((a, b) => a.id.localeCompare(b.id));
   const permissionFingerprint = researchFingerprint(documents.map(document => [document.id, document.permissionRevision]));
   const conversationAttachments = [...new Set(attachments?.attachmentIds ?? [])].map(attachmentId => {
     const conversationId = attachments?.conversationId;
@@ -103,7 +112,7 @@ export function authorizeNotebookRequest(input: ResearchChatRequest): ScopedRequ
   if (notebook && !prior && notebookPreparationStatus(scope.documents.map(document => document.id), getResearchPreparationInventory().documents, embeddingsExpected()).pending > 0) throw new Error('research_notebook_indexing');
   if (notebook && input.conversationId) notebooks.associateNotebookConversation(notebook.id, input.conversationId);
   // The conversation's own system prompt and effort apply, chosen in the chat like any other.
-  return { ...input, [pinnedScope]: scope, attachmentIds: input.selection.notebookId ? [] : input.attachmentIds,
+  return { ...input, [pinnedScope]: scope, [pinnedSourceRestriction]: hasResearchSourceRestriction(input) || !!input.selection.notebookId, attachmentIds: input.selection.notebookId ? [] : input.attachmentIds,
     messages: authorizedNotebookHistory(input, scope),
     // Limits a notebook or the user chose are pinned; without them the chat's agent sets its own.
     selection: { ...input.selection, documents: false, passages: true, retrieval: notebook?.settings || input.selection.retrieval ? validateRetrievalSettings(notebook?.settings ?? input.selection.retrieval!) : undefined,
@@ -114,7 +123,7 @@ export function validateNotebookRequest(input: ResearchChatRequest): void {
   if (!scope) return;
   if (getActiveVault().id !== scope.vaultId) throw new Error('research_scope_changed');
   const current = scope.notebookId ? resolveResearchNotebook(scope.notebookId) : resolveAcademicResearchScope(input.selection.sourceFilter, input);
-  if (current.id !== scope.id) throw new Error('research_scope_changed');
+  if (researchScopeAuthorization(current) !== researchScopeAuthorization(scope)) throw new Error('research_scope_changed');
 }
 
 function authorizedNotebookHistory(input: ResearchChatRequest, scope: ResolvedResearchScope): ResearchChatRequest['messages'] {
@@ -123,8 +132,13 @@ function authorizedNotebookHistory(input: ResearchChatRequest, scope: ResolvedRe
   const known = input.conversationId ? getDb().prepare(`SELECT role,content_hash FROM research_conversation_provenance WHERE conversation_id=? AND scope_id=?`)
     .all(input.conversationId, scope.id) as { role: string; content_hash: string }[] : [];
   const trusted = new Set(known.map(row => `${row.role}:${row.content_hash}`));
-  return input.messages.filter((message, index) => index === lastUser || trusted.has(`${message.role}:${researchFingerprint(message.content)}`))
-    .map(({ role, content }) => ({ role, content }));
+  return input.messages.filter((message, index) => index === lastUser || trusted.has(`${message.role}:${researchFingerprint(message.content)}`)
+    || message.role === 'assistant' && !message.content.trim() && trusted.has(`assistant:${researchFingerprint(researchHistorySourceNotices(message.sourceNotices).join('\n\n'))}`))
+    .map(({ role, content, sourceNotices }) => {
+      // Annotations remain untrusted context, never citation provenance or a tool grant.
+      const notes = role === 'assistant' ? researchHistorySourceNotices(sourceNotices) : [];
+      return { role, content, ...(notes.length ? { sourceNotices: notes } : {}) };
+    });
 }
 
 /** Only provider results that passed scope validation can authorize later reuse.
@@ -137,7 +151,7 @@ export function rememberNotebookTurn(input: ResearchChatRequest, answer: string)
   const user = input.messages.filter(message => message.role === 'user').at(-1);
   const insert = getDb().prepare(`INSERT OR IGNORE INTO research_conversation_provenance(conversation_id,scope_id,role,content_hash,created_at) VALUES (?,?,?,?,?)`);
   getDb().transaction(() => {
-    for (const [role, content] of [['user', user?.content], ['assistant', answer]]) if (content) insert.run(input.conversationId, scope.id, role, researchFingerprint(content), new Date().toISOString());
+    for (const [role, content] of [['user', user?.content], ['assistant', answer], ['assistant', researchSourcePresentation(answer).content]]) if (content) insert.run(input.conversationId, scope.id, role, researchFingerprint(content), new Date().toISOString());
   })();
   return answer;
 }

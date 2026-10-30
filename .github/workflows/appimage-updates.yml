@@ -1,0 +1,28 @@
+name: AppImage update compatibility
+
+# Automatic validation is selected by CI; this entry point is explicitly manual.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install packaging verification dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y zsync libfuse2
+          npm ci --ignore-scripts
+      - name: Materialize Electron for the real updater fixtures
+        run: node scripts/prepare-electron-tests.mjs
+      - name: Verify both AppImage update formats on real packaged fixtures
+        run: node scripts/verify-appimage-updates.mjs

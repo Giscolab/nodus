@@ -14,6 +14,15 @@ export function researchTestProviderBase(provider: AiProvider): string | null {
   return `${endpoint.href}/${provider}`;
 }
 
+/** The paid gate changes transport, not the embedding space. Keep production's
+ * identity hash while the isolated process still sends every request to loopback. */
+export function researchTestEmbeddingEndpointIdentity(provider: AiProvider, endpoint: string): string {
+  const proxy = researchTestProviderBase(provider);
+  if (!proxy || endpoint !== proxy) return endpoint;
+  return provider === 'openrouter' ? 'https://openrouter.ai/api/v1'
+    : provider === 'deepseek' ? 'https://api.deepseek.com' : endpoint;
+}
+
 /** Fixed embedding lists for the isolated proxy. DeepSeek chat capabilities are read
  * through its free catalogue route instead of being supplied by the application. */
 const RESEARCH_TEST_MODELS: Record<'chat' | 'embedding', Partial<Record<string, string[]>>> = {
@@ -24,5 +33,6 @@ export function researchTestProviderModels(provider: string, kind: 'chat' | 'emb
   if (!process.env.NODUS_RESEARCH_PROVIDER_PROXY || !['deepseek', 'openrouter'].includes(provider)) return null;
   // Chat metadata must come through the free live catalogue route too.
   if (provider === 'deepseek' && kind === 'chat') return null;
+  if (provider === 'openrouter' && kind === 'chat' && process.env.NODUS_RESEARCH_OPENROUTER_CHAT_QA === '1') return null;
   return (RESEARCH_TEST_MODELS[kind][provider] ?? []).map(id => ({ id, name: id }));
 }

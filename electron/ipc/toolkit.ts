@@ -1,3 +1,6 @@
+import { registerSignIpc } from './sign';
+import { getBackupCatalog, getBackupCatalogRecords, previewOpenBackup, runOpenBackup, cancelOpenBackup, saveBackupPreset, deleteBackupPreset } from '../export/openBackupService';
+import type { BackupCatalogQuery, BackupPreset, OpenBackupOptions } from '@shared/backups';
 // toolkit channels, moved verbatim out of the monolithic registerIpc.
 // The channel names are unchanged; scripts/test-ipc-contract.mjs is what proves it.
 import type { IpcContext } from './context';
@@ -20,7 +23,7 @@ import { buildToolkitAppPackage, toolkitAppPackageFileName } from '../toolkit/ap
 import { isToolkitAppManifest } from '@shared/toolkitApps';
 import type { ToolkitAppGenerationProgress, ToolkitAppGenerationRequest, ToolkitAppJsonValue, ToolkitAppManifest } from '@shared/toolkitApps';
 import { getSystemVolume, setSystemVolume, openCastPicker } from '../toolkit/presenter/systemAudio';
-import { normalizeLibrary, PresenterLibrary } from '@shared/presenterTypes';
+import { normalizeLibrary, PresenterLibrary, type PresenterFolderDeleteMode } from '@shared/presenterTypes';
 import { parsePresenterNotesTxt, serializePresenterNotesTxt } from '@shared/presenterNotesTxt';
 import type { PresenterAction } from '@shared/presenterState';
 import type { ProtectArtifact, ProtectListSourcesRequest, ProtectSourceRef } from '@shared/protectTypes';
@@ -51,6 +54,17 @@ function presenterFileStem(name: unknown): string {
 }
 
 export function registerToolkitIpc({ h, getWindow }: IpcContext): void {
+  registerSignIpc({ h, getWindow });
+  h('backups:catalog', async (e, ids: string[]) => { assertNotBrowserIpcSender(e); return getBackupCatalog(ids); });
+  h('backups:records', async (e, query: BackupCatalogQuery) => { assertNotBrowserIpcSender(e); return getBackupCatalogRecords(query); });
+  h('backups:preview', async (e, options: OpenBackupOptions) => { assertNotBrowserIpcSender(e); return previewOpenBackup(options); });
+  h('backups:run', async (e, id: string, options: OpenBackupOptions, output: string) => {
+    assertNotBrowserIpcSender(e); return runOpenBackup(id, options, output, p => { if (!e.sender.isDestroyed()) e.sender.send('backups:progress', id, p); });
+  });
+  h('backups:cancel', async (e, id: string) => { assertNotBrowserIpcSender(e); cancelOpenBackup(id); });
+  h('backups:presets:save', async (e, preset: BackupPreset) => { assertNotBrowserIpcSender(e); return saveBackupPreset(preset); });
+  h('backups:presets:delete', async (e, id: string) => { assertNotBrowserIpcSender(e); return deleteBackupPreset(id); });
+
   // ── Nodus Toolkit (Convert) ─────────────────────────────────────────────────
   // Native-dialog copy for every toolkit tool, in the current UI language.
   const toolkitCopy = (key: ToolkitDialogKey): string => toolkitDialogText(key, getSettings().uiLanguage);
@@ -199,7 +213,7 @@ export function registerToolkitIpc({ h, getWindow }: IpcContext): void {
   });
 
   // ── PDF Presenter (Toolkit) ─────────────────────────────────────────────────
-  // A global library of imported PDFs (copies) + tags, independent of the
+  // A global library of imported PDFs (copies) + folders, independent of the
   // active vault, under userData/toolkit/presenter. The pure model + reducers
   // live in @shared/presenterTypes; the filesystem side in toolkit/presenter.
   const presenterDir = () => path.join(app.getPath('userData'), 'toolkit', 'presenter');
@@ -293,6 +307,10 @@ export function registerToolkitIpc({ h, getWindow }: IpcContext): void {
   });
   h('presenter:delete', async (_e, id: string) => {
     presenterLibrary.deletePresentation(presenterDir(), id);
+  });
+  h('presenter:folder:delete', async (_e, id: string, mode: PresenterFolderDeleteMode) => {
+    if (typeof id !== 'string' || !id) throw new Error('Invalid folder id');
+    return presenterLibrary.deleteFolder(presenterDir(), id, mode);
   });
   h('presenter:import:pptxNotes', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender);

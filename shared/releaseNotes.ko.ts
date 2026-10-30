@@ -1,3 +1,22 @@
+import { RELEASE_5_16_1_HIGHLIGHTS } from './releaseNotes5161';
+import { RELEASE_5_16_0_HIGHLIGHTS } from './releaseNotes5160';
+import { RELEASE_5_15_4_HIGHLIGHTS } from './releaseNotes5154';
+import { RELEASE_5_15_3_HIGHLIGHTS } from './releaseNotes5153';
+import { RELEASE_5_15_2_HIGHLIGHTS } from './releaseNotes5152';
+import { RELEASE_5_15_1_HIGHLIGHTS } from './releaseNotes5151';
+import { RELEASE_5_15_0_HIGHLIGHTS } from './releaseNotes5150';
+import { RELEASE_5_14_1_HIGHLIGHTS } from './releaseNotes5141';
+import { RELEASE_5_14_0_HIGHLIGHTS } from './releaseNotes5140';
+import { RELEASE_5_13_0_HIGHLIGHTS } from './releaseNotes5130';
+import { RELEASE_5_12_0_HIGHLIGHTS } from './releaseNotes5120';
+import { RELEASE_5_12_1_HIGHLIGHTS } from './releaseNotes5121';
+import { RELEASE_5_11_1_HIGHLIGHTS } from './releaseNotes5111';
+import { RELEASE_5_11_0_HIGHLIGHTS } from './releaseNotes5110';
+import { RELEASE_5_10_0_HIGHLIGHTS } from './releaseNotes5100';
+import { RELEASE_5_9_0_HIGHLIGHTS } from './releaseNotes590';
+import { RELEASE_5_8_1_HIGHLIGHTS } from './releaseNotes581';
+import { RELEASE_5_8_0_HIGHLIGHTS } from './releaseNotes580';
+import { RELEASE_5_7_4_HIGHLIGHTS } from './releaseNotes574';
 import { RELEASE_5_7_3_HIGHLIGHTS } from './releaseNotes573';
 import { RELEASE_5_6_0_HIGHLIGHTS } from './releaseNotes560';
 import { RELEASE_5_7_0_HIGHLIGHTS } from './releaseNotes570';
@@ -5,8 +24,28 @@ import { RELEASE_5_7_2_HIGHLIGHTS } from './releaseNotes572';
 /* Korean release notes, keyed by version. Machine-translated from the English highlights. */
 import { RELEASE_5_5_0_HIGHLIGHTS } from './releaseNotes550';
 export const RELEASE_NOTES_KO: Record<string, string[]> = {
+  "5.16.1": RELEASE_5_16_1_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.16.0": RELEASE_5_16_0_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.15.4": RELEASE_5_15_4_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.15.3": RELEASE_5_15_3_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.15.2": RELEASE_5_15_2_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.15.1": RELEASE_5_15_1_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.15.0": RELEASE_5_15_0_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.14.1": RELEASE_5_14_1_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.14.0": RELEASE_5_14_0_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.13.0": RELEASE_5_13_0_HIGHLIGHTS.map(highlight => highlight['ko']),
   // 5.5.0 reads its Korean from the release's own highlight columns, the same
   // way the Italian, Turkish and both Chinese tables do.
+  "5.12.1": RELEASE_5_12_1_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.12.0": RELEASE_5_12_0_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.11.1": RELEASE_5_11_1_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.11.0": RELEASE_5_11_0_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.10.0": RELEASE_5_10_0_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.9.1": RELEASE_5_9_0_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.9.0": RELEASE_5_9_0_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.8.1": RELEASE_5_8_1_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.8.0": RELEASE_5_8_0_HIGHLIGHTS.map(highlight => highlight['ko']),
+  "5.7.4": RELEASE_5_7_4_HIGHLIGHTS.map(highlight => highlight['ko']),
   "5.7.3": RELEASE_5_7_3_HIGHLIGHTS.map(highlight => highlight['ko']),
   "5.7.2": RELEASE_5_7_2_HIGHLIGHTS.map(highlight => highlight.ko),
   "5.7.1": RELEASE_5_7_0_HIGHLIGHTS.map(highlight => highlight.ko),

@@ -119,7 +119,10 @@ function injectSidebar(window) {
   const splitter = doc.createXULElement("splitter");
   splitter.id = SPLITTER_ID;
   splitter.setAttribute("hidden", "true");
-  splitter.style.cssText = "border:0;min-width:0;width:1px;background:rgba(124,58,237,0.35);";
+  splitter.style.cssText = "border:0;min-width:6px;width:6px;max-width:6px;cursor:col-resize;background:rgba(124,58,237,0.35);";
+
+  splitter.addEventListener("mouseenter", () => { splitter.style.background = "rgba(124,58,237,0.65)"; });
+  splitter.addEventListener("mouseleave", () => { splitter.style.background = "rgba(124,58,237,0.35)"; });
 
   const sidebar = doc.createXULElement("vbox");
   sidebar.id = SIDEBAR_ID;
@@ -270,7 +273,7 @@ async function translateInPopup(text, langName, resultEl, L) {
     let acc = "";
     const onDelta = (d) => { acc += d; resultEl.textContent = acc; resultEl.scrollTop = resultEl.scrollHeight; };
     if (mode === "standalone") {
-      const key = NS.getKey(model.provider);
+      const key = await NS.getKey(model.provider);
       const localBase = NS.getLocalBase(model.provider);
       await NP.chatStream(model, { system, key, localBase, messages: [{ role: "user", content: text }] }, onDelta, undefined);
     } else {

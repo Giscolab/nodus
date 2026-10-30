@@ -214,7 +214,7 @@ test('search folds accents and case; unavailable sounds are not operative cards'
 
 test('the media button shows with Browser sessions OR a Drift selection, and opens Drift through real navigation', () => {
   const app = read('src/App.tsx');
-  assert.match(app, /if \(!hasBrowser && !hasDrift\) return null;/);
+  assert.match(app, /if \(!hasBrowser && !hasDrift && !hasNarration\) return null;/, 'and with narration playing or generating');
   assert.match(app, /const hasDrift = drift\.selection\.length > 0;/, 'a paused mix keeps its button');
   assert.match(app, /data-testid="browser-media-header-action"/, 'the existing test id is kept');
   assert.match(app, /onOpenDrift=\{\(\) => \{[\s\S]*?setToolkitPage\('drift'\);\s*setView\('toolkit'\);\s*\}\}/, 'the same state the Tools button uses');
@@ -245,8 +245,9 @@ test('the popover keeps its two-effect lifecycle: only opening or closing it res
   const chooser = popover.slice(popover.indexOf('const chooseTab'), popover.indexOf('return createPortal('));
   assert.doesNotMatch(chooser, /nodus\.|playAll|pauseAll|browserMediaCommand/);
   assert.match(popover, /role="tablist"[\s\S]*?role="tab"[\s\S]*?aria-selected=\{tab === id\}/);
-  assert.match(popover, /role=\{drift \? 'tabpanel' : undefined\}/);
-  assert.match(popover, /event\.key === 'ArrowRight' \|\| event\.key === 'End'/, 'arrow keys move between the tabs');
+  assert.match(popover, /role=\{tabs\.length > 1 \? 'tabpanel' : undefined\}/);
+  assert.match(popover, /event\.key === 'End' \? tabs\[tabs\.length - 1\]/, 'End jumps to the last tab');
+  assert.match(popover, /event\.key === 'ArrowRight' \? 1 : -1/, 'arrow keys move between the tabs');
 });
 
 test('the Drift volume moves the Drift bus and nothing else', () => {
@@ -254,7 +255,13 @@ test('the Drift volume moves the Drift bus and nothing else', () => {
   assert.match(mini, /drift\.setMaster\(Number\(event\.currentTarget\.value\) \/ 100\)/);
   assert.doesNotMatch(mini, /window\.nodus|BrowserDeviceVolume/);
   const media = read('src/components/browser/BrowserMedia.tsx');
-  assert.equal((media.match(/setBrowserDeviceVolume\(/g) ?? []).length, 1, 'the Browser slider is untouched and still the only caller');
+  const deviceVolume = code('src/components/browser/useDeviceVolume.ts');
+  assert.match(media, /changeVolume \} = useDeviceVolume\(Boolean\(anchorEl\)\)/, 'the Browser slider uses the device-volume hook');
+  assert.match(media, /changeVolume\(Number\(event\.currentTarget\.value\)\)/, 'only its slider input requests a device-volume change');
+  assert.equal(((media + deviceVolume).match(/setBrowserDeviceVolume\(/g) ?? []).length, 1, 'the device-volume hook owns the only system-volume write in the Browser controls');
+  for (const file of DRIFT_RENDERER_FILES) {
+    assert.doesNotMatch(code(file), /setBrowserDeviceVolume|useDeviceVolume/, `${file} cannot change the system volume`);
+  }
 });
 
 test('which tab a popover opens on', () => {
@@ -266,6 +273,12 @@ test('which tab a popover opens on', () => {
   assert.equal(defaultMediaTab(true, true, null), 'browser', 'both, nothing chosen yet');
   assert.equal(defaultMediaTab(true, true, 'drift'), 'drift', 'both: the last one chosen');
   assert.equal(defaultMediaTab(true, true, 'browser'), 'browser');
+  assert.equal(defaultMediaTab(true, true, 'narration'), 'browser', 'a stale narration choice falls back to Browser');
+  // Narration (Ming) joins as the first tab while it plays or generates.
+  assert.equal(defaultMediaTab(false, false, null, true), 'narration', 'only narration');
+  assert.equal(defaultMediaTab(true, true, null, true), 'narration', 'narration wins when nothing was chosen');
+  assert.equal(defaultMediaTab(true, true, 'drift', true), 'drift', 'the last chosen source still wins');
+  assert.equal(defaultMediaTab(false, true, 'browser', true), 'narration', 'a choice whose source is gone does not win');
 });
 
 // ── navigation ─────────────────────────────────────────────────────────────
@@ -289,10 +302,12 @@ test('Drift is a Tools page: pinnable as toolkit:drift, never a View, never in a
   // and the default a new profile starts from is pinned, and is one the normaliser keeps
   assert.match(read('electron/db/settingsRepo.ts'), /toolkitPinnedPages: \['drift'\],/, 'a new profile starts with Nodus Drift pinned');
   assert.deepEqual(toolkit.normalizeToolkitToolPages(['drift']), ['drift'], 'the default survives the normaliser every load runs it through');
-  // alphabetical, after Convert and before Protect
+  // alphabetical, after Convert and before Focus, Presenter and Protect
   const names = navigation.TOOLKIT_TOOLS.map((entry) => entry.name);
   assert.equal(names.indexOf('Nodus Drift'), names.indexOf('Nodus Convert') + 1);
-  assert.equal(names.indexOf('Nodus Protect'), names.indexOf('Nodus Drift') + 1);
+  assert.equal(names.indexOf('Nodus Focus'), names.indexOf('Nodus Drift') + 1);
+  assert.equal(names.indexOf('Nodus Presenter'), names.indexOf('Nodus Focus') + 1);
+  assert.equal(names.indexOf('Nodus Protect'), names.indexOf('Nodus Presenter') + 1);
 
   const source = read('src/navigation.ts');
   assert.doesNotMatch(source.slice(source.indexOf('export type View ='), source.indexOf('\n', source.indexOf('export type View ='))), /'drift'/);

@@ -54,12 +54,17 @@ export const EDGE_LABELS: Record<EdgeType, string> = {
 // ── Inline icon set (feather-style strokes) ─────────────────────────────────
 // Kept inline so buttons with long text labels read at a glance, without a dep.
 const ICON_PATHS: Record<string, string> = {
+  monitor: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>',
   home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-7h6v7"/>',
   building: '<rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M8 7h2"/><path d="M14 7h2"/><path d="M8 11h2"/><path d="M14 11h2"/><path d="M10 21v-5h4v5"/>',
   flag: '<path d="M5 21V4"/><path d="M5 4h11l-2 3.5L16 11H5"/>',
   ruler: '<path d="M3 15 15 3l6 6L9 21z"/><path d="m7 11 2 2"/><path d="m10 8 2 2"/><path d="m13 5 2 2"/>',
   mapPin: '<path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z"/><circle cx="12" cy="10" r="2.6"/>',
   pin: '<path d="M12 17v5"/><path d="M5 17h14"/><path d="M7 17V9l-2-2V5h14v2l-2 2v8"/><path d="M9 5V2h6v3"/>',
+  listChecks: '<path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>',
+  crop: '<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/>',
+  eraser: '<path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>',
+  trackpad: '<rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M6 14c1.5-3 3-4 4-2s2 2 3 0 2-3 5-2"/>',
   scissors: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M8.1 7.7 20 18"/><path d="M8.1 16.3 20 6"/>',
   truck: '<path d="M3 6h11v10H3z"/><path d="M14 9h4l3 3v4h-7z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17.5" cy="18" r="1.6"/>',
   anchor: '<circle cx="12" cy="5" r="2.5"/><path d="M12 7.5V21"/><path d="M8 11H5a7 7 0 0 0 14 0h-3"/>',
@@ -79,11 +84,14 @@ const ICON_PATHS: Record<string, string> = {
   chartBar: '<line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/><line x1="3" y1="20" x2="21" y2="20"/>',
   bulb: '<path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/>',
   layers: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
+  layersOff: '<path d="m3 3 18 18"/><path d="m8.5 3.8 3.5-1.8L22 7l-6.5 3.3M11 11.5 2 7l2.7-1.4"/><path d="m2 12 10 5 2.7-1.4M18.1 13.9 22 12"/><path d="m2 17 10 5 6.7-3.4"/>',
   // A field seen in section: three uneven strata stand for what the corpus
   // covers, where its positions diverge and what remains open.
   strata: '<polyline points="4 5 9 5 11 4 14 6 20 5"/><polyline points="2 12 7 12 10 10 14 11 17 12 22 12"/><polyline points="5 19 9 19 11 18 14 19 17 17 20 18"/>',
   sigma: '<path d="M18 4H6l6 8-6 8h12"/>',
   wand: '<path d="M15 4V2"/><path d="M15 16v-2"/><path d="M8 9h2"/><path d="M20 9h2"/><path d="M17.8 11.8L19 13"/><path d="M15 9h0"/><path d="M17.8 6.2L19 5"/><path d="M3 21l9-9"/><path d="M12.2 6.2L11 5"/>',
+  aiPolish: '<path d="m13 6 5 5M4 20l4-1L20 7a2.1 2.1 0 0 0-3-3L5 16z"/><path d="m6 2 1.2 2.8L10 6 7.2 7.2 6 10 4.8 7.2 2 6l2.8-1.2z"/>',
+  sliders: '<path d="M4 6h4m4 0h8M4 18h8m4 0h4"/><circle cx="10" cy="6" r="2"/><circle cx="14" cy="18" r="2"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
   cube: '<path d="M12 2 3 7v10l9 5 9-5V7Z"/><path d="M3 7l9 5 9-5"/><path d="M12 12v10"/>',
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
@@ -159,6 +167,8 @@ const ICON_PATHS: Record<string, string> = {
   play: '<polygon points="6 4 20 12 6 20 6 4"/>',
   stop: '<rect x="5" y="5" width="14" height="14" rx="2"/>',
   microphone: '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/><path d="M8 22h8"/>',
+  headphones: '<path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="2" y="14" width="4" height="7" rx="1.6"/><rect x="18" y="14" width="4" height="7" rx="1.6"/>',
+  userVoice: '<circle cx="9" cy="6" r="3"/><path d="M2 21v-1a7 7 0 0 1 14 0v1"/><path d="M17 8c1.2 1.2 1.2 3.8 0 5"/><path d="M20 5c2.5 2.5 2.5 8.5 0 11"/>',
   audio: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
   video: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3Z"/>',
   mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
@@ -169,6 +179,7 @@ const ICON_PATHS: Record<string, string> = {
   // A party popper: marks a holiday in the attendance grid (its own drawing, not a copied set).
   partyPopper: '<path d="M4 20 8.5 9l6.5 6.5z"/><path d="M7.3 13.3l3.4 3.4"/><path d="M11 7c-.4-1.8.6-3.2 2.4-3.4"/><path d="M17 13c1.8.4 3.2-.6 3.4-2.4"/><path d="M13.5 10.5 19 5"/><path d="M17 2.5v.01"/><path d="M21.5 7v.01"/><path d="M21 16.5v.01"/>',
   edit: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>',
+  signature: '<path d="M3 15.5C6.5 13.5 11 8 11 5.5c0-2.5-3-2.5-4 0-1.3 3.3-1.5 9.5.5 10s4.5-5 5.5-4c.8.8-1.5 4 .5 4 1.5 0 2-3 3.5-3 .8 0 .2 3 2 3H21"/><path d="M3 20h18"/>',
   lock: '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
   share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.5 6.8-4"/><path d="m8.6 13.5 6.8 4"/>',
@@ -195,6 +206,7 @@ const ICON_PATHS: Record<string, string> = {
   heading: '<path d="M6 4v16"/><path d="M18 4v16"/><path d="M6 12h12"/>',
   list: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  qrCode: '<rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="3" width="6" height="6" rx="1"/><rect x="3" y="15" width="6" height="6" rx="1"/><path d="M6 6h.01M18 6h.01M6 18h.01M12 3v3M12 9v3H9M3 12h3M15 12h3v3h3M12 15v3h3v3h3M21 18v3M12 21h.01"/>',
   clock: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>',
   // The Marketplace's own mark, reduced to a line glyph: the header rail is a row of
   // 2px strokes, and the gradient basket would read as a sticker among them.
@@ -376,7 +388,8 @@ export function AiBadge({
  * is always in the accessibility tree (`aria-label` plus the `title` tooltip); only its
  * width is animated, so nothing is hidden from a screen reader or a pointerless user.
  * `showLabel` pins the text open — use it for an action in progress or one that must be
- * noticed. Sizing and tone come from `className` (`h-9 min-h-9 btn-ghost`, …).
+ * noticed. `iconOnly` keeps the width fixed and exposes the label through the tooltip.
+ * Sizing and tone come from `className` (`h-9 min-h-9 btn-ghost`, …).
  */
 export function HoverLabelButton({
   icon,
@@ -386,6 +399,7 @@ export function HoverLabelButton({
   className = '',
   spinning = false,
   showLabel = false,
+  iconOnly = false,
   disabled = false,
   trailing,
   ...rest
@@ -397,6 +411,7 @@ export function HoverLabelButton({
   className?: string;
   spinning?: boolean;
   showLabel?: boolean;
+  iconOnly?: boolean;
   disabled?: boolean;
   /** Rendered inside the expanding label (a keyboard shortcut, a dropdown chevron). */
   trailing?: React.ReactNode;
@@ -405,6 +420,9 @@ export function HoverLabelButton({
   'data-inbox-trigger'?: string;
   'data-notifications-trigger'?: string;
   'data-testid'?: string;
+  'aria-pressed'?: boolean;
+  'aria-expanded'?: boolean;
+  'aria-haspopup'?: 'dialog' | 'menu';
 }) {
   return (
     <button
@@ -417,7 +435,7 @@ export function HoverLabelButton({
       className={`header-action group btn justify-center px-2.5 py-0 leading-none ${className}`}
     >
       <Icon name={icon} className={spinning ? 'animate-spin' : ''} />
-      <span
+      {!iconOnly && <span
         className={`flex items-center overflow-hidden whitespace-nowrap transition-all duration-200 ${
           showLabel
             ? 'ml-1.5 max-w-[14rem] opacity-100'
@@ -426,7 +444,7 @@ export function HoverLabelButton({
       >
         {label}
         {trailing}
-      </span>
+      </span>}
     </button>
   );
 }

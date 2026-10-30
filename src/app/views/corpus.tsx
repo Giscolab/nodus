@@ -39,7 +39,7 @@ export const corpusViews = {
   // `snapshot` is the same shape as `target` and `initialTab`: a starting value the
   // shell hands down, read once at mount. `onSnapshotChange` is the return path, so
   // the cut survives the unmount that leaving the section causes.
-  library: ({ activeVault, isPrimarySources, libraryTarget, navigate, openAssistant, reloadSettings, setCollectionsOpen, setLibraryTarget, settings, setView, snapshots }) => (
+  library: ({ activeVault, isPrimarySources, libraryTarget, navigate, openAssistant, reloadSettings, setCollectionsOpen, setLibraryTarget, settings, setView, snapshots, onSync, syncing }) => (
     <GlobalLibraryView
       target={libraryTarget}
       onTargetConsumed={() => setLibraryTarget(null)}
@@ -51,12 +51,14 @@ export const corpusViews = {
       onSettingsChange={reloadSettings}
       onOpenSettings={() => setView('settings')}
       onOpenCollections={() => setCollectionsOpen(true)}
+      onSync={onSync}
+      syncing={syncing}
       onOpenGraph={(target) => navigate('graph', target)}
       onOpenAssistant={openAssistant}
       onOpenArchive={isPrimarySources ? () => setView('archive') : undefined}
     />
   ),
-  graph: ({ graphTarget, reloadSettings, settings, snapshots, openIdea }) => <GraphView onEditManualIdea={openIdea} settings={settings} onSettingsChange={reloadSettings} target={graphTarget}
+  graph: ({ graphTarget, reloadSettings, settings, snapshots, openIdea, activeVault }) => <GraphView key={activeVault?.id} onEditManualIdea={openIdea} settings={settings} onSettingsChange={reloadSettings} target={graphTarget}
     snapshot={snapshots.read('graph')} onSnapshotChange={snapshot => snapshots.patch('graph', snapshot)} />,
   argument: ({ settings, snapshots }) => (
     <ArgumentMapView
@@ -214,7 +216,7 @@ export const corpusViews = {
   },
 
   // Notas, ideas y colecciones con una única experiencia visual. La ruta académica
-  // conserva el nombre Espacio de trabajo; el resto entra por su sección Notas.
+  // mantiene las rutas antiguas bajo el nombre Nodus Scriptor en Nodus Tools.
   workspace: ({ navigate, noteTarget, settings, snapshots, openResearchConversation }) => (
     <WorkspaceView
       settings={settings}
@@ -231,7 +233,7 @@ export const corpusViews = {
     : (
       <WorkspaceView
         settings={ctx.settings}
-        title={ctx.isEstudio || ctx.isDocencia ? 'Espacio de trabajo' : 'Notas'}
+        title="Nodus Scriptor"
         snapshot={ctx.snapshots.read('notes')}
         onSnapshotChange={(patch) => ctx.snapshots.patch('notes', patch)}
         onOpenGraph={(target) => ctx.navigate('graph', target)}

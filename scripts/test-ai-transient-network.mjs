@@ -33,7 +33,7 @@ function load(file) {
   return require(bundle);
 }
 
-const { isTransientNetworkFailure, rejectsAdaptiveThinking } = load('electron/ai/providerErrors.ts');
+const { isTransientNetworkFailure, rejectsAdaptiveThinking, thinkingOffReplacement } = load('electron/ai/providerErrors.ts');
 
 /** The exact shape the OpenAI SDK throws for a lost socket. */
 const connectionError = () => Object.assign(new Error('Connection error.'), { name: 'APIConnectionError' });
@@ -47,6 +47,9 @@ test('undici-style socket failures are transient', () => {
   assert.equal(isTransientNetworkFailure(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' })), true);
   assert.equal(isTransientNetworkFailure(new Error('other side closed')), true);
   assert.equal(isTransientNetworkFailure(new Error('network error')), true);
+  // A connection dropped mid-read (a long reasoning stream), as Node reports it.
+  assert.equal(isTransientNetworkFailure(Object.assign(new Error('read ETIMEDOUT'), { code: 'ETIMEDOUT', syscall: 'read' })), true);
+  assert.equal(isTransientNetworkFailure(new TypeError('terminated', { cause: Object.assign(new Error('read ETIMEDOUT'), { code: 'ETIMEDOUT' }) })), true);
 });
 
 test('an abort, a timeout and a status-bearing error are NOT transient network failures', () => {
@@ -57,6 +60,7 @@ test('an abort, a timeout and a status-bearing error are NOT transient network f
   assert.equal(isTransientNetworkFailure(Object.assign(new Error('Request timed out.'), { name: 'APIConnectionTimeoutError' })), false);
   assert.equal(isTransientNetworkFailure(Object.assign(new Error('AI transport timed out after 180000 ms.'), { name: 'TimeoutError' })), false);
   assert.equal(isTransientNetworkFailure(Object.assign(new Error('timed out'), { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } })), false);
+  assert.equal(isTransientNetworkFailure(Object.assign(new Error('connect ETIMEDOUT 1.2.3.4:443'), { code: 'ETIMEDOUT', syscall: 'connect' })), false, 'a connect timeout stays excluded');
   // A status means another branch of wrapProviderError owns the decision.
   assert.equal(isTransientNetworkFailure(Object.assign(new Error('Connection error'), { status: 503 })), false);
   assert.equal(isTransientNetworkFailure(Object.assign(new Error('connection refused'), { response: { status: 502 } })), false);
@@ -82,13 +86,26 @@ test('the adaptive-thinking predicate keys off the model wording, and only on a 
   assert.equal(rejectsAdaptiveThinking(new Error('"thinking.type.disabled" is not supported')), false);
   // An unrelated 400 must keep its own recovery path.
   assert.equal(rejectsAdaptiveThinking(Object.assign(new Error('`temperature` is deprecated for this model'), { status: 400 })), false);
+  // The opus wording names adaptive explicitly.
+  assert.equal(thinkingOffReplacement(disabled), 'adaptive');
+});
+
+test('claude-sonnet-5-5 wording: recognised, and the type it asks for is the one replayed', () => {
+  // Verbatim from a harness run, 2026-10-02: every sonnet-5.5 "thinking off" request failed on it.
+  const sonnet = Object.assign(
+    new Error('400 {"type":"error","error":{"type":"invalid_request_error","message":"To turn thinking off on this model, send \\"thinking\\": {\\"type\\": \\"between_tools\\"} instead of {\\"type\\": \\"disabled\\"}."}}'),
+    { status: 400 },
+  );
+  assert.equal(rejectsAdaptiveThinking(sonnet), true);
+  assert.equal(thinkingOffReplacement(sonnet), 'between_tools');
+  assert.equal(thinkingOffReplacement({ status: 400, error: { message: 'To turn thinking off on this model, send "thinking": {"type": "between_tools"} instead of {"type": "disabled"}.' } }), 'between_tools');
 });
 
 test('wrapProviderError marks a transient network failure retriable', () => {
   // The heuristic is dead without this call site, and aiClient.ts cannot be imported
   // here (database + native driver), so the wiring is asserted on the source text.
   const source = readFileSync(path.join(repoRoot, 'electron/ai/aiClient.ts'), 'utf8');
-  assert.match(source, /import \{ classifyProviderError, isTransientNetworkFailure, rejectsAdaptiveThinking, rejectsOptionalBodyWithoutNaming, rejectsOptionalTransportField, rejectsTemperatureParameter, shouldRetryWithoutOptionalFields \} from '\.\/providerErrors';/);
+  assert.match(source, /import \{ classifyProviderError, isTransientNetworkFailure, rejectsOptionalBodyWithoutNaming, rejectsOptionalTransportField, shouldRetryWithoutOptionalFields \} from '\.\/providerErrors';/);
   assert.match(
     source,
     /if \(isTransientNetworkFailure\(e\)\) \{\s*return new AiError\(message \|\| 'Error de conexión con el proveedor de IA\.', true, false, 'connection'\);/,

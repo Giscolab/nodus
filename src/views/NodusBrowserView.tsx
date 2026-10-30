@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { Icon } from '../components/ui';
 import { t, tx } from '../i18n';
@@ -9,6 +9,7 @@ import type {
   BrowserRestartResult,
   BrowserState,
   BrowserTabState,
+  BrowserViewport,
   PendingBrowserAuth,
   PendingBrowserPermission,
 } from '@shared/browser';
@@ -39,6 +40,7 @@ import connectorIcon from '../../browser-extension/icons/icon.svg';
  */
 export function NodusBrowserView() {
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const publishedViewportRef = useRef<BrowserViewport | null>(null);
   const [state, setState] = useState<BrowserState>({ tabs: [], activeTabId: null });
   const [omnibox, setOmnibox] = useState('');
   const [omniboxFocused, setOmniboxFocused] = useState(false);
@@ -230,35 +232,35 @@ export function NodusBrowserView() {
     const element = viewportRef.current;
     if (!element) return;
     const rect = element.getBoundingClientRect();
-    void window.nodus.setBrowserViewport({
+    const next = {
       x: rect.left,
       y: rect.top,
       width: rect.width,
       height: rect.height,
-    });
+    };
+    const previous = publishedViewportRef.current;
+    if (previous && previous.x === next.x && previous.y === next.y
+      && previous.width === next.width && previous.height === next.height) return;
+    publishedViewportRef.current = next;
+    void window.nodus.setBrowserViewport(next);
   }, []);
 
-  useEffect(() => {
+  // Parent commits include sidebar width/collapse changes. Publish their new
+  // geometry before paint, including moves that do not resize the viewport.
+  useLayoutEffect(() => { publishViewport(); });
+
+  useLayoutEffect(() => {
     publishViewport();
     const element = viewportRef.current;
     if (!element) return;
-    // rAF-coalesced: a drag-resize fires these dozens of times per second, and
-    // forwarding each one is how a browser section starts dropping frames.
-    let frame = 0;
-    const schedule = () => {
-      if (frame) return;
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        publishViewport();
-      });
-    };
-    const observer = new ResizeObserver(schedule);
+    // ResizeObserver already batches layout changes before paint. Scheduling
+    // another rAF here left the native page at its old bounds for a full frame.
+    const observer = new ResizeObserver(publishViewport);
     observer.observe(element);
-    window.addEventListener('resize', schedule);
+    window.addEventListener('resize', publishViewport);
     return () => {
-      if (frame) cancelAnimationFrame(frame);
       observer.disconnect();
-      window.removeEventListener('resize', schedule);
+      window.removeEventListener('resize', publishViewport);
     };
   }, [publishViewport]);
 
@@ -633,8 +635,8 @@ export function NodusBrowserView() {
         />
       )}
 
-      {/* The page goes here. This div is deliberately empty and never painted
-          into: the main process positions the native view over its rectangle. */}
+      {/* Main positions the native page here. While app overlays are open, the
+          overlay guard keeps a frozen image inside this same rectangle. */}
       <div ref={viewportRef} data-browser-viewport className="relative min-h-0 flex-1">
         {active?.kind === 'bookmarks' && (
           <NodusBookmarksPage
@@ -1036,14 +1038,14 @@ function BrowserTabStrip({
   };
 
   return (
-    <div data-testid="browser-tab-bar" className="flex items-center gap-1 border-b border-neutral-300 px-2 py-1 dark:border-neutral-800">
+    <div data-testid="browser-tab-bar" className="library-workspace-tabs flex items-start gap-1">
       {overflow.left && <TabStripArrow direction={-1} onClick={() => scrollByStep(-1)} />}
       <div
         ref={stripRef}
         role="tablist"
         data-testid="browser-tab-strip"
         onScroll={measureOverflow}
-        className="browser-tab-strip-scroll flex min-w-0 flex-1 items-center gap-1"
+        className="browser-tab-strip-scroll flex h-9 min-w-0 flex-1 items-end gap-1"
       >
         {tabs.map((tab) => {
           const selected = tab.id === activeTabId;
@@ -1053,13 +1055,11 @@ function BrowserTabStrip({
               role="tab"
               aria-selected={selected}
               data-testid="browser-tab"
-              className={`group flex ${TAB_WIDTH_CLASS} shrink-0 items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors ${
-                selected ? 'bg-neutral-200 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100' : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900'
-              }`}
+              className={`group flex ${TAB_WIDTH_CLASS} shrink-0 library-workspace-tab ${selected ? 'is-active' : ''}`}
             >
               <button
                 type="button"
-                className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                className="library-workspace-tab-main"
                 onClick={() => onSelect(tab.id)}
                 title={tab.url || tab.title}
               >
@@ -1074,7 +1074,7 @@ function BrowserTabStrip({
                 type="button"
                 aria-label={t('Cerrar pestaña')}
                 title={t('Cerrar pestaña')}
-                className="shrink-0 rounded p-0.5 opacity-0 transition-opacity hover:bg-neutral-300 group-hover:opacity-70 focus:opacity-100 dark:hover:bg-neutral-700"
+                className="library-workspace-tab-close"
                 onClick={() => onClose(tab.id)}
               >
                 <Icon name="x" size={11} />
@@ -1093,7 +1093,7 @@ function BrowserTabStrip({
         disabled={full}
         onClick={onNew}
         data-testid="browser-new-tab"
-        className="shrink-0 rounded-lg p-1.5 text-neutral-600 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-30 dark:text-neutral-400 dark:hover:bg-neutral-900"
+        className="shrink-0 self-center rounded-lg p-1.5 text-neutral-600 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-30 dark:text-neutral-400 dark:hover:bg-neutral-900"
       >
         <Icon name="plus" size={13} />
       </button>
@@ -1120,7 +1120,7 @@ function TabStripArrow({ direction, onClick }: { direction: -1 | 1; onClick: () 
       title={label}
       data-testid={direction < 0 ? 'browser-tab-scroll-left' : 'browser-tab-scroll-right'}
       onClick={onClick}
-      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 active:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-900 dark:active:bg-neutral-800"
+      className="flex h-6 w-6 shrink-0 self-center items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 active:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-900 dark:active:bg-neutral-800"
     >
       <Icon name={direction < 0 ? 'chevronLeft' : 'chevronRight'} size={14} />
     </button>

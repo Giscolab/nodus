@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import { configureEmbeddingIndex } from '../configureEmbeddingIndex';
 import './onboarding.css';
 import { motion } from 'framer-motion';
 import type { AiProvider, AppSettings, AcademicMode, ZoteroCollection, ModelRef, VaultSummary, ZoteroPingResult } from '@shared/types';
+import { learningModelPatch } from '@shared/academicLearning';
 import { normalizeEmbeddingModel, normalizeEmbeddingProvider } from '@shared/providers';
 import { getNodusLocalModel } from '@shared/localAiModels';
 import { Spinner, Icon } from '../components/ui';
@@ -48,8 +50,8 @@ export function Onboarding({
   // both bundled and first in the listing) would otherwise open with that model already
   // chosen. A model that runs on this machine is only ever picked here by hand, and the
   // red mark beside the picker then explains what it costs.
-  const [aiModel, setAiModel] = useState<ModelRef | null>(null);
-  const [embeddingModel, setEmbeddingModel] = useState<ModelRef | null>(null);
+  const [aiModel, setAiModel] = useState<ModelRef | null>(settings.academicInterfaceProfile === 'simple' ? settings.chatModel ?? settings.synthesisModel : null);
+  const [embeddingModel, setEmbeddingModel] = useState<ModelRef | null>(settings.academicInterfaceProfile === 'simple' && (settings.chatModel || settings.synthesisModel) ? {provider:settings.embeddingProvider,model:settings.embeddingModel} : null);
   const [modelError, setModelError] = useState<string | null>(null);
   const [storagePath, setStoragePath] = useState('');
   const [finishing, setFinishing] = useState(false);
@@ -227,6 +229,7 @@ export function Onboarding({
     downloadCancellationRequested.current = false;
     try {
       await downloadLocalModels([aiModel, embeddingModel]);
+      if (!await configureEmbeddingIndex(embeddingModel)) return;
       const favorites = settings.favorites.some((model) => model.provider === aiModel.provider && model.model === aiModel.model)
         ? settings.favorites
         : [...settings.favorites, aiModel];
@@ -234,10 +237,9 @@ export function Onboarding({
       await window.nodus.updateSettings({
         ...(connectsZotero ? { monitoredCollections: Array.from(selected), readTag, zoteroStoragePath: storagePath } : {}),
         favorites,
-        synthesisModel: aiModel,
+        ...(settings.academicInterfaceProfile === 'simple' ? learningModelPatch(settings, 'chat', aiModel) : { synthesisModel: aiModel, modelSettingsMode: 'basic' as const }),
         embeddingProvider,
         embeddingModel: normalizeEmbeddingModel(embeddingProvider, embeddingModel.model),
-        modelSettingsMode: 'basic',
         onboardingComplete: true,
       });
       setStep(doneStep);
@@ -474,7 +476,7 @@ export function Onboarding({
           <div className="space-y-3 rounded-xl border border-neutral-800 p-4">
             <h3 className="font-semibold">{t('Añade como prefieras')}</h3>
             <p className="text-sm leading-6 text-neutral-400">{t('Después del asistente podrás arrastrar PDF, EPUB y otros archivos a Biblioteca, añadir una obra por DOI o ISBN, importar referencias o crear una ficha manual.')}</p>
-            <p className="text-xs text-neutral-500">{t('Nodus tratará de completar metadatos y preparar una versión limpia de lectura automáticamente.')}</p>
+            <p className="text-xs text-neutral-500">{t('Nodus tratará de completar metadatos y preparar una versión Markdown automáticamente.')}</p>
           </div>
         )}
 
@@ -506,6 +508,8 @@ export function Onboarding({
         {step === aiStep && !manual && (
           <div className="space-y-4">
             <OnboardingModelStep
+              purpose={settings.academicInterfaceProfile === 'simple' ? 'chat' : 'analysis'}
+              cloudFirst={settings.academicInterfaceProfile === 'simple'}
               providerKeys={providerKeys ?? {}}
               aiModel={aiModel}
               embeddingModel={embeddingModel}

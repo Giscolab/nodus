@@ -241,12 +241,14 @@ page is still a complete, readable document.
 
     function fetchRelease() {
       const version = document.getElementById('dl-version');
-      fetch('https://api.github.com/repos/Drakonis96/nodus/releases/latest', { cache: 'no-store' })
+      fetch('https://api.github.com/repos/jorgepb96/nodus/releases/latest', { cache: 'no-store' })
         .then((response) => (response.ok ? response.json() : Promise.reject(new Error('no release'))))
         .then((release) => {
           if (version) version.textContent = `Latest release · ${release.tag_name} · ${new Date(release.published_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`;
           const assets = release.assets || [];
-          const find = (suffix) => assets.find((asset) => asset.name.endsWith(suffix));
+          // Support and recovery archives share extensions/architecture suffixes.
+          // Main-app download buttons must select the canonical filename.
+          const find = (suffix) => assets.find((asset) => asset.name === `Nodus${suffix}`);
           const mb = (asset) => `${(asset.size / 1048576).toFixed(0)} MB`;
           const wire = (id, asset, fallbackLabel) => {
             const anchor = document.getElementById(id);

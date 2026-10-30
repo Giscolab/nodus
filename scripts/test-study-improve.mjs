@@ -74,6 +74,9 @@ try {
   assert.equal(chatAnswer, 'El documento afirma 37 casos.');
   assert.equal(chatStreamed, chatAnswer, 'Word chat forwards only answer deltas to the pane');
   assert.equal(shared.missingProtectedSpans(protectedValue.text.replace(protectedValue.spans[0].placeholder, ''), protectedValue.spans).length, 1);
+  const extraPrompt = improve.buildStudyImprovePrompt({ mode: 'preserve', variables: {}, length: 'similar', level: 'minimal', scope: 'selection', additionalInstructions: 'Aclara la conclusión.' }, { prompt: 'Mejora {{selectedText}}.', language: 'es' }, 'Texto original.');
+  assert.ok(extraPrompt.user.indexOf('Aclara la conclusión.') < extraPrompt.user.indexOf('<<<NODUS_SELECTION'));
+  assert.ok(extraPrompt.user.includes('Texto original.'));
   const markerlessPrompt = improve.buildStudyImprovePrompt({
     mode: 'free', variables: {}, length: 'similar', level: 'minimal', scope: 'selection',
   }, { prompt: 'Mejora {{selectedText}}.', language: 'es' }, 'Texto sin fragmentos protegidos.');
@@ -102,6 +105,11 @@ try {
   settingsRepo.updateSettings({ studyImproveToolbarStyleIds: ['builtin:formal', 'builtin:academic', 'builtin:clear', 'builtin:concise', 'builtin:summary'] });
   assert.deepEqual(settingsRepo.getSettings().studyImproveToolbarStyleIds,
     ['builtin:formal', 'builtin:academic', 'builtin:clear', 'builtin:concise'], 'the prompt toolbar persists at most four styles');
+  settingsRepo.updateSettings({ studyImproveLastStyleId: 'builtin:formal', imageFavorites: [{ provider: 'codex', model: 'qa-image' }, { provider: 'codex', model: 'qa-image' }, { provider: 'ollama', model: 'not-an-image' }], favorites: [{ provider: 'ollama', model: 'qa-text' }] });
+  closeDb();
+  assert.equal(settingsRepo.getSettings().studyImproveLastStyleId, 'builtin:formal', 'the vault remembers its last style after reopening storage');
+  assert.deepEqual(settingsRepo.getSettings().imageFavorites, [{ provider: 'codex', model: 'qa-image' }], 'image favorites persist with invalid entries and duplicates removed');
+  assert.deepEqual(settingsRepo.getSettings().favorites, [{ provider: 'ollama', model: 'qa-text' }], 'image favorites do not enter text selectors');
 
   const document = org.createStudyDocument({ title: 'Apunte para mejorar', contentMarkdown: original });
   const custom = styles.createStudyStyle({
@@ -167,6 +175,11 @@ try {
   assert.equal(improved.modelName, 'controlled-local-verifier');
   assert.ok(improved.protectedSpanCount >= 6);
   assert.equal(styles.listStudyImprovementLog(document.id).some((entry) => entry.id === improved.logId), true, 'full rewrite records provenance');
+  const beforeAbortLogs = styles.listStudyImprovementLog(document.id).length;
+  const abortController = new AbortController();
+  await assert.rejects(improve.improveStudyText({ documentId: document.id, text: 'Texto original.', styleId: 'builtin:clear', scope: 'selection', level: 'minimal', length: 'similar', mode: 'preserve', model: { provider: 'ollama', model: 'controlled-local-verifier' } }, () => abortController.abort(), abortController.signal), { name: 'AbortError' });
+  assert.equal(styles.listStudyImprovementLog(document.id).length, beforeAbortLogs, 'cancelled late output never creates a proposal log');
+  await assert.rejects(improve.improveStudyText({}, () => {}, AbortSignal.abort()), { name: 'AbortError' });
 
   const synonymResult = await synonyms.suggestStudySynonyms({
     documentId: document.id,
@@ -207,12 +220,11 @@ try {
 
   const dialogSource = fs.readFileSync(path.join(repoRoot, 'src/components/editor/StudyImproveDialog.tsx'), 'utf8');
   const editorSource = fs.readFileSync(path.join(repoRoot, 'src/components/editor/StudyEditor.tsx'), 'utf8');
-  assert.match(dialogSource, /max-h-\[78vh\].*max-w-2xl/);
   assert.match(dialogSource, /Puedes mostrar un máximo de cuatro prompts en la barra/);
   assert.match(dialogSource, /study-prompt-title/); assert.match(dialogSource, /study-prompt-text/); assert.match(dialogSource, /IconEmojiPicker/);
   for (const removed of ['Conservar significado', 'Transformación libre', "t('Nivel')", "t('Longitud')"]) assert.doesNotMatch(dialogSource, new RegExp(removed));
-  assert.match(editorSource, /createPortal/); assert.match(editorSource, /milkdown-toolbar/);
-  assert.match(editorSource, /study-selection-text-color/); assert.match(editorSource, /study-selection-heading/); assert.match(editorSource, /study-selection-tools-host/); assert.match(editorSource, /study-toolbar-quick-improve/);
+  assert.match(editorSource, /createPortal/); assert.match(editorSource, /onToolbarElement=\{setSelectionToolbar\}/);
+  assert.match(editorSource, /study-selection-text-color/); assert.match(editorSource, /study-selection-heading/); assert.match(editorSource, /onToolbarElement=\{setSelectionToolbar\}/); assert.match(editorSource, /study-toolbar-quick-improve/);
   assert.doesNotMatch(editorSource, /study-improve-selection-toolbar/); assert.match(editorSource, /requestAnimationFrame\(flush\)/);
   assert.match(editorSource, /updateStudyImprovementAction\(result\.logId, 'replace'\)/); assert.match(editorSource, /Ctrl\/⌘\+Z/);
 
@@ -248,7 +260,10 @@ function installRuntimeHooks(userDataPath) {
     dialog: {}, shell: {}, BrowserWindow: class {},
   };
   Module._resolveFilename = function resolveFilename(request, parent, isMain, options) {
-    if (request.startsWith('@shared/')) return path.join(repoRoot, `${request.replace('@shared/', 'shared/')}.ts`);
+    if (request.startsWith('@shared/')) {
+      const resolved = path.join(repoRoot, request.replace('@shared/', 'shared/'));
+      return /\.(?:mjs|json)$/.test(resolved) ? resolved : `${resolved}.ts`;
+    }
     return originalResolveFilename.call(this, request, parent, isMain, options);
   };
   Module._load = function load(request, parent, isMain) {

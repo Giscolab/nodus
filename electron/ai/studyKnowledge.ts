@@ -10,7 +10,7 @@ import type {
 } from '@shared/studyKnowledge';
 import type { PromptLanguage } from '@shared/types';
 import { studyKnowledgePromptPack } from '@shared/studyKnowledgePromptPacks';
-import { completeJson, embed, embedMany } from './aiClient';
+import { completeJson, embedQuery, embedMany } from './aiClient';
 import { runStudyAiTask } from './studyAiPolicy';
 import { currentEmbeddingConfig } from '../db/ideasRepo';
 import { getDb } from '../db/database';
@@ -174,6 +174,7 @@ async function analyzeSource(source: SourceData, force: boolean, externalConsent
     }
     const merged = mergeStudyKnowledgeExtractions(parts); const embeddingTexts = merged.ideas.map((idea) => `${idea.type}\n${idea.label}\n${idea.statement}`);
     const vectors = await embedMany(embeddingTexts); const config = currentEmbeddingConfig();
+    if (sourceData(source.kind, source.id)?.hash !== source.hash) throw new Error('embedding_source_changed');
     for (const subjectId of pendingSubjects) {
       // The source can be deleted while an external model is still answering.
       // Re-check scope immediately before writing so a late response can never
@@ -230,7 +231,7 @@ function cosine(a: number[] | null, b: number[] | null): number {
 export async function retrieveStudyKnowledgeContext(subjectId: string, query: string, sourceKeys: string[] = [], limit = 10): Promise<StudyAssessmentKnowledgeContext> {
   const prompt = studyKnowledgePromptPack(getSettings().promptLanguage ?? 'es');
   const candidates = listStudyIdeaVectors(subjectId, sourceKeys); if (!candidates.length) return { ideas: [], connections: [], outline: '', embeddingAvailable: false };
-  const queryVector = await embed(query).catch(() => null);
+  const queryVector = await embedQuery(query).catch(() => null);
   const ranked = candidates.map((idea) => ({ idea, score: queryVector ? cosine(queryVector, idea.embedding) : 0 }))
     .sort((a, b) => queryVector ? b.score - a.score || b.idea.sourceCount - a.idea.sourceCount : b.idea.sourceCount - a.idea.sourceCount)
     .slice(0, limit).map((item) => item.idea);

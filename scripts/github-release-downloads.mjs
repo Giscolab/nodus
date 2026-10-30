@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const REPOSITORY = 'Drakonis96/nodus';
+const REPOSITORY = 'jorgepb96/nodus';
 const DEFAULT_OUTPUT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../site/data/github-release-downloads.json',
@@ -11,6 +11,8 @@ const DEFAULT_OUTPUT = path.resolve(
 export function classifyReleaseAsset(name) {
   if (typeof name !== 'string') return null;
   const lower = name.toLowerCase();
+
+  if (/^nodus-(?:support|runtime)-/.test(lower)) return null;
 
   if (/^latest.*\.ya?ml$/i.test(name) || lower.endsWith('.blockmap')) return null;
   if (lower.endsWith('.deb') || lower.endsWith('.appimage') || lower.endsWith('.rpm')) return 'linux';
@@ -34,6 +36,8 @@ function hasArchToken(lower, token) {
 export function classifyInstallerAsset(name) {
   if (typeof name !== 'string') return null;
   const lower = name.toLowerCase();
+
+  if (/^nodus-(?:support|runtime)-/.test(lower)) return null;
 
   if (/^latest.*\.ya?ml$/i.test(name) || lower.endsWith('.blockmap')) return null;
   if (lower.endsWith('.deb')) return 'linuxDeb';

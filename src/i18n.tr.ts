@@ -1,21 +1,35 @@
+import { RESEARCH_QUEUE_TRANSLATIONS } from './i18n.researchQueue';
+import { EMBEDDING_INDEX_TRANSLATIONS } from './i18n.embeddingIndexes';
+import { RESEARCH_HARNESS_TRANSLATIONS } from './i18n.researchHarness';
+import { EMBEDDING_GEMMA2_TRANSLATIONS } from './i18n.embeddingGemma2';
+import { SIGN_TRANSLATIONS } from './i18n.sign';
+import { CHAT_ORGANIZATION_HELP_TRANSLATIONS } from './i18n.chatOrganizationHelp';
+import { RESEARCH_CHAT_SELECTION_TRANSLATIONS } from './i18n.researchChatSelection';
+import { ACADEMIC_INTERFACE_TRANSLATIONS } from './i18n.academicInterface';
+import { BACKUPS_TRANSLATIONS } from './i18n.backups';
+import { SCRIPTOR_AI_TRANSLATIONS } from './i18n.scriptorAi';
 import { RESEARCH_CHAT_HISTORY_TRANSLATIONS } from './i18n.researchChatHistory';
 import { RESEARCH_ACTIVITY_TRANSLATIONS } from './i18n.researchActivity';
 import { RESEARCH_NOTEBOOK_TRANSLATIONS } from './i18n.researchNotebooks';
 import { CALENDAR_SYNC_TRANSLATIONS } from './i18n.calendarSync';
+import { AGENT_RUNTIME_TRANSLATIONS } from './i18n.agentRuntimes';
 import { ACADEMIC_MANUAL_TRANSLATIONS } from './i18n.academicManual';
 import { STUDY_SOURCE_TRANSLATIONS } from './i18n.studySources';
 import { COMPLETE_GUIDE_TRANSLATIONS } from './i18n.completeGuide';
 import { STUDY_FOCUS_TRANSLATIONS } from './i18n.studyFocus';
 import { STUDY_NOTE_LINKS_TRANSLATIONS } from './i18n.studyNoteLinks';
+import { BOOKMARK_SORT_TRANSLATIONS } from './i18n.bookmarkSort';
 import { CONCILIUM_TRANSLATIONS } from './i18n.concilium';
 import { DRIFT_TRANSLATIONS } from './i18n.drift';
 import { RESEARCH_ATTACHMENT_TRANSLATIONS } from './i18n.researchAttachments';
+import { RESEARCH_VERIFICATION_TRANSLATIONS } from './i18n.researchVerification';
 import { VAULT_FILE_DROP_TRANSLATIONS } from './i18n.vaultFileDrop';
 import { DOCUMENT_SKILLS_TRANSLATIONS } from './i18n.documentSkills';
 import { RESEARCH_PROMPT_TRANSLATIONS } from './i18n.researchPrompts';
 import { RESEARCH_SOURCE_TRANSLATIONS } from './i18n.researchSources';
 import { RESEARCH_REASONING_TRANSLATIONS } from './i18n.researchReasoning';
 import { CHAT_SKILLS_TRANSLATIONS } from './i18n.chatSkills';
+import { NARRATION_TRANSLATIONS } from './i18n.narration';
 import { CAPABILITIES_TRANSLATIONS } from './i18n.capabilities';
 import { STELLAR_GRAPH_TRANSLATIONS } from './i18n.stellarGraph';
 import { PROTECT_TRANSLATIONS } from './i18n.protect';
@@ -66,20 +80,27 @@ import { SOURCE_CITATION_TRANSLATIONS } from './i18n.sourceCitation';
 import { DEEP_RESEARCH_APPROACH_TRANSLATIONS } from './i18n.deepResearchApproaches';
 import { DICTIONARY_TRANSLATIONS } from './i18n.dictionary';
 import { DEEP_RESEARCH_VERSION_TRANSLATIONS } from './i18n.deepResearchVersions';
+import { GALLERY_FILTER_TRANSLATIONS } from './i18n.galleryFilters';
 import { DOCUMENT_UNDERSTANDING_TRANSLATIONS } from './i18n.documentUnderstanding';
 import { STALE_MODEL_TRANSLATIONS } from './i18n.staleModels';
+import { SCHEME_DECLUTTER_TRANSLATIONS } from './i18n.schemeDeclutter';
+import { CHEMISTRY_STOCK_TRANSLATIONS } from './i18n.chemistryStock';
 import { DEEP_RESEARCH_QUALITY_TRANSLATIONS } from './i18n.deepResearchQuality';
 import { TEXT_PROVENANCE_TRANSLATIONS } from './i18n.textProvenance';
 import { MODEL_SETTINGS_TRANSLATIONS } from './i18n.modelSettings';
+import { SETTINGS_LAYOUT_TRANSLATIONS } from './i18n.settingsLayout';
 import { ADAPTIVE_CONCURRENCY_TRANSLATIONS } from './i18n.adaptiveConcurrency';
 import { DATABASE_DEEP_RESEARCH_TRANSLATIONS } from './i18n.databaseDeepResearch';
 import { ACADEMIC_TOUR_TRANSLATIONS } from './i18n.academicTour';
 
 /** Complete static Turkish interface table; coverage prohibits runtime fallbacks. */
 export const TR: Record<string, string> = {
+  ...EMBEDDING_INDEX_TRANSLATIONS["tr"],
+  ...BACKUPS_TRANSLATIONS.tr,
   // First, so every entry below wins: the server's English-only keys.
   ...SERVER_ENGLISH_FALLBACKS.tr,
   ...CALENDAR_SYNC_TRANSLATIONS["tr"],
+  ...AGENT_RUNTIME_TRANSLATIONS["tr"],
   ...ACADEMIC_MANUAL_TRANSLATIONS["tr"],
   // Nodus Tools catalogue
   "Navega por la web y guarda fuentes para tu investigación.": "Web’de gezinin ve araştırmanız için kaynakları kaydedin.",
@@ -92,14 +113,17 @@ export const TR: Record<string, string> = {
   ...RESEARCH_ACTIVITY_TRANSLATIONS["tr"],
   ...RESEARCH_CHAT_HISTORY_TRANSLATIONS["tr"],
   ...RESEARCH_ATTACHMENT_TRANSLATIONS['tr'],
+  ...RESEARCH_VERIFICATION_TRANSLATIONS['tr'],
   ...VAULT_FILE_DROP_TRANSLATIONS['tr'],
   "Research chat": "Research chat",
   "Elige al menos una base de datos.": "En az bir veritabanı seçin.",
   ...RESEARCH_PROMPT_TRANSLATIONS["tr"],
   ...RESEARCH_SOURCE_TRANSLATIONS["tr"],
+  ...RESEARCH_HARNESS_TRANSLATIONS["tr"],
   ...RESEARCH_REASONING_TRANSLATIONS["tr"],
   ...RESEARCH_NOTEBOOK_TRANSLATIONS["tr"],
   ...CHAT_SKILLS_TRANSLATIONS['tr'],
+  ...NARRATION_TRANSLATIONS['tr'],
   ...CAPABILITIES_TRANSLATIONS['tr'],
   ...DOCUMENT_SKILLS_TRANSLATIONS['tr'],
   ...STELLAR_GRAPH_TRANSLATIONS["tr"],
@@ -107,6 +131,8 @@ export const TR: Record<string, string> = {
   ...ADAPTIVE_CONCURRENCY_TRANSLATIONS.tr,
   ...DATABASE_DEEP_RESEARCH_TRANSLATIONS.tr,
   ...MODEL_SETTINGS_TRANSLATIONS.tr,
+  ...SETTINGS_LAYOUT_TRANSLATIONS.tr,
+  ...EMBEDDING_GEMMA2_TRANSLATIONS['tr'],
   ...DICTIONARY_TRANSLATIONS.tr,
   'Tamaño de Nodi': 'Nodi boyutu',
   'El 100 % conserva el tamaño original de Nodi y es el máximo. Puedes reducirlo hasta el 40 %.': "%100, Nodi'nin özgün boyutunu korur ve en büyük boyuttur. Boyutu %40'a kadar küçültebilirsiniz.",
@@ -125,8 +151,11 @@ export const TR: Record<string, string> = {
   ...SOURCE_CITATION_TRANSLATIONS.tr,
   ...DEEP_RESEARCH_APPROACH_TRANSLATIONS.tr,
   ...DEEP_RESEARCH_VERSION_TRANSLATIONS.tr,
+  ...GALLERY_FILTER_TRANSLATIONS.tr,
   ...DOCUMENT_UNDERSTANDING_TRANSLATIONS.tr,
   ...STALE_MODEL_TRANSLATIONS.tr,
+  ...SCHEME_DECLUTTER_TRANSLATIONS.tr,
+  ...CHEMISTRY_STOCK_TRANSLATIONS.tr,
   ...DEEP_RESEARCH_QUALITY_TRANSLATIONS.tr,
   ...TEXT_PROVENANCE_TRANSLATIONS.tr,
   ...LIBRARY_BIBLIOGRAPHY_TRANSLATIONS.tr,
@@ -160,6 +189,8 @@ export const TR: Record<string, string> = {
   ...COMPLETE_GUIDE_TRANSLATIONS["tr"],
   ...STUDY_FOCUS_TRANSLATIONS["tr"],
   ...STUDY_NOTE_LINKS_TRANSLATIONS["tr"],
+  ...BOOKMARK_SORT_TRANSLATIONS["tr"],
+  ...SCRIPTOR_AI_TRANSLATIONS["tr"],
   ...STUDY_IMPROVE_TRANSLATIONS.tr,
   ...WORKSPACE_TRANSLATIONS.tr,
   "Lo que cuenta el mapa": "Haritanın anlattıkları",
@@ -1642,7 +1673,7 @@ export const TR: Record<string, string> = {
   "Nodus Compass": "Nodus Compass",
   "Nodus Tools": "Nodus Tools",
   "Herramientas prácticas y local-first para convertir archivos y procesar documentos, integradas en Nodus.": "Dosyaları dönüştürmek ve belgeleri işlemek için Nodus'ta yerleşik, kullanışlı, yerel öncelikli araçlar.",
-  "Nodus PDF Presenter": "Nodus PDF Sunucusu",
+  'Nodus Presenter': 'Nodus Presenter',
   "Presentar archivos PDF y presentaciones externas con vista del presentador, control remoto desde el móvil, notas del orador y herramientas de anotación en directo.": "Sunum yapan kişi görünümü, mobil uzaktan kumanda, konuşmacı notları ve canlı açıklama ekleme araçlarıyla PDF'ler ve harici sunumlar sunun.",
   "Nodus OCR Workspace": "Nodus OCR Çalışma Alanı",
   "OCR asistido por IA para PDF escaneados e imágenes, con revisión página a página, limpieza de texto, reprocesamiento e integración directa con las bóvedas de Nodus.": "Taranan PDF'ler ve görüntüler için sayfa sayfa inceleme, metin temizleme, yeniden işleme ve Nodus kasalarıyla doğrudan entegrasyon özellikleriyle yapay zeka destekli OCR.",
@@ -2416,7 +2447,7 @@ export const TR: Record<string, string> = {
   "Detener y eliminar de la cola": "Durdurun ve kuyruktan kaldırın",
   "Eliminar de la cola": "Sıradan kaldır",
   "Se quitarán de la cola los elementos pendientes y los ya terminados. El elemento en curso seguirá procesándose.": "Bekleyen ve tamamlanan öğeler kuyruktan kaldırılacaktır. Devam eden öğe işlenmeye devam edecek.",
-  "Limpiar": "Temiz",
+  "Limpiar": "Temizle",
   "Se detendrá el escaneo en curso y se eliminarán todos los elementos de la cola. Esta acción no se puede deshacer.": "Devam eden tarama durdurulacak ve kuyruktaki tüm öğeler silinecek. Bu eylem geri alınamaz.",
   "Detener y vaciar": "Dur ve boşalt",
   "Obra": "iş",
@@ -3090,8 +3121,8 @@ export const TR: Record<string, string> = {
   "Buscar dentro del documento": "Belgede ara",
   "Preparando el índice de búsqueda…": "Arama dizini hazırlanıyor…",
   "Este archivo no contiene una capa de texto que Nodus pueda buscar.": "Bu dosyada Nodus'un arayabileceği bir metin katmanı yok.",
-  "Este PDF no contiene texto buscable. Abre el Markdown limpio para consultar el OCR.": "Bu PDF aranabilir metin içermiyor. OCR metnini incelemek için temiz Markdown'u açın.",
-  "Las imágenes no contienen una capa textual. Usa el Markdown limpio para buscar el OCR.": "Görseller metin katmanı içermez. OCR metninde arama yapmak için temiz Markdown'u kullanın.",
+  "Este PDF no contiene texto buscable. Abre el Markdown para consultar el OCR.": "Bu PDF aranabilir metin içermiyor. OCR metnini incelemek için Markdown'u açın.",
+  "Las imágenes no contienen una capa textual. Usa el Markdown para buscar el OCR.": "Görseller metin katmanı içermez. OCR metninde arama yapmak için Markdown'u kullanın.",
   "Coincidencia {current} de {total}": "{total} eşleşmeden {current}.",
   "No se encontró ese texto": "Bu metin bulunamadı",
   "Ir a la coincidencia anterior": "Önceki eşleşmeye git",
@@ -3783,7 +3814,7 @@ export const TR: Record<string, string> = {
   "Contenido": "İçerik",
   "Crear una idea manual indexable": "Manuel olarak indekslenebilir bir fikir oluşturun",
   "Cuerpo de cada nota": "Her notanın gövdesi",
-  "Deshacer": "geri almak",
+  "Deshacer": "Geri al",
   "elemento": "eleman",
   "Esta carpeta tiene un resumen": "Bu klasörde bir özet var",
   "Estructura completa con ids y metadatos, ideal para procesar.": "İşleme için ideal, kimlikler ve meta veriler içeren eksiksiz yapı.",
@@ -3795,7 +3826,7 @@ export const TR: Record<string, string> = {
   "Jerarquía legible, ideal para entregar a una IA.": "Okunabilir hiyerarşi, yapay zekaya aktarım için idealdir.",
   "JSON": "JSON",
   "Mantener": "Bakım",
-  "Markdown": "indirim",
+  "Markdown": "Markdown",
   "Mover": "Taşı",
   "Notas reordenadas por IA.": "Notlar AI tarafından yeniden sıralandı.",
   "Ordenar notas": "Notları sırala",
@@ -5707,6 +5738,7 @@ export const TR: Record<string, string> = {
   "Cambiar modelo": "Modeli değiştir",
   "Si cambias de modelo de embeddings, los vectores anteriores no servirán con el nuevo modelo y tendrás que reindexar.": "Gömme modelini değiştirirseniz önceki vektörler yeni modelde çalışmaz ve yeniden indekslemeniz gerekir.",
   "Embeddings multilingües de alta calidad para corpus amplios.": "Büyük derlemler için yüksek kaliteli çok dilli yerleştirmeler.",
+  "Embeddings multilingües de Microsoft con instrucción de búsqueda. La mejor puntuación MTEB multilingüe de los modelos locales; reserva unos 6,5 GB de memoria de GPU, así que conviene un equipo con 16 GB o más.": "Microsoft’un arama talimatı kullanan çok dilli yerleştirmeleri. Yerel modeller arasında en yüksek çok dilli MTEB puanına sahiptir. Yaklaşık 6,5 GB GPU belleği ayırdığı için 16 GB veya daha fazla belleğe sahip bir bilgisayar önerilir.",
   "Embeddings multilingües con contexto largo y buen equilibrio entre precisión y memoria.": "Uzun bağlamlı ve hassasiyet ile hafıza arasında iyi bir denge sağlayan çok dilli yerleştirmeler.",
   "Opción ligera y rápida para equipos con menos memoria.": "Daha az belleğe sahip bilgisayarlar için hafif ve hızlı seçenek.",
   "Modelo visual muy ligero para conversación, resúmenes e ideas.": "Konuşma, özetler ve fikirler için çok hafif görsel model.",
@@ -7974,7 +8006,7 @@ export const TR: Record<string, string> = {
   "Activar Global": "Global'i etkinleştir",
   "Configura las copias de seguridad para activar Global.": "Global kapsamını etkinleştirmek için yedeklemeleri yapılandırın.",
   "Biblioteca global activada.": "Global Kütüphane etkinleştirildi.",
-  "Global reúne originales y Markdown limpio para todos tus vaults.": "Global kapsamı, tüm kasalarınız için orijinalleri ve temiz Markdown'ı bir araya getirir.",
+  "Global reúne originales y Markdown para todos tus vaults.": "Global kapsamı, tüm kasalarınız için orijinalleri ve Markdown'ı bir araya getirir.",
   "Este vault conserva colecciones, scans, resúmenes, embeddings y análisis existentes.": "Bu kasa mevcut koleksiyonları, taramaları, özetleri, embedding'leri ve analizleri korur.",
   "Activa la Biblioteca global cuando quieras; este vault no cambiará.": "Global Kütüphaneyi istediğiniz zaman etkinleştirin; bu kasa değişmez.",
   "{n} documento(s) añadidos; {reused} componente(s) reutilizados con huellas exactas.": "{n} belge eklendi; {reused} bileşen tam parmak izleriyle yeniden kullanıldı.",
@@ -8620,4 +8652,53 @@ export const TR: Record<string, string> = {
   "Sent": "Gönderildi",
   ...CONCILIUM_TRANSLATIONS['tr'],
   ...DRIFT_TRANSLATIONS['tr'],
+  // PDF Presenter — editorial workspace
+  "Organiza tus diapositivas. Comparte tus ideas.": "Slaytlarınızı düzenleyin. Fikirlerinizi paylaşın.",
+  "Buscar por número o notas…": "Numara veya notlara göre ara…",
+
+  // PDF Presenter folder navigation.
+  "Editar carpeta": "Klasörü düzenle",
+  "Carpeta principal": "Üst klasör",
+  "Biblioteca principal": "Ana kitaplık",
+  "Color personalizado": "Özel renk",
+  "Ruta de carpetas": "Klasör yolu",
+  "Opciones de la carpeta {name}": "{name} klasörünün seçenekleri",
+  "No se pudo eliminar la carpeta.": "Klasör silinemedi.",
+  "Se eliminará la carpeta «{name}» y sus subcarpetas ({n}).": "“{name}” klasörü ve alt klasörleri ({n}) silinecek.",
+  "¿Qué quieres hacer con sus {n} presentaciones?": "İçindeki {n} sunumla ne yapmak istersiniz?",
+  "Conservar presentaciones": "Sunumları koru",
+  "Moverlas a la biblioteca principal, con sus notas y vídeos.": "Notları ve videolarıyla birlikte ana kitaplığa taşı.",
+  "Eliminar también las presentaciones": "Sunumları da sil",
+  "Se eliminarán sus copias de la biblioteca. Los archivos originales se conservarán.": "Kitaplıktaki kopyaları silinecek. Orijinal dosyalar korunacak.",
+  "Eliminar carpeta y presentaciones": "Klasörü ve sunumları sil",
+  "Ciencia": "Bilim",
+  "Arte": "Sanat",
+  "Favoritos": "Favoriler",
+  "Conexión móvil": "Mobil bağlantı",
+  "Navegador web": "Web tarayıcısı",
+  "App iPhone–iPad": "iPhone–iPad uygulaması",
+  "Escanea desde Nodus Presenter. Mantén Wi-Fi encendido en el Mac y el móvil; no necesitas el router de la sala.": "Nodus Presenter ile tarayın. Mac ve mobil cihazda Wi-Fi açık kalsın; salonun yönlendiricisi gerekli değildir.",
+  "El enlace nativo no está disponible. Requiere macOS y permiso de red local.": "Yerel uygulama bağlantısı kullanılamıyor. macOS ve yerel ağ izni gerekir.",
+  "Escanea desde Nodus Presenter. Conecta el ordenador y el móvil a la misma red local.": "Nodus Presenter ile tarayın. Bilgisayarı ve telefonu aynı yerel ağa bağlayın.",
+  "El enlace de la app no está disponible. Comprueba la conexión de red e inicia de nuevo la presentación.": "Uygulama bağlantısı kullanılamıyor. Ağ bağlantısını kontrol edip sunumu yeniden başlatın.",
+  // Live local dictation in Scriptor.
+  "No se pudo iniciar el micrófono.": "Mikrofon başlatılamadı.",
+  "Dictado pausado para terminar el audio pendiente. Reanuda cuando esté listo.": "Bekleyen sesi tamamlamak için dikte duraklatıldı. Hazır olduğunda devam edin.",
+  "Preparando dictado…": "Dikte hazırlanıyor…",
+  "Cancelar dictado": "Dikteyi iptal et",
+  "Dictado en directo · Local": "Canlı dikte · Yerel",
+  "Escuchando…": "Dinleniyor…",
+  "El texto se inserta automáticamente en el cursor.": "Metin imleç konumuna otomatik olarak eklenir.",
+  "Opciones de dictado": "Dikte seçenekleri",
+  "Descarga un modelo local de transcripción en Ajustes → Modelos IA para dictar.": "Dikte için Ayarlar → Yapay zekâ modelleri bölümünden yerel bir transkripsiyon modeli indirin.",
+  "Audio pendiente": "Bekleyen ses",
+  "Modelo local": "Yerel model",
+  "Detener dictado": "Dikteyi durdur",
+  ...ACADEMIC_INTERFACE_TRANSLATIONS["tr"],
+  ...CHAT_ORGANIZATION_HELP_TRANSLATIONS["tr"],
+  ...RESEARCH_CHAT_SELECTION_TRANSLATIONS["tr"],
 };
+
+Object.assign(TR, SIGN_TRANSLATIONS['tr']);
+
+Object.assign(TR, RESEARCH_QUEUE_TRANSLATIONS['tr']);

@@ -26,6 +26,7 @@ import {
 } from '../db/documentProfilesRepo';
 import { cosineSimilarity, currentEmbeddingConfig, decodeEmbedding } from '../db/ideasRepo';
 import { prepareLegacyDocumentaryPassages, type PreparedLegacyPassages } from './documentaryLegacyPreparation';
+import { waitForPassageWork } from './passageEmbeddingActivity';
 import { resolveWorkText, resolvedTextStateFromDoc } from '../extraction/textExtractor';
 import { setResolvedTextState } from '../db/worksRepo';
 import { analysisFingerprint, analysisModelFingerprint, upsertLibraryAnalysisProvenance } from '../db/libraryAnalysisProvenance';
@@ -1175,7 +1176,7 @@ function buildExtractiveProfileFallback(
 
 function alignIdeas(nodusId: string, vectors: Array<{ sourceId: string; kind: string; embedding: number[] | null }>): DocumentIdeaLink[] {
   const ideas = getDb().prepare(
-    `SELECT i.global_id,i.embedding FROM ideas i JOIN idea_occurrences io ON io.global_id=i.global_id
+    `SELECT i.global_id,i.embedding FROM embedding_read_ideas i JOIN idea_occurrences io ON io.global_id=i.global_id
       WHERE io.nodus_id=? AND i.embedding IS NOT NULL`
   ).all(nodusId) as { global_id: string; embedding: Buffer }[];
   const links: DocumentIdeaLink[] = [];
@@ -1286,6 +1287,9 @@ export async function runDocumentProfileScan(work: Work, options: RunDocumentPro
   if (!sections.length) throw new Error('El documento no contiene texto estructurable.');
 
   emit(options, 'embedding', 0.05, 'Indexando los pasajes del texto completo…');
+  // A passage run that has this work queued would fence these passages while the sections are
+  // analysed and void the index at publication; let it finish first (passageEmbeddingActivity.ts).
+  await waitForPassageWork(work.nodus_id, options.signal);
   const preparedPassages = await preparePassages(
     work,
     document.text,
@@ -1536,6 +1540,7 @@ export async function runDocumentProfileScan(work: Work, options: RunDocumentPro
   ].filter((source) => source.text.trim());
   const vectorEmbeddingConfig = currentEmbeddingConfig();
   const embeddings = await embedMany(vectorSources.map((source) => source.text), options.signal, {
+    role: 'document', title: work.title,
     perf: options.perf,
     jobId: `${options.jobId}:profile-embeddings`,
   });

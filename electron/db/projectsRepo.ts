@@ -222,6 +222,7 @@ function toLink(row: LinkRow): ProjectLink {
 }
 
 function toChapter(row: ChapterRow): ProjectChapter {
+  const canonical=row.note_id?getNote(row.note_id):null;
   return {
     id: row.id,
     projectId: row.project_id,
@@ -232,7 +233,7 @@ function toChapter(row: ChapterRow): ProjectChapter {
     originalFileName: row.original_file_name,
     originalTextHash: row.original_text_hash,
     originalText: row.original_text,
-    currentMarkdown: row.current_markdown,
+    currentMarkdown: canonical?.content ?? row.current_markdown,
     wordCount: row.word_count,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -732,7 +733,7 @@ function chunkMarkdown(chapterId: string, markdown: string): ProjectChapterChunk
 
 export function listChapterChunks(chapterId: string): ProjectChapterChunk[] {
   return (getDb()
-    .prepare('SELECT * FROM project_chapter_chunks WHERE chapter_id = ? ORDER BY order_idx ASC')
+    .prepare('SELECT * FROM embedding_read_project_chapter_chunks AS project_chapter_chunks WHERE chapter_id = ? ORDER BY order_idx ASC')
     .all(chapterId) as ChunkRow[]).map(toChunk);
 }
 

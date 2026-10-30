@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -8,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { chromium } from 'playwright-core';
+import { launchComponentBrowser } from './lib/component-test-browser.mjs';
 import { componentStyles } from './lib/component-test-styles.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -31,7 +31,7 @@ test('real model menus support search, selection, themes and clipped containers'
   const bundle = await build({ entryPoints: [path.join(root, 'scripts/fixtures/model-picker/renderer.tsx')], outfile: path.join(dir, 'fixture.js'), bundle: true, write: false, platform: 'browser', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"' } });
   const stylesheet = componentStyles();
   const css = await readFile(stylesheet, 'utf8');
-  const browser = await chromium.launch({ executablePath: chrome, headless: true });
+  const { browser, close: closeBrowser } = await launchComponentBrowser(chromium, { executablePath: chrome, headless: true });
   const errors = [];
   let page;
   async function fresh(config = {}) {
@@ -91,6 +91,42 @@ test('real model menus support search, selection, themes and clipped containers'
       await page.locator('#outside').click(); await open(); assert.equal(await search().inputValue(), '');
       await search().fill('sin modelo'); await search().press('Enter');
       assert.deepEqual(await page.evaluate(() => window.actions), [null]);
+    });
+    await t.test('current non-favorite models sort with favorites in searchable and native pickers', async () => {
+      const value = { provider: 'ollama', model: 'zulu-saved-model' };
+      const alphabetic = (labels) => [...labels].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+      await fresh({ value, allowEmpty: false }); await open();
+      const labels = await page.getByRole('option').allTextContents();
+      assert.deepEqual(labels, alphabetic(labels));
+      assert.equal(await page.getByRole('option', { selected: true }).textContent(), 'Ollama · zulu-saved-model');
+      await search().fill('ollama');
+      const filtered = await page.getByRole('option').allTextContents();
+      assert.deepEqual(filtered, alphabetic(filtered));
+      await search().press('ArrowDown'); await page.keyboard.press('Enter');
+      assert.deepEqual(await page.evaluate(() => window.actions), [{ provider: 'ollama', model: 'local-model-0' }]);
+      await fresh({ value, native: true, allowEmpty: false });
+      const nativeLabels = await page.locator('select option:not([value=""])').allTextContents();
+      assert.deepEqual(nativeLabels, alphabetic(nativeLabels));
+      assert.equal(await page.locator('select').inputValue(), 'ollama::zulu-saved-model');
+    });
+    await t.test('Scriptor styles and image models sort by visible label without losing selected IDs or keyboard position', async () => {
+      for (const scriptor of ['style', 'image']) {
+        await fresh({ scriptor });
+        const trigger = page.getByTestId('scriptor-choice'), input = page.getByTestId('scriptor-choice-search');
+        await trigger.click();
+        const labels = await page.getByRole('option').allTextContents();
+        assert.deepEqual(labels, [...labels].sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' })));
+        assert.equal(await page.getByRole('option', { selected: true }).getAttribute('data-active'), 'true');
+        await input.press('Enter');
+        assert.deepEqual(await page.evaluate(() => window.selections), ['z']);
+        await trigger.click(); await input.press('ArrowUp'); await input.press('Enter');
+        assert.deepEqual(await page.evaluate(() => window.selections), ['z', 'c']);
+        await trigger.click(); await input.fill(scriptor === 'style' ? 'breve' : 'boceto'); await input.press('Enter');
+        assert.deepEqual(await page.evaluate(() => window.selections), ['z', 'c', 'b']);
+        await trigger.click(); await input.press('Escape');
+        assert.equal(await trigger.evaluate(e => e === document.activeElement), true);
+        assert.equal(await page.evaluate(() => window.escaped), 0);
+      }
     });
     await t.test('reasoning stays beside the searchable model picker and preserves the model identity', async () => {
       await fresh({ reasoning: true, value: { provider: 'codex', model: 'gpt-test' } });
@@ -152,5 +188,5 @@ test('real model menus support search, selection, themes and clipped containers'
       }
     });
     assert.deepEqual(errors, []);
-  } finally { await browser.close(); }
+  } finally { await closeBrowser(); }
 });

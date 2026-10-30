@@ -90,7 +90,6 @@ const SYNC_GROUPS: { key: SyncGroupKey; prefix?: string; tables?: string[] }[] =
       'events',
       'event_participants',
       'relationships',
-      'evidence',
       'record_evidence',
       'archive_folders',
       'archive_items',
@@ -246,11 +245,21 @@ const NOT_SYNCED_TABLES = new Set([
   'work_themes', 'work_zotero_tags', 'authors', 'author_relations', 'author_dossier_synthesis',
   'saved_authors',
   'ideas', 'idea_occurrences', 'idea_theme_links', 'themes', 'edges', 'edge_traces', 'gaps',
+  // The analysis's quotes for an idea, keyed by the idea's global_id. That id is a
+  // per-machine counter (nextGlobalId), so a quote carried to another machine lands on
+  // whatever idea holds the same number there. Genealogy's own evidence is
+  // `record_evidence`, which does travel.
+  'evidence',
   'passages', 'collections', 'zotero_tags', 'external_refs', 'extraction_cache', 'scan_checkpoints',
   // Scope receipts authorize evidence against THIS profile's revisions and
   // permissions. Importing them would incorrectly trust another device's history.
   // Publication fencing likewise belongs to the local passage writer.
-  'research_run_scopes', 'research_conversation_provenance', 'passage_publications',
+  'research_run_scopes', 'research_scope_receipts', 'research_conversation_provenance', 'passage_publications',
+  // Checkpoints pin THIS profile's grants, receipts, completed stages and usage.
+  // Saved reports/sessions can travel; a resumable local execution cannot.
+  'research_harness_runs',
+  'embedding_indexes', 'embedding_index_state', 'embedding_index_values', 'embedding_index_documentary_refs', 'embedding_index_generations',
+  'embedding_index_runs', 'embedding_index_run_items', 'embedding_index_run_events',
   // Web receipts are what THIS machine read; another device verifies its own.
   'research_web_passages',
   // Complete study guide working state and evidence sidecars: run checkpoints and the
@@ -284,6 +293,9 @@ const NOT_SYNCED_TABLES = new Set([
   // backup can reuse a verified snapshot. Moving it to another machine would neither
   // carry user data nor describe the receiver's SQLite file.
   'backup_revision',
+  // Write counters the vector-scan worker keys its cache on (vectorScanGenerations.ts):
+  // they describe this SQLite file's writes, not anything a receiver could use.
+  'vector_scan_generations',
   // Explicitly local, opt-in and content-free beta performance observations.
   'primary_source_local_metrics',
   // Deliberately machine-local: it is THIS computer's record of what its own merges

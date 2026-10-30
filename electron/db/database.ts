@@ -1,3 +1,4 @@
+import { protectReplicaImportWait } from './replicaImportWait';
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -14,7 +15,9 @@ import { auditQaDatabaseOpen } from '../qa/databaseAudit';
 import { migrateDatabaseSafely } from './migrationSafety';
 import { scheduleMigrationRecoveryRetention } from './migrationRecoveryUtilityHost';
 import { ensureBackupRevisionTriggers } from '../export/backupVaultRevision';
+import { ensureVectorScanGenerationTriggers } from './vectorScanGenerations';
 import { embeddingTextForIdea, embeddingTextHash } from './ideaEmbeddingText';
+import { activeEmbeddingIndex, registerEmbeddingIndexFunctions, withEmbeddingIndexContext, withoutEmbeddingIndexContext } from './embeddingIndexesRepo';
 
 let db: Database.Database | null = null;
 const jobDatabase = new AsyncLocalStorage<Database.Database>();
@@ -116,26 +119,25 @@ export function ensureWorkspaceDevice(database: Database.Database): void {
 }
 
 function openDatabase(file: string): Database.Database {
+  auditQaDatabaseOpen(file, 'read-write');
   let next = new Database(file);
-  try {
-    auditQaDatabaseOpen(file, 'read-write');
-  } catch (error) {
-    next.close();
-    throw error;
-  }
+  protectReplicaImportWait(next);
   const migrationPending = Number(next.pragma('user_version', { simple: true })) < SCHEMA_VERSION;
   next = migrateDatabaseSafely(next, file, SCHEMA_VERSION, runMigrations);
-  if (migrationPending) scheduleMigrationRecoveryRetention(file);
+  if (migrationPending && process.env.NODUS_SUPPORT_INTERACTIVE !== '1') scheduleMigrationRecoveryRetention(file);
+  registerEmbeddingIndexFunctions(next);
   ensureWorkspaceDevice(next);
   // Deletion tombstones are written by triggers, which are regenerated here rather than
   // created by a migration: the set of synced tables is decided in code, so a migration
   // could only ever capture the shape it had on the day it was written.
   ensureTombstoneTriggers(next);
-  pruneTombstones(next);
+  if (process.env.NODUS_SUPPORT_INTERACTIVE !== '1') pruneTombstones(next);
   // Same reasoning for the outgoing queue of a connected vault — and this is the gate that
   // stops a reader from queueing anything: without triggers, nothing can write to
   // server_outbox no matter what the rest of the app believes.
   ensureOutboxTriggers(next, mayQueueMutations(file));
+  // Before the backup triggers, so its counter table is tracked like any other.
+  ensureVectorScanGenerationTriggers(next);
   ensureBackupRevisionTriggers(next);
   // A chat history's folders and projects are checked on every open: a placement that
   // names a folder or project that is gone (or a folder of another project) is cleared
@@ -147,6 +149,7 @@ function openDatabase(file: string): Database.Database {
     console.warn('[db] chat history repair skipped:', error instanceof Error ? error.message : error);
   }
   next.pragma('busy_timeout = 5000');
+  protectReplicaImportWait(next);
   next.pragma('synchronous = NORMAL');
   next.pragma('temp_store = MEMORY');
   next.pragma('cache_size = -32768');
@@ -200,13 +203,14 @@ function openDatabase(file: string): Database.Database {
 
 export function getDb(): Database.Database {
   const scoped = jobDatabase.getStore();
-  if (scoped) return scoped;
+  if (scoped) { protectReplicaImportWait(scoped); return scoped; }
   if (!db) {
     const target = dbPath();
     const dir = path.dirname(target);
     fs.mkdirSync(dir, { recursive: true });
     db = openDatabase(target);
   }
+  protectReplicaImportWait(db);
   return db;
 }
 
@@ -223,7 +227,7 @@ export function withDatabaseContext<T>(database: Database.Database, work: () => 
  * even after withVaultDatabase has closed that dedicated connection.
  */
 export function withoutDatabaseContext<T>(work: () => T): T {
-  return jobDatabase.exit(work);
+  return jobDatabase.exit(() => withoutEmbeddingIndexContext(work));
 }
 
 /**
@@ -239,7 +243,10 @@ export async function withVaultDatabase<T>(vaultId: string, work: () => Promise<
 
   const scoped = openDatabase(vault.path);
   try {
-    return await jobDatabase.run(scoped, work);
+    return await jobDatabase.run(scoped, () => {
+      const context = withoutEmbeddingIndexContext(() => activeEmbeddingIndex(scoped));
+      return withEmbeddingIndexContext(context, work);
+    });
   } finally {
     if (scoped.open) scoped.close();
   }
@@ -271,11 +278,28 @@ export function closeDb(): void {
   }
 }
 
-/** Replace the live DB file with an imported one and re-open. Used by import. */
+/**
+ * Replace the live DB file with an imported one and re-open. Used by import.
+ *
+ * Copied to a sibling first and renamed into place, never copied over the vault: a copy that
+ * fails part way (disk full, volume gone) would otherwise leave a truncated vault, and a copy
+ * onto the same file opens THROUGH the `-wal` that any other connection still open on the vault
+ * keeps beside it — the restore then reads back the old vault's rows, and that connection later
+ * checkpoints its log into the new file. Renaming gives the import a new file of its own; the
+ * stale log and shared-memory files are removed so SQLite starts it with fresh ones.
+ */
 export function replaceDbFile(sourceFile: string): void {
   closeDb();
   const target = dbPath();
-  fs.copyFileSync(sourceFile, target);
+  const staged = `${target}.incoming-${process.pid}-${randomUUID()}`;
+  try {
+    fs.copyFileSync(sourceFile, staged);
+    for (const sibling of [`${target}-wal`, `${target}-shm`]) fs.rmSync(sibling, { force: true });
+    fs.renameSync(staged, target);
+  } catch (error) {
+    fs.rmSync(staged, { force: true });
+    throw error;
+  }
   db = openDatabase(target); // brings an older import up to the current schema
 }
 

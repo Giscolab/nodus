@@ -219,6 +219,9 @@
 .app-titlebar [data-no-drag] {
   -webkit-app-region: no-drag;
 }
+.app-titlebar[data-selector-open='true'] {
+  -webkit-app-region: no-drag;
+}
 
 /* The centred vault trigger uses dark-theme indigo utilities as its baseline.
    In the light theme it needs its own, much lighter surface; using --vault-accent
@@ -338,11 +341,6 @@ body {
 .high-contrast.light body {
   background: #fff;
   color: #000;
-}
-
-.reading-focus .study-editor-shell .milkdown .ProseMirror {
-  --study-editor-width: 48rem;
-  --study-editor-line: 1.8;
 }
 
 .reading-focus .study-editor-shell {
@@ -1530,85 +1528,8 @@ html.theme-active.light .nodus-tooltip { border-color: var(--theme-border-light)
   outline: none;
 }
 
-.study-milkdown .milkdown-toolbar {
-  overflow: visible;
-  align-items: center;
-}
-
-/* Immediate, localized labels for every selection-toolbar action. Native `title`
-   tooltips wait for the OS hover delay and Crepe's own buttons have no names at all;
-   this shared treatment appears on hover or keyboard focus without a delay. */
-.study-milkdown .milkdown-toolbar .study-selection-tooltip {
-  position: relative;
-  overflow: visible;
-}
-
-.study-milkdown .milkdown-toolbar .study-selection-tooltip::after {
-  position: absolute;
-  z-index: 40;
-  top: calc(100% + 7px);
-  left: 50%;
-  width: max-content;
-  max-width: min(19rem, calc(100vw - 2rem));
-  padding: 0.35rem 0.5rem;
-  border: 1px solid rgba(82, 82, 82, 0.9);
-  border-radius: 0.4rem;
-  background: rgba(23, 23, 23, 0.98);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
-  color: #fafafa;
-  content: attr(data-study-tooltip);
-  font-size: 0.7rem;
-  font-weight: 600;
-  line-height: 1.35;
-  text-align: center;
-  white-space: normal;
-  pointer-events: none;
-  opacity: 0;
-  transform: translate(-50%, -3px);
-  transition: opacity 80ms ease, transform 80ms ease;
-}
-
-.study-milkdown .milkdown-toolbar .study-selection-tooltip:hover::after,
-.study-milkdown .milkdown-toolbar .study-selection-tooltip:focus-visible::after,
-.study-milkdown .milkdown-toolbar .study-selection-tooltip:focus-within::after {
-  opacity: 1;
-  transform: translate(-50%, 0);
-}
-
-.light .study-milkdown .milkdown-toolbar .study-selection-tooltip::after {
-  border-color: #d6d3d1;
-  background: rgba(255, 255, 255, 0.99);
-  box-shadow: 0 8px 22px rgba(28, 25, 23, 0.18);
-  color: #292524;
-}
-
 .study-selection-tools-host {
   display: contents;
-}
-
-.study-milkdown .milkdown-toolbar .study-selection-tool {
-  display: grid;
-  place-items: center;
-  color: #404040;
-}
-
-/* Crepe fills every toolbar SVG by default because its own glyphs are solid.
-   Nodus icons are stroked; filling them turns the AI thesaurus into a grey
-   smudge and thickens every prompt mark. Keep our appended controls outlined. */
-.study-milkdown .milkdown-toolbar .study-selection-tool svg,
-.study-milkdown .milkdown-toolbar .study-selection-color svg {
-  fill: none !important;
-  stroke: currentColor;
-  color: currentColor;
-}
-
-.study-milkdown .milkdown-toolbar .study-synonyms-trigger:hover {
-  border-color: rgba(13, 148, 136, 0.42);
-  background: rgba(13, 148, 136, 0.15);
-}
-
-.dark .study-milkdown .milkdown-toolbar .study-selection-tool {
-  color: #e5e5e5;
 }
 
 .study-selection-color {
@@ -1696,8 +1617,14 @@ html.theme-active.light .nodus-tooltip { border-color: var(--theme-border-light)
   background: transparent;
 }
 
-/* The shared left navigation serves every vault type. Its inherited accent is
-   supplied by the app shell from the canonical VAULT_TYPE_COLORS map. */
+/* Header artwork keeps its exact vault variant in the default palette. */
+.nodus-header-logo { display: inline-flex; flex-shrink: 0; }
+.nodus-header-logo > img,
+.nodus-header-logo > svg { width: 100%; height: 100%; }
+.nodus-header-logo-theme { display: none; }
+
+/* The default palette uses the canonical vault accent. Active app themes
+   override it with their mode-specific accent in theme-components.css. */
 .vault-sidebar-scroll {
   scrollbar-width: thin;
   scrollbar-color: var(--vault-accent, #6366f1) transparent;
@@ -3086,6 +3013,15 @@ html.theme-active.light .home-dashboard .study-home-icon {
   font-size: 0.875rem;
   line-height: 1.25rem;
 }
+/* Tailwind's preflight gives every input and select `font-size: 100%` with one element
+   of specificity, which still beats the zero-specificity default above: native fields
+   rendered at 16px beside the 14px model pickers in the same Settings row. Inside a
+   Settings panel this restores the default with exactly that one element of
+   specificity, declared later, so preflight loses and a `text-xs` on the field still wins. */
+:where(.settings-panel) :is(input, select, textarea):where(.input) {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
 .input {
   @apply bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-1.5 outline-none focus:border-indigo-500;
 }
@@ -3788,15 +3724,16 @@ select.input optgroup {
 }
 .library-workspace-tabs {
   height: 2.25rem;
+  min-width: 0;
   border-bottom: 1px solid #262626;
-  background: rgb(10 10 10 / 0.96);
-  padding: 0.25rem 0.5rem;
+  background: #0a0a0a;
+  padding: 0 1.25rem;
 }
 .library-workspace-tabs-scroll {
   display: flex;
-  height: 1.75rem;
+  height: 2.25rem;
   min-width: 0;
-  align-items: stretch;
+  align-items: flex-end;
   gap: 0.25rem;
   overflow-x: auto;
   overflow-y: hidden;
@@ -3805,6 +3742,11 @@ select.input optgroup {
 }
 .library-workspace-tabs-scroll::-webkit-scrollbar {
   display: none;
+}
+.library-workspace-tabs.workspace-tabs-in-header {
+  padding: 0;
+  border-bottom: 0;
+  background: transparent;
 }
 /* The Browser tab strip scrolls for the same reason, and hides its scrollbar for
    the same reason: the arrows at either end are the affordance, and a scrollbar
@@ -3820,27 +3762,28 @@ select.input optgroup {
 }
 .library-workspace-tab {
   display: flex;
-  min-width: 7rem;
-  max-width: 13.5rem;
-  flex: 0 1 13.5rem;
+  height: 2.25rem;
+  min-width: 0;
+  max-width: 23rem;
+  flex: 0 0 auto;
   align-items: center;
   border: 1px solid transparent;
-  border-radius: 0.45rem;
-  color: #a3a3a3;
+  border-bottom: 0;
+  border-radius: 0.5rem 0.5rem 0 0;
+  color: #737373;
 }
 .library-workspace-tab.is-library {
   min-width: auto;
   flex-basis: auto;
 }
 .library-workspace-tab:hover {
-  background: #171717;
-  color: #e5e5e5;
+  background: rgb(23 23 23 / 0.6);
+  color: #d4d4d4;
 }
 .library-workspace-tab.is-active {
   border-color: #404040;
-  background: #262626;
+  background: #171717;
   color: #f5f5f5;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.24);
 }
 .library-workspace-tab-main {
   display: flex;
@@ -3848,33 +3791,32 @@ select.input optgroup {
   height: 100%;
   flex: 1;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0 0.55rem;
+  gap: 0.5rem;
+  padding: 0 0.75rem;
   text-align: left;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
 }
+.library-workspace-tab-main > svg { flex-shrink: 0; }
+.library-workspace-tab-main > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-workspace-tab-main:focus-visible,
+.library-workspace-tab-close:focus-visible { outline: 2px solid var(--a-500, #6366f1); outline-offset: -2px; }
 .library-workspace-tab-close {
   display: grid;
   width: 1.5rem;
   height: 1.5rem;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 0.35rem;
-  color: #737373;
-  opacity: 0;
-}
-.library-workspace-tab:hover .library-workspace-tab-close,
-.library-workspace-tab.is-active .library-workspace-tab-close,
-.library-workspace-tab-close:focus-visible {
-  opacity: 1;
+  margin-right: 0.25rem;
+  border-radius: 0.25rem;
+  color: inherit;
 }
 .library-workspace-tab-close:hover {
-  background: #404040;
+  background: #262626;
   color: #f5f5f5;
 }
 .light .library-workspace-tabs {
-  border-color: #d4d4d4;
-  background: rgb(250 250 250 / 0.97);
+  border-color: #e5e5e5;
+  background: #ffffff;
 }
 .light .library-workspace-tab {
   color: #737373;
@@ -3887,10 +3829,9 @@ select.input optgroup {
   border-color: #d4d4d4;
   background: #ffffff;
   color: #171717;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
 }
 .light .library-workspace-tab-close {
-  color: #a3a3a3;
+  color: inherit;
 }
 .light .library-workspace-tab-close:hover {
   background: #e5e5e5;
@@ -4174,13 +4115,13 @@ html.theme-active.light .library-workspace-tabs {
 }
 html.theme-active.dark .library-workspace-tab { color: var(--theme-text-dark-muted); }
 html.theme-active.dark .library-workspace-tab:hover { background: var(--n-900); color: var(--theme-text-dark); }
-html.theme-active.dark .library-workspace-tab.is-active { border-color: var(--theme-border-dark); background: var(--n-800); color: var(--theme-text-dark); }
-html.theme-active.dark .library-workspace-tab-close { color: var(--theme-text-dark-subtle); }
+html.theme-active.dark .library-workspace-tab.is-active { border-color: var(--n-700); background: var(--n-900); color: var(--theme-text-dark); }
+html.theme-active.dark .library-workspace-tab-close { color: inherit; }
 html.theme-active.dark .library-workspace-tab-close:hover { background: var(--n-700); color: var(--theme-text-dark); }
 html.theme-active.light .library-workspace-tab { color: var(--theme-text-light-muted); }
 html.theme-active.light .library-workspace-tab:hover { background: var(--n-100); color: var(--theme-text-light); }
 html.theme-active.light .library-workspace-tab.is-active { border-color: var(--theme-border-light); background: var(--n-50); color: var(--theme-text-light); }
-html.theme-active.light .library-workspace-tab-close { color: var(--theme-text-light-subtle); }
+html.theme-active.light .library-workspace-tab-close { color: inherit; }
 html.theme-active.light .library-workspace-tab-close:hover { background: var(--n-200); color: var(--theme-text-light); }
 html.theme-active.dark .library-scope-switcher { border-color: var(--theme-border-dark); background: color-mix(in srgb, var(--n-800) 72%, transparent); }
 html.theme-active.light .library-scope-switcher { border-color: var(--theme-border-light); background: var(--n-50); }
@@ -4891,9 +4832,8 @@ body:has(.library-document-reader [data-testid="library-reader-sidebar"]) .app-t
   }
 }
 
-/* Study editor: Milkdown owns document structure; these variables keep visual
+/* Study editor appearance: these variables keep visual
    preferences outside the Markdown so typography never mutates content. */
-.study-editor-shell .study-milkdown { min-height: 100%; background: transparent; }
 .study-editor-model-picker .model-picker-trigger {
   min-height: 2rem;
   border-color: color-mix(in srgb, var(--vault-accent, #0f766e) 52%, #404040);
@@ -4938,89 +4878,7 @@ body:has(.library-document-reader [data-testid="library-reader-sidebar"]) .app-t
   color: color-mix(in srgb, var(--vault-accent, #0f766e) 92%, #0c0a09);
   background: color-mix(in srgb, var(--vault-accent, #0f766e) 15%, white);
 }
-.study-editor-shell .milkdown {
-  position: relative;
-  min-height: 100%;
-  background: transparent;
-  color: inherit;
-  --crepe-color-background: #171717;
-  --crepe-color-on-background: #e5e5e5;
-  --crepe-color-surface: #262626;
-  --crepe-color-surface-low: #1f1f1f;
-  --crepe-color-on-surface: #f5f5f5;
-  --crepe-color-on-surface-variant: #a3a3a3;
-  --crepe-color-outline: #737373;
-  --crepe-color-primary: #2dd4bf;
-  --crepe-color-secondary: #134e4a;
-  --crepe-color-on-secondary: #ccfbf1;
-  --crepe-color-inverse: #f5f5f5;
-  --crepe-color-on-inverse: #171717;
-  --crepe-color-hover: #333333;
-  --crepe-color-selected: #404040;
-  --crepe-color-inline-area: #292524;
-}
-.study-editor-shell .milkdown .milkdown-slash-menu {
-  max-width: min(360px, calc(100vw - 2rem));
-}
-.study-editor-shell .milkdown .ProseMirror {
-  box-sizing: border-box;
-  width: min(100%, var(--study-editor-width));
-  min-height: 100%;
-  margin: 0 auto;
-  padding: 48px var(--study-editor-margin) 120px;
-  font-family: var(--study-editor-font);
-  font-size: var(--study-editor-size);
-  line-height: var(--study-editor-line);
-  text-align: var(--study-editor-align);
-  color: #d4d4d4;
-  outline: none;
-}
-.study-editor-shell .milkdown .ProseMirror p { margin-block: var(--study-editor-spacing); text-indent: var(--study-editor-indent); }
-.study-editor-shell .milkdown .ProseMirror li > p,
-.study-editor-shell .milkdown .ProseMirror blockquote p,
-.study-editor-shell .milkdown .ProseMirror td p { text-indent: 0; }
-.study-editor-shell .milkdown .ProseMirror h1,
-.study-editor-shell .milkdown .ProseMirror h2,
-.study-editor-shell .milkdown .ProseMirror h3,
-.study-editor-shell .milkdown .ProseMirror h4 { scroll-margin-top: 100px; text-align: left; color: #f5f5f5; }
-.study-editor-shell.study-theme-paper .milkdown .ProseMirror {
-  background: #171717;
-  box-shadow: 0 0 0 1px rgb(64 64 64 / 0.55), 0 18px 50px rgb(0 0 0 / 0.22);
-}
-.study-editor-shell.study-theme-soft .milkdown .ProseMirror { background: #13201f; }
-.study-editor-shell.study-theme-contrast .milkdown .ProseMirror { background: #050505; color: #fff; }
-.study-editor-shell .milkdown .ProseMirror table { width: 100%; border-collapse: collapse; }
-.study-editor-shell .milkdown .ProseMirror th,
-.study-editor-shell .milkdown .ProseMirror td { border: 1px solid #404040; padding: 0.45rem 0.6rem; text-align: left; }
-.study-editor-shell .milkdown .ProseMirror blockquote { border-left: 3px solid #0d9488; padding-left: 1rem; color: #a3a3a3; }
-.study-editor-shell .milkdown .ProseMirror pre { overflow-x: auto; border-radius: 0.5rem; background: #0a0a0a; padding: 1rem; text-align: left; }
 .light .study-editor-shell { background: #f5f5f4; }
-.light .study-editor-shell .milkdown {
-  --crepe-color-background: #fffefb;
-  --crepe-color-on-background: #292524;
-  --crepe-color-surface: #ffffff;
-  --crepe-color-surface-low: #f5f5f4;
-  --crepe-color-on-surface: #292524;
-  --crepe-color-on-surface-variant: #57534e;
-  --crepe-color-outline: #78716c;
-  --crepe-color-primary: #0f766e;
-  --crepe-color-secondary: #ccfbf1;
-  --crepe-color-on-secondary: #134e4a;
-  --crepe-color-inverse: #292524;
-  --crepe-color-on-inverse: #fafaf9;
-  --crepe-color-hover: #f0fdfa;
-  --crepe-color-selected: #ccfbf1;
-  --crepe-color-inline-area: #f5f5f4;
-}
-.light .study-editor-shell .milkdown .ProseMirror { color: #292524; }
-.light .study-editor-shell .milkdown .ProseMirror h1,
-.light .study-editor-shell .milkdown .ProseMirror h2,
-.light .study-editor-shell .milkdown .ProseMirror h3,
-.light .study-editor-shell .milkdown .ProseMirror h4 { color: #0c0a09; }
-.light .study-editor-shell.study-theme-paper .milkdown .ProseMirror { background: #fffefb; box-shadow: 0 0 0 1px #e7e5e4, 0 18px 50px rgb(120 113 108 / 0.12); }
-.light .study-editor-shell.study-theme-soft .milkdown .ProseMirror { background: #f0fdfa; }
-.light .study-editor-shell.study-theme-contrast .milkdown .ProseMirror { background: white; color: black; box-shadow: 0 0 0 2px #111827; }
-.light .study-editor-shell .milkdown .ProseMirror pre { background: #f5f5f4; }
 
 /* Cinematic release modal: a compact premiere scene rather than a full-screen tour. */
 .whats-new-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--n-950) 78%, transparent); backdrop-filter: blur(10px); animation: modal-backdrop-in .24s ease-out both; }
@@ -5623,10 +5481,6 @@ html.theme-active .whats-new-scope-tooltip { border-color: var(--wn-border); col
 
 @media print {
   body * { visibility: hidden; }
-  .study-editor-shell .study-milkdown,
-  .study-editor-shell .study-milkdown * { visibility: visible; }
-  .study-editor-shell .study-milkdown { position: fixed; inset: 0; background: white; }
-  .study-editor-shell .milkdown .ProseMirror { color: black; background: white; box-shadow: none; }
 }
 
 /* Testimonios vault → cyan (#0891b2) accent instead of the indigo default. Same remap
@@ -5775,6 +5629,10 @@ html.theme-active .whats-new-scope-tooltip { border-color: var(--wn-border); col
 .light.testimonios .border-indigo-800\/40,
 .light.testimonios .border-indigo-800\/60 { border-color: rgba(8, 145, 178, 0.3); }
 
+/* The header sound balloon floats over whatever view is open (chat bubbles, reader text):
+   the generic 96% light surface let it show through, so it gets an opaque one. */
+.light [data-testid="browser-media-popover"] { background-color: #ffffff; }
+
 /* ── Source citation modal — light theme ───────────────────────────────── */
 /* Dark-by-design sheet; light gets an opaque white surface so it never inherits charcoal. */
 .light [data-testid="source-citation-modal"] {
@@ -5874,39 +5732,26 @@ html.theme-active.light .library-theme :is(.bg-neutral-950\/25, .bg-neutral-950\
 html.theme-active.light .library-theme .text-indigo-100 { color: var(--a-700); }
 
 /* Documentary welcome shares the release premiere palette, with one decision. */
-.research-preparation-cinema { position: fixed; inset: 0; margin: auto; width: min(620px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 0; border: 1px solid rgb(148 163 184 / .24); border-radius: 28px; color: #eef2ff; background: #0b1222; box-shadow: 0 35px 100px rgb(0 0 0 / .55); }
-.research-preparation-cinema::backdrop { background: rgb(3 7 18 / .72); backdrop-filter: blur(10px); }
-.research-preparation-scene { position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: inherit; background: radial-gradient(ellipse at 50% 0, rgb(99 102 241 / .23), transparent 62%), radial-gradient(ellipse at 100% 70%, rgb(45 212 191 / .07), transparent 50%); }
-.research-preparation-scene .whats-new-stars { opacity: .18; mask-image: linear-gradient(black, transparent 60%); }
-.research-preparation-content { position: relative; padding: 38px 42px 30px; text-align: center; }
-.research-preparation-kicker { color: #94a3b8; font-size: 10px; font-weight: 700; letter-spacing: .2em; }
-.research-preparation-mark { width: 80px; height: 72px; margin: 25px auto 18px; color: #99f6e4; filter: drop-shadow(0 0 18px rgb(45 212 191 / .24)); }
-.research-preparation-mark svg { width: 100%; height: 100%; stroke: currentColor; stroke-width: 1.5; }
-.research-preparation-mark rect { fill: #122032; }
-.research-preparation-content h2 { max-width: 460px; margin: 0 auto; font-size: clamp(27px, 4vw, 36px); line-height: 1.12; letter-spacing: -.035em; font-weight: 700; text-wrap: balance; }
-.research-preparation-description { margin: 19px auto 0; max-width: 460px; color: #bdc9dc; font-size: 15px; line-height: 1.65; text-wrap: pretty; }
+.research-preparation-dialog { position: fixed; inset: 0; margin: auto; width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; padding: 0; border: 1px solid var(--app-border); border-radius: 12px; color: var(--app-text); background: var(--app-panel); box-shadow: 0 20px 60px #0004; }
+.research-preparation-dialog::backdrop { background: #0007; backdrop-filter: blur(3px); }
+.research-preparation-heading { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--app-border); }
+.research-preparation-heading > svg { flex-shrink: 0; color: var(--vault-accent, #6366f1); }
+.research-preparation-heading h2 { flex: 1; font-size: 17px; line-height: 1.4; font-weight: 600; }
+.research-preparation-content { padding: 20px; text-align: left; }
+.research-preparation-description { color: var(--app-muted); font-size: 14px; line-height: 1.65; }
 .research-preparation-description-follow { margin-top: 10px; }
-.research-preparation-question { margin-top: 25px; font-size: 15px; font-weight: 600; }
-.research-preparation-model-label { margin-top: 19px; color: #a5b4c8; font-size: 12px; }
-.research-preparation-model { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 100%; margin-top: 9px; padding: 9px 15px; border: 1px solid rgb(94 234 212 / .2); border-radius: 12px; background: rgb(45 212 191 / .06); color: #99f6e4; font-size: 12px; overflow-wrap: anywhere; }
-.research-preparation-model span { color: #b6c5d8; }
+.research-preparation-question { margin-top: 20px; font-size: 14px; font-weight: 600; }
+.research-preparation-model-label { margin-top: 16px; color: var(--app-muted); font-size: 12px; }
+.research-preparation-model { display: inline-flex; flex-wrap: wrap; gap: 8px; max-width: 100%; margin-top: 8px; padding: 8px 12px; border: 1px solid var(--app-border); border-radius: 8px; background: var(--app-canvas); color: var(--app-text); font-size: 12px; overflow-wrap: anywhere; }
+.research-preparation-model span { color: var(--app-muted); }
 .research-preparation-model b { font-weight: 600; }
-.research-preparation-note { margin-top: 13px; color: #94a3b8; font-size: 11px; line-height: 1.6; }
-.research-preparation-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 28px; }
-.research-preparation-actions .btn { min-height: 42px; border-radius: 12px; padding: 10px 19px; font-size: 13px; color: #e2e8f0; border: 1px solid rgb(148 163 184 / .25); background: rgb(148 163 184 / .05); }
-.research-preparation-actions .btn-ghost { border-color: transparent; background: transparent; color: #a5b4c8; }
-.research-preparation-actions .btn-primary { background: #99f6e4; border-color: #99f6e4; color: #0b1222; font-weight: 650; }
-.research-preparation-actions .btn:hover { filter: brightness(1.12); }
-.research-preparation-cinema button:focus-visible { outline: 2px solid #5eead4; outline-offset: 4px; }
-.research-preparation-cinema button:disabled { opacity: .45; cursor: default; }
-.research-preparation-cinema .whats-new-close { z-index: 5; }
+.research-preparation-note { margin-top: 12px; color: var(--app-muted); font-size: 12px; line-height: 1.6; }
+.research-preparation-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.research-preparation-dialog button:focus-visible { outline: 2px solid var(--vault-accent, #6366f1); outline-offset: 3px; }
+.research-preparation-dialog button:disabled { opacity: .5; }
 .research-preparation-manage { width: min(860px, calc(100vw - 32px)); }
-.research-preparation-manage .research-preparation-content { text-align: left; }
-.research-preparation-manage .research-preparation-mark { display: none; }
-.research-preparation-manage h2 { margin: 20px 0; font-size: 26px; }
-@media (max-width: 540px) { .research-preparation-content { padding: 32px 22px 24px; } .research-preparation-mark { margin-top: 18px; } .research-preparation-actions { gap: 6px; } .research-preparation-actions .btn { padding-inline: 14px; } }
-@media (prefers-reduced-motion: reduce) { .research-preparation-cinema *, .research-preparation-cinema::backdrop { animation: none !important; } }
-.reduce-motion .research-preparation-cinema * { animation: none !important; }
+@media (max-width: 540px) { .research-preparation-heading, .research-preparation-content { padding: 16px; } }
+
 
 /* Three-position filter switch: left excludes, centre is off, right includes. */
 .tri-switch { position: relative; display: inline-grid; grid-template-columns: repeat(3, 1fr); flex-shrink: 0; width: 70px; height: 24px; border-radius: 999px; border: 1px solid #3f4149; background: #25262c; }

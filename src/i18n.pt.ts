@@ -1,21 +1,35 @@
+import { RESEARCH_QUEUE_TRANSLATIONS } from './i18n.researchQueue';
+import { EMBEDDING_INDEX_TRANSLATIONS } from './i18n.embeddingIndexes';
+import { RESEARCH_HARNESS_TRANSLATIONS } from './i18n.researchHarness';
+import { EMBEDDING_GEMMA2_TRANSLATIONS } from './i18n.embeddingGemma2';
+import { SIGN_TRANSLATIONS } from './i18n.sign';
+import { CHAT_ORGANIZATION_HELP_TRANSLATIONS } from './i18n.chatOrganizationHelp';
+import { RESEARCH_CHAT_SELECTION_TRANSLATIONS } from './i18n.researchChatSelection';
+import { ACADEMIC_INTERFACE_TRANSLATIONS } from './i18n.academicInterface';
+import { BACKUPS_TRANSLATIONS } from './i18n.backups';
+import { SCRIPTOR_AI_TRANSLATIONS } from './i18n.scriptorAi';
 import { RESEARCH_CHAT_HISTORY_TRANSLATIONS } from './i18n.researchChatHistory';
 import { RESEARCH_ACTIVITY_TRANSLATIONS } from './i18n.researchActivity';
 import { RESEARCH_NOTEBOOK_TRANSLATIONS } from './i18n.researchNotebooks';
 import { CALENDAR_SYNC_TRANSLATIONS } from './i18n.calendarSync';
+import { AGENT_RUNTIME_TRANSLATIONS } from './i18n.agentRuntimes';
 import { ACADEMIC_MANUAL_TRANSLATIONS } from './i18n.academicManual';
 import { STUDY_SOURCE_TRANSLATIONS } from './i18n.studySources';
 import { COMPLETE_GUIDE_TRANSLATIONS } from './i18n.completeGuide';
 import { STUDY_FOCUS_TRANSLATIONS } from './i18n.studyFocus';
 import { STUDY_NOTE_LINKS_TRANSLATIONS } from './i18n.studyNoteLinks';
+import { BOOKMARK_SORT_TRANSLATIONS } from './i18n.bookmarkSort';
 import { CONCILIUM_TRANSLATIONS } from './i18n.concilium';
 import { DRIFT_TRANSLATIONS } from './i18n.drift';
 import { RESEARCH_ATTACHMENT_TRANSLATIONS } from './i18n.researchAttachments';
+import { RESEARCH_VERIFICATION_TRANSLATIONS } from './i18n.researchVerification';
 import { VAULT_FILE_DROP_TRANSLATIONS } from './i18n.vaultFileDrop';
 import { DOCUMENT_SKILLS_TRANSLATIONS } from './i18n.documentSkills';
 import { RESEARCH_PROMPT_TRANSLATIONS } from './i18n.researchPrompts';
 import { RESEARCH_SOURCE_TRANSLATIONS } from './i18n.researchSources';
 import { RESEARCH_REASONING_TRANSLATIONS } from './i18n.researchReasoning';
 import { CHAT_SKILLS_TRANSLATIONS } from './i18n.chatSkills';
+import { NARRATION_TRANSLATIONS } from './i18n.narration';
 import { CAPABILITIES_TRANSLATIONS } from './i18n.capabilities';
 import { STELLAR_GRAPH_TRANSLATIONS } from './i18n.stellarGraph';
 /**
@@ -72,19 +86,26 @@ import { SOURCE_CITATION_TRANSLATIONS } from './i18n.sourceCitation';
 import { DEEP_RESEARCH_APPROACH_TRANSLATIONS } from './i18n.deepResearchApproaches';
 import { DICTIONARY_TRANSLATIONS } from './i18n.dictionary';
 import { DEEP_RESEARCH_VERSION_TRANSLATIONS } from './i18n.deepResearchVersions';
+import { GALLERY_FILTER_TRANSLATIONS } from './i18n.galleryFilters';
 import { DOCUMENT_UNDERSTANDING_TRANSLATIONS } from './i18n.documentUnderstanding';
 import { STALE_MODEL_TRANSLATIONS } from './i18n.staleModels';
+import { SCHEME_DECLUTTER_TRANSLATIONS } from './i18n.schemeDeclutter';
+import { CHEMISTRY_STOCK_TRANSLATIONS } from './i18n.chemistryStock';
 import { DEEP_RESEARCH_QUALITY_TRANSLATIONS } from './i18n.deepResearchQuality';
 import { TEXT_PROVENANCE_TRANSLATIONS } from './i18n.textProvenance';
 import { MODEL_SETTINGS_TRANSLATIONS } from './i18n.modelSettings';
+import { SETTINGS_LAYOUT_TRANSLATIONS } from './i18n.settingsLayout';
 import { ADAPTIVE_CONCURRENCY_TRANSLATIONS } from './i18n.adaptiveConcurrency';
 import { DATABASE_DEEP_RESEARCH_TRANSLATIONS } from './i18n.databaseDeepResearch';
 import { ACADEMIC_TOUR_TRANSLATIONS } from './i18n.academicTour';
 
 export const PT: Record<string, string> = {
+  ...EMBEDDING_INDEX_TRANSLATIONS["pt"],
+  ...BACKUPS_TRANSLATIONS.pt,
   // First, so every entry below wins: the server's English-only keys.
   ...SERVER_ENGLISH_FALLBACKS.pt,
   ...CALENDAR_SYNC_TRANSLATIONS["pt"],
+  ...AGENT_RUNTIME_TRANSLATIONS["pt"],
   ...ACADEMIC_MANUAL_TRANSLATIONS["pt"],
   // Nodus Tools catalogue
   "Navega por la web y guarda fuentes para tu investigación.": "Navega na web e guarda fontes para a tua investigação.",
@@ -97,14 +118,17 @@ export const PT: Record<string, string> = {
   ...RESEARCH_ACTIVITY_TRANSLATIONS["pt"],
   ...RESEARCH_CHAT_HISTORY_TRANSLATIONS["pt"],
   ...RESEARCH_ATTACHMENT_TRANSLATIONS['pt'],
+  ...RESEARCH_VERIFICATION_TRANSLATIONS['pt'],
   ...VAULT_FILE_DROP_TRANSLATIONS['pt'],
   "Research chat": "Research chat",
   "Elige al menos una base de datos.": "Escolha pelo menos uma base de dados.",
   ...RESEARCH_PROMPT_TRANSLATIONS["pt"],
   ...RESEARCH_SOURCE_TRANSLATIONS["pt"],
+  ...RESEARCH_HARNESS_TRANSLATIONS["pt"],
   ...RESEARCH_REASONING_TRANSLATIONS["pt"],
   ...RESEARCH_NOTEBOOK_TRANSLATIONS["pt"],
   ...CHAT_SKILLS_TRANSLATIONS['pt'],
+  ...NARRATION_TRANSLATIONS['pt'],
   ...CAPABILITIES_TRANSLATIONS['pt'],
   ...DOCUMENT_SKILLS_TRANSLATIONS['pt'],
   ...STELLAR_GRAPH_TRANSLATIONS["pt"],
@@ -112,6 +136,8 @@ export const PT: Record<string, string> = {
   ...ADAPTIVE_CONCURRENCY_TRANSLATIONS.pt,
   ...DATABASE_DEEP_RESEARCH_TRANSLATIONS.pt,
   ...MODEL_SETTINGS_TRANSLATIONS.pt,
+  ...SETTINGS_LAYOUT_TRANSLATIONS.pt,
+  ...EMBEDDING_GEMMA2_TRANSLATIONS['pt'],
   ...DICTIONARY_TRANSLATIONS.pt,
   'Tamaño de Nodi': 'Tamanho do Nodi',
   'El 100 % conserva el tamaño original de Nodi y es el máximo. Puedes reducirlo hasta el 40 %.': '100% mantém o tamanho original do Nodi e é o máximo. Pode reduzi-lo até 40%.',
@@ -127,8 +153,11 @@ export const PT: Record<string, string> = {
   ...SOURCE_CITATION_TRANSLATIONS.pt,
   ...DEEP_RESEARCH_APPROACH_TRANSLATIONS.pt,
   ...DEEP_RESEARCH_VERSION_TRANSLATIONS.pt,
+  ...GALLERY_FILTER_TRANSLATIONS.pt,
   ...DOCUMENT_UNDERSTANDING_TRANSLATIONS.pt,
   ...STALE_MODEL_TRANSLATIONS.pt,
+  ...SCHEME_DECLUTTER_TRANSLATIONS.pt,
+  ...CHEMISTRY_STOCK_TRANSLATIONS.pt,
   ...DEEP_RESEARCH_QUALITY_TRANSLATIONS.pt,
   ...TEXT_PROVENANCE_TRANSLATIONS.pt,
   ...LIBRARY_BIBLIOGRAPHY_TRANSLATIONS.pt,
@@ -162,6 +191,8 @@ export const PT: Record<string, string> = {
   ...COMPLETE_GUIDE_TRANSLATIONS["pt"],
   ...STUDY_FOCUS_TRANSLATIONS["pt"],
   ...STUDY_NOTE_LINKS_TRANSLATIONS["pt"],
+  ...BOOKMARK_SORT_TRANSLATIONS["pt"],
+  ...SCRIPTOR_AI_TRANSLATIONS["pt"],
   ...STUDY_IMPROVE_TRANSLATIONS.pt,
   ...WORKSPACE_TRANSLATIONS.pt,
   "Lo que cuenta el mapa": "O que conta o mapa",
@@ -1320,7 +1351,7 @@ export const PT: Record<string, string> = {
   'Nodus Tools': 'Nodus Tools',
   'Herramientas prácticas y local-first para convertir archivos y procesar documentos, integradas en Nodus.':
     'Ferramentas práticas e local-first para converter ficheiros e processar documentos, integradas no Nodus.',
-  'Nodus PDF Presenter': 'Nodus PDF Presenter',
+  'Nodus Presenter': 'Nodus Presenter',
   'Presentar archivos PDF y presentaciones externas con vista del presentador, control remoto desde el móvil, notas del orador y herramientas de anotación en directo.':
     'Apresentar ficheiros PDF e apresentações externas com vista de apresentador, controlo remoto a partir do telemóvel, notas do orador e ferramentas de anotação em direto.',
   'Nodus OCR Workspace': 'Nodus OCR Workspace',
@@ -2976,8 +3007,8 @@ export const PT: Record<string, string> = {
   'Buscar dentro del documento': 'Pesquisar neste documento',
   'Preparando el índice de búsqueda…': 'A preparar o índice de pesquisa…',
   'Este archivo no contiene una capa de texto que Nodus pueda buscar.': 'Este ficheiro não contém uma camada de texto pesquisável pelo Nodus.',
-  'Este PDF no contiene texto buscable. Abre el Markdown limpio para consultar el OCR.': 'Este PDF não contém texto pesquisável. Abra o Markdown limpo para consultar o texto OCR.',
-  'Las imágenes no contienen una capa textual. Usa el Markdown limpio para buscar el OCR.': 'As imagens não contêm uma camada de texto. Use o Markdown limpo para pesquisar o OCR.',
+  'Este PDF no contiene texto buscable. Abre el Markdown para consultar el OCR.': 'Este PDF não contém texto pesquisável. Abra o Markdown para consultar o texto OCR.',
+  'Las imágenes no contienen una capa textual. Usa el Markdown para buscar el OCR.': 'As imagens não contêm uma camada de texto. Use o Markdown para pesquisar o OCR.',
   'Coincidencia {current} de {total}': 'Correspondência {current} de {total}',
   'No se encontró ese texto': 'Esse texto não foi encontrado',
   'Ir a la coincidencia anterior': 'Ir para a correspondência anterior',
@@ -5834,6 +5865,7 @@ export const PT: Record<string, string> = {
   'Si cambias de modelo de embeddings, los vectores anteriores no servirán con el nuevo modelo y tendrás que reindexar.':
     'Se mudar de modelo de embeddings, os vetores anteriores não funcionarão com o novo modelo e terá de reindexar.',
   'Embeddings multilingües de alta calidad para corpus amplios.': 'Embeddings multilingues de alta qualidade para corpus extensos.',
+  'Embeddings multilingües de Microsoft con instrucción de búsqueda. La mejor puntuación MTEB multilingüe de los modelos locales; reserva unos 6,5 GB de memoria de GPU, así que conviene un equipo con 16 GB o más.': 'Embeddings multilingues da Microsoft com instrução de pesquisa. A melhor pontuação MTEB multilingue entre os modelos locais; reserva cerca de 6,5 GB de memória da GPU, pelo que se recomenda um computador com 16 GB ou mais.',
   'Embeddings multilingües con contexto largo y buen equilibrio entre precisión y memoria.':
     'Embeddings multilingues com contexto longo e um bom equilíbrio entre precisão e memória.',
   'Opción ligera y rápida para equipos con menos memoria.': 'Opção leve e rápida para computadores com menos memória.',
@@ -8164,7 +8196,7 @@ export const PT: Record<string, string> = {
   "Activar Global": "Ativar Global",
   "Configura las copias de seguridad para activar Global.": "Configure as cópias de segurança para ativar o âmbito Global.",
   "Biblioteca global activada.": "Biblioteca global ativada.",
-  "Global reúne originales y Markdown limpio para todos tus vaults.": "O âmbito Global reúne originais e Markdown limpo para todos os cofres.",
+  "Global reúne originales y Markdown para todos tus vaults.": "O âmbito Global reúne originais e Markdown para todos os cofres.",
   "Este vault conserva colecciones, scans, resúmenes, embeddings y análisis existentes.": "Este cofre conserva coleções, análises, resumos, embeddings e resultados existentes.",
   "Activa la Biblioteca global cuando quieras; este vault no cambiará.": "Ative a Biblioteca global quando quiser; este cofre não será alterado.",
   "{n} documento(s) añadidos; {reused} componente(s) reutilizados con huellas exactas.": "{n} documento(s) adicionado(s); {reused} componente(s) reutilizado(s) com impressões digitais exatas.",
@@ -8811,4 +8843,53 @@ export const PT: Record<string, string> = {
   "Sent": "Enviado",
   ...CONCILIUM_TRANSLATIONS['pt'],
   ...DRIFT_TRANSLATIONS['pt'],
+  // PDF Presenter — editorial workspace
+  "Organiza tus diapositivas. Comparte tus ideas.": "Organize os seus diapositivos. Partilhe as suas ideias.",
+  "Buscar por número o notas…": "Pesquisar por número ou notas…",
+
+  // PDF Presenter folder navigation.
+  "Editar carpeta": "Editar pasta",
+  "Carpeta principal": "Pasta principal",
+  "Biblioteca principal": "Biblioteca principal",
+  "Color personalizado": "Cor personalizada",
+  "Ruta de carpetas": "Caminho das pastas",
+  "Opciones de la carpeta {name}": "Opções da pasta {name}",
+  "No se pudo eliminar la carpeta.": "Não foi possível eliminar a pasta.",
+  "Se eliminará la carpeta «{name}» y sus subcarpetas ({n}).": "A pasta «{name}» e as suas subpastas ({n}) serão eliminadas.",
+  "¿Qué quieres hacer con sus {n} presentaciones?": "O que pretende fazer com as suas {n} apresentações?",
+  "Conservar presentaciones": "Manter apresentações",
+  "Moverlas a la biblioteca principal, con sus notas y vídeos.": "Movê-las para a biblioteca principal, com as suas notas e vídeos.",
+  "Eliminar también las presentaciones": "Eliminar também as apresentações",
+  "Se eliminarán sus copias de la biblioteca. Los archivos originales se conservarán.": "As cópias na biblioteca serão eliminadas. Os ficheiros originais serão mantidos.",
+  "Eliminar carpeta y presentaciones": "Eliminar pasta e apresentações",
+  "Ciencia": "Ciência",
+  "Arte": "Arte",
+  "Favoritos": "Favoritos",
+  "Conexión móvil": "Ligação móvel",
+  "Navegador web": "Navegador web",
+  "App iPhone–iPad": "App iPhone–iPad",
+  "Escanea desde Nodus Presenter. Mantén Wi-Fi encendido en el Mac y el móvil; no necesitas el router de la sala.": "Leia com Nodus Presenter. Mantenha o Wi-Fi ligado no Mac e no dispositivo móvel; não precisa do router da sala.",
+  "El enlace nativo no está disponible. Requiere macOS y permiso de red local.": "A ligação nativa não está disponível. Requer macOS e permissão de rede local.",
+  "Escanea desde Nodus Presenter. Conecta el ordenador y el móvil a la misma red local.": "Lê com o Nodus Presenter. Liga o computador e o telemóvel à mesma rede local.",
+  "El enlace de la app no está disponible. Comprueba la conexión de red e inicia de nuevo la presentación.": "A ligação à app não está disponível. Verifica a ligação de rede e reinicia a apresentação.",
+  // Live local dictation in Scriptor.
+  "No se pudo iniciar el micrófono.": "Não foi possível iniciar o microfone.",
+  "Dictado pausado para terminar el audio pendiente. Reanuda cuando esté listo.": "Ditado em pausa para terminar o áudio pendente. Retome quando estiver pronto.",
+  "Preparando dictado…": "A preparar o ditado…",
+  "Cancelar dictado": "Cancelar ditado",
+  "Dictado en directo · Local": "Ditado em direto · Local",
+  "Escuchando…": "A ouvir…",
+  "El texto se inserta automáticamente en el cursor.": "O texto é inserido automaticamente na posição do cursor.",
+  "Opciones de dictado": "Opções de ditado",
+  "Descarga un modelo local de transcripción en Ajustes → Modelos IA para dictar.": "Transfira um modelo local de transcrição em Definições → Modelos de IA para ditar.",
+  "Audio pendiente": "Áudio pendente",
+  "Modelo local": "Modelo local",
+  "Detener dictado": "Parar ditado",
+  ...ACADEMIC_INTERFACE_TRANSLATIONS["pt"],
+  ...CHAT_ORGANIZATION_HELP_TRANSLATIONS["pt"],
+  ...RESEARCH_CHAT_SELECTION_TRANSLATIONS["pt"],
 };
+
+Object.assign(PT, SIGN_TRANSLATIONS['pt']);
+
+Object.assign(PT, RESEARCH_QUEUE_TRANSLATIONS['pt']);

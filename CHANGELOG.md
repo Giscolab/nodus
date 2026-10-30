@@ -1,5 +1,388 @@
 # Changelog
 
+## 5.16.1 — 2026-10-25
+
+### Enhancements
+- Organize Settings with grouped side navigation and an AI models essentials card. Separate model types into tabs, remove the basic/advanced switch and preserve independent model choices when changing the main model.
+- Open Ideas and Authors filters in floating panels without moving the catalog. Close them from the trigger, an outside click or Escape.
+
+## 5.16.0 — 2026-10-24
+
+### New features
+- Highlight the sentence and the word being read aloud in Deep Research, Research chat, the Dictionary, Nodus Scriptor, study documents and Immersion. The view follows the reading, a button returns to the narration after manual scrolling, and ⌥/Alt + click on a word jumps the audio to it. The Library's Markdown reader can read aloud from the visible block or the selection. Settings choose word and sentence, sentence only or no highlight, and a colour fill or underline.
+- Offer three local embedding models in the Nodus add-on for Zotero: Multilingual E5 small, Granite 97M Multilingual R2 and Harrier 270M. Only the chosen model is downloaded, Granite is the default without an explicit choice, and switching prepares the new vectors before activation while keeping the current model on cancellation or failure.
+
+### Enhancements
+- Prepare the local model when the Zotero add-on starts, and prepare the text and vectors of an attachment opened in the reader in the background, without opening Settings.
+- Sync linked Zotero collections after the window opens and when an academic vault opens, including in manual sync mode, and add a manual Zotero sync button with compact icons to This vault in the Library.
+- Widen the Zotero add-on sidebar resize handle from 1 to 6 pixels, with a resize cursor and hover feedback.
+- Call the Library's generated reading version Markdown instead of clean version, with Open Markdown and Rebuild Markdown actions, also in the Nodus Server web app.
+
+### Fixes
+- Keep one conversation per item in the Zotero add-on and restore it when returning to the item. Messages are saved before the response starts.
+- Keep the macOS window responsive while syncing Zotero collections during idea extraction, and recover saved summaries left marked as pending.
+- Show Nodus Sign's specific error sentences, such as an invalid page range, instead of the generic failure message.
+- Update adm-zip to 0.6.1, which fixes seven published security advisories.
+
+## 5.15.4 — 2026-10-23
+
+### Fixes
+- Show voice engine installation phases, progress, cancellation and errors in the Listen panel. Model downloads show activity from the click, opening the panel refreshes the status, and models that require accepting terms open the model section in Settings.
+- Make the Listen button in the Nodus Scriptor header only open or close the panel. Playback and audio generation start from their controls, including when reading selected text.
+
+## 5.15.3 — 2026-10-22
+
+### New features
+- Pocket TTS joins the narration engines. It is Kyutai’s official implementation for the CPU, with six-layer models and a default voice in seven languages. It can clone a voice from a recording of up to twelve seconds without a transcript, models download on demand, downloads can be paused and resumed, and the audio is generated on your computer. It is available on Apple silicon, Windows and Linux.
+
+### Fixes
+- Configure Recovery opens the wizard when requested from Settings or the update notice, including in an academic vault whose tutorial invitations are still pending.
+- Show the last automatic backup result in the interface language, including after changing language.
+- Publish Nodus Support for Windows and Linux again. The Windows installer keeps its signature check without inheriting incompatible PowerShell module paths, and the Linux packages use the names the app already accepts.
+
+## 5.15.2 — 2026-10-22
+
+### Enhancements
+- Remember voice picker filters, follow the model and interface language by default, show the active voice and use an icon button for model downloads.
+
+### Fixes
+- Regenerate Ming fragments in smaller parts when the reference context would truncate speech.
+- Toggle saved voice previews between play and pause and resume from the same position.
+
+## 5.15.1 — 2026-10-21
+
+### Fixes
+
+- The narration controls fit inside the header sound popover. With a long title, such as a Research Chat question, the close button, the progress bar, the speed and Free memory were cut off. The title is now shortened, and the popover has an opaque background in light mode.
+
+- The Listen button in the Research Chat header only opens the Listen balloon. It no longer starts playing or generating audio on its own. It also no longer shows a progress ring on the button. Progress and controls appear inside the balloon.
+
+## 5.15.0 — 2026-10-21
+
+### New features
+
+- Nodus Support is a separate application for when Nodus does not start or shows errors. You install it only if you need it, from Settings → Help, and it is not part of the Nodus installer. It checks your profiles and vaults on isolated copies, creates protection copies of your data and verifies them. It also prepares a bug report that you review before you share it.
+
+- Nodus can read text aloud with three local engines: Ming 3.0, which can clone voices, Phonon and Kokoro. The Listen button is on Research Chat answers, in Immersion, Deep Research, the Dictionary and the Nodus Scriptor header. In Scriptor you can also listen to only the selected text. The voice is generated on your computer. Engines, models and voices are installed and managed in Settings → Voice and narration.
+
+### Enhancements
+
+- Research Chat has a Context button next to web search. One click pauses indexed texts, ideas, full documents and the web, and the AI answers from its general knowledge. Another click restores exactly the previous selection. The Context → Focus panel also has a Select all switch for the four layers.
+
+- Research Chat answers have a Copy without references action next to Markdown copy. It removes parenthetical and Nodus citations and keeps explanatory asides in the text. When you drag a conversation, the destination folder or project is highlighted with a clearer border and background.
+
+- Cmd+F on macOS or Ctrl+F on Windows and Linux searches the open Research Chat conversation and the visible tab of the citation workspace. The citation workspace now fits its content and takes less space. Its passage headers link to the work and the author, and opening the source in Zotero keeps the cited page and attachment.
+
+- Harrier 0.6B is a new built-in embedding model that runs on your computer. It downloads from Settings like the other local models. It accepts texts of up to 8,000 tokens and is recommended with 16 GB of memory.
+
+- Settings offers three local models to reorder search results: BGE Reranker v2 M3 in a light and a full version, and Qwen3 Reranker 0.6B. Each one shows its size and license, and can be downloaded, selected and deleted. The model you already had installed is detected and is not downloaded again.
+
+- BGE-M3 and GTE Multilingual Base have a new profile that processes texts the way these models were trained, which gives better search results. Existing indexes keep working without a rebuild. A note on the index offers to prepare the new version, and both profiles share the same model download.
+
+- Answers about chemical synthesis routes in Research Chat remember the data of each structure already analyzed. Later turns of the conversation do not calculate it again, so long routes answer faster.
+
+### Fixes
+
+- Research Chat answers no longer fail while the library is being indexed at the same time. Nodus checks which documents the answer may read and with which permissions, and no longer cancels it because the extracted text of a document changed. If a document enters or leaves the scope, or its permissions change, the answer still stops.
+
+- When you load a provider’s models in Settings, Nodus first saves the API key you just typed. If it cannot be saved, the typed key is kept, the error is shown and the provider is not contacted. Custom providers, Ollama and LM Studio also save their credentials before loading models or testing the connection. A rejected key is now reported separately from a connection failure.
+
+- Remote model catalogs and downloads of built-in models and runtimes now use the proxy and certificates configured in the system. They now also work on university and company networks that require a proxy. Direct connections to Ollama and LM Studio do not change.
+
+- The Ready and Incomplete filters in the Library show the correct works again in vaults with indexed passages. Since 5.14.0 they were swapped: Ready showed no works and Incomplete showed all of them.
+
+## 5.14.1 — 2026-10-19
+
+### Fixes
+
+- Vaults that were already indexed keep their semantic search after updating to 5.14. Version 5.14.0 left them without an active embedding index and asked for a full rebuild. Nodus now reuses the stored embeddings when they come from the model the vault still uses, with no new requests to the provider. Only texts that changed after they were indexed appear as pending.
+
+- Settings no longer freezes Nodus while it shows the embedding indexes. The list reads the vault in short steps and reuses the result until the content changes. While an index is being prepared, the list is no longer reloaded after every batch.
+
+## 5.14.0 — 2026-10-19
+
+### New features
+
+- Each vault can keep several embedding indexes, one for each model you use. When you select another embedding model in Settings, Nodus shows how much content can be reused and how much is pending before you choose Prepare and activate. The current index stays active while the new one is prepared. Switching back to a saved index activates it without generating the embeddings again.
+
+- Compare A/B retrieval runs the same test questions against two saved indexes without activating them. It calculates quality metrics only when you enter the complete list of relevant results for a question. The comparison can be exported.
+
+- Research Chat has a request queue. Press Cmd+Enter on macOS or Ctrl+Enter on Windows and Linux to add a request to the queue. Each request keeps the model, sources and options selected when you added it. Requests run in order, and you can reorder, edit or delete them, or pause the queue.
+
+### Enhancements
+
+- Search in indexed texts can reorder its results with an optional local model. The model requires a separate download and does not change the embeddings. If reordering fails or takes too long, the original order is kept.
+
+- Indexes for E5, Nomic, Gemini and EmbeddingGemma 2 models prepare questions and documents in the format each model expects. The model input profile also accepts custom prefixes. Existing indexes keep the format they were created with.
+
+- The Web search and Verify sources controls in Research Chat are now icon buttons with tooltips. This leaves more space for writing the request.
+
+### Fixes
+
+- Indexing a new document no longer freezes Nodus in vaults with many indexed texts. Earlier documents remain searchable while it is added.
+
+- Changing the sources of an existing Research Chat conversation keeps its earlier messages. Follow-up requests such as asking to review the answer again keep the original question and topic.
+
+- Idea search in Research Chat returns valid ideas again when the vault contains current and older indexed versions of the same works. The context summary lists only the idea and passage sections that were sent to the model.
+
+- Conversation titles in the Research Chat sidebar use the full width of the row. The pin and more actions buttons appear over the right edge on hover or keyboard focus.
+
+- Nodus requests embeddings from OpenAI-compatible providers explicitly as decimal numbers. This prevents vectors from being decoded incorrectly.
+
+## 5.13.0 — 2026-10-18
+
+### New features
+
+- Nodus Research Harness is the new shared engine for Research Chat, Deep Research, Immersion and Dictionary. It organizes the investigation, uses the enabled sources and options, asks related questions and connects findings to the original question. It can stop searching when further work adds little useful information. The activity panel lets you inspect tasks and pause, continue or cancel the investigation.
+
+- Fast and Expanded modes control research breadth. Fast focuses searches and readings. Expanded gives more room to explore related questions and compare sources. Chat and Dictionary start in Fast, while Deep Research and Immersion start in Expanded. Each tool remembers your choice independently of the model’s thinking level.
+
+- EmbeddingGemma 2 is an additional experimental local model for semantic text search. Its 512 and 256 dimension profiles share one optional download and run on the CPU. Switching profiles requires preparing compatible indexes. It is unavailable on Intel Macs. Existing default models are preserved.
+
+### Enhancements
+
+- Chat distinguishes research requests from translations, paraphrases and text edits that do not require source lookup. A later explicit request to search the sources starts a lookup even if the previous answer did not need one.
+
+- Chat answers use connected prose, with headings only when requested. Notices about source availability open from a separate alert button and stay outside copied text.
+
+- Documentary retrieval preserves prose after PDF tables that continue across pages and keeps relevant passages when fitting the model context. Verify sources improves checks of citations, coverage and calculations based on the sources. It remains optional and off by default.
+
+### Fixes
+
+- Scriptor’s citation picker can be closed while it searches for sources. Searches read the necessary metadata and load details for selected sources. Focus and bibliographic edits are preserved, and stale responses cannot replace a newer search.
+
+- Scriptor asks for confirmation before deleting uploaded or AI-generated images and supports undoing deletion. Large images are stored as vault assets to avoid size errors when saving documents. Previews and downloads remain available.
+
+- Graph research actions show one translated tooltip on hover or keyboard focus, without repeating the same text.
+
+- Synthesis route compatibility checks also recognize consumed reagents listed as reactants. This allows incompatibilities to be detected even when the reagent is absent from the conditions or agent list.
+
+- Text generation has improved compatibility with OpenRouter models that do not support reasoning. Optional visual planning accepts lists of proposals, including an empty list when no figure is useful.
+
+## 5.12.1 — 2026-10-17
+
+### Enhancements
+
+- In Research Chat, Indexed texts no longer switches off the other sources in the context panel. It is now one more switch and combines with Ideas, Full documents and Web search. Documents is renamed Full documents and reads the works in depth from the indexed texts. Turning it on therefore turns on Indexed texts too. With only Indexed texts on and the web off, the answer comes only from the passages found.
+
+- In the Simple interface, a new Research Chat conversation starts with only Indexed texts on and the web off. This interface does not extract ideas, so the assistant answers from the passages of your sources. You can turn on the other sources in the context panel.
+
+### Fixes
+
+- Synthesis routes use the forward step search with precedents again. Since 14 October every call to it failed, which looked as if no precedent existed. The check of each step also names the fault more precisely. An inverted stereocentre is no longer reported as an unbalanced step.
+
+## 5.12.0 — 2026-10-17
+
+### New features
+
+- Research Chat has a new Indexed texts mode in the Focus tab of the context panel. With it on, the assistant searches the indexed text of your sources once and answers only with the passages it finds. It does not use ideas, document profiles, the research agent or the web, and it cites a passage for every claim. Short follow-up questions keep the topic of the previous question. When you turn it off, the layers you had chosen come back.
+
+### Enhancements
+
+- Research Chat no longer locks while it writes an answer. You can open other chats, start a new one and send messages in several chats at once. A dot in the history marks the chats that are still answering. Stop generating only stops the chat on screen, and deleting a chat that is answering stops its answer. The same applies to the chats in study, worldbuilding and database vaults.
+
+## 5.11.1 — 2026-10-16
+
+### Enhancements
+
+- In Nodus Sign you can draw your handwritten signature with a finger on the trackpad. On macOS the drawing area shows the trackpad to scale, so its edges are the real limits and no stroke is cut off. On Windows and Linux the cursor is locked and draws while you hold the trackpad down. Before saving, you can crop the signature with an adjustable frame. The editor tools are now icons with tooltips.
+
+- In Nodus Sign you move signatures on the page with the mouse and resize them from eight handles. Corners keep the proportions, and Shift frees them. Edges stretch one side. The exact percentages are still available under Precise adjustment. A certificate signature no longer has to show anything on the document. If you turn off its appearance, the PDF looks unchanged and PDF readers show the signature in their signatures panel.
+
+### Fixes
+
+- The Nodus Sign signing engine now installs on macOS. In 5.11.0 the installation always ended with a connection error, although the download worked. Nodus now uses a compatible Python on your computer or downloads its own.
+
+- Plugins that use Python work even when the default python3 is newer than they support. Nodus picks another installed version the plugin supports. If there is none, the message lists the supported versions and the ones found.
+
+## 5.11.0 — 2026-10-16
+
+### New features
+
+- Nodus Sign is a new tool in Nodus Tools for signing PDFs on your computer. Draw or import handwritten signatures, keep them in a library, and place them with exact position, size and pages. You can also sign with a PKCS#12 certificate. Certificate signing uses an optional engine that Nodus installs with one button. The original PDF is never changed, and the signed copy can be saved to your vault.
+
+### Enhancements
+
+- The Chrome connector and Nodus Browser let you review each captured reference separately, with its own metadata, tags, files and snapshot. Captures continue when the Chrome popup is closed and resume after a restart. A progress and history list shows each save, with retry for failed items and links to saved references.
+
+### Fixes
+
+- When a visual resource fails to generate in the document reader, its controls keep the same size as the rest of the toolbar. The full error opens in a dialog. Tooltips appear again when you switch to the keyboard after a click.
+
+- Nodus Focus uses the selected application palette in the dashboard, timer, header, focus rail, notices and dialogs. Primary buttons follow the palette in their normal and hover states.
+
+- Closing the Chrome popup during pairing or capture no longer loses the connection or the transfer. Saving keeps the metadata you reviewed. Different references found on the same results page are no longer merged into one.
+
+## 5.10.0 — 2026-10-14
+
+### New features
+
+- Academic vaults offer Simple, Intermediate, Advanced and Custom interface profiles. Choose which sidebar sections and header buttons appear, and change the profile, theme, language and Nodi options from the Interface selector. New local academic vaults start in Simple. Existing vaults keep their layout, and switching profiles preserves your saved custom layout and research.
+
+- Academic vaults include 12 resumable lessons in the real workspace. Prepare sources, ask questions and check citations, extract ideas and inspect their evidence, or practice research tools and Scriptor. Each lesson checks the results of your actions. Initial setup configures chat and embeddings separately from idea analysis.
+
+- Bookmarks is the default home page in Nodus Browser. Mark favorites, show only favorites, sort by date or name, put folders first, and switch between cards and a list. Custom home addresses and blank-page settings are preserved.
+
+### Enhancements
+
+- Report galleries support several values in each filter, show option counts and let you clear all filters at once. Deep Research adds approach and language filters where applicable. Immersion adds progress and language filters.
+
+- Research, writing and browser workspaces use consistent tabs with visible close buttons and horizontal scrolling. Scriptor tabs sit above the formatting toolbar, and the active tab stays in view.
+
+- Desktop installation packages are smaller. Codex and GitHub Copilot engines download when first needed, with progress and retry controls in the queue. Existing users of these providers receive the engines automatically after updating.
+
+- Startup no longer shows the old Presenter, mobile preview, integrations, Toolkit beta or tutorial catalogue announcements. Current tutorials remain available.
+
+- Reaction index preparation supports forward reaction templates and externally supplied atom mappings. For large synthesis targets, compatible Chemistry Studio versions can search evidence for individual building blocks. If decomposition is unavailable or incomplete, searches use the whole target.
+
+- Research answers can use the full output limits of GPT-6.1 Sol and Claude Fable 5.1, allowing longer responses.
+
+- Deep Research keeps reader actions in fixed positions when you hover or use the keyboard. Audio narration opens from the reader toolbar, with generation, cancellation and playback controls in a dialog.
+
+### Fixes
+
+- New citations and generated reports use the content language. Report and exam exports and portable backup text use the interface language. Previously saved content keeps its original text.
+
+- Japanese and Korean labels now distinguish read status, reading progress and actions correctly in the desktop app and Server web.
+
+- Research retries a truncated answer with a lower supported reasoning level when available. It also allows more time for models that think without streaming text before treating the response as stalled.
+
+- Synthesis route checks compare molecular connectivity instead of the order of atoms in SMILES text. Equivalent structures no longer cause false errors, while connectivity and regiochemistry errors still fail the check.
+
+- Nodus Server in basic mode starts correctly from the installed desktop app. Its web interface, shared vaults and published links are available.
+
+- Nodus Scriptor’s 13 built-in improvement styles show translated names, descriptions and instructions in every interface language. Selection and advanced formatting controls have consistent sizes.
+
+- Dictionary entries use the model, reasoning and web search settings from the main toolbar. Duplicate controls and empty progress rows have been removed.
+
+- The sidebar scrollbar and header logo follow the selected color palette in light and dark modes, including custom themes and system theme changes.
+
+## 5.9.1 — 2026-10-13
+
+### Fixes
+
+- Nodus Scriptor now uses the latest text selected while the Polish panel is open. Changing the selection clears the previous proposal and cancels any pending request, preserving the correct replacement range, formatting and undo.
+
+### Enhancements
+
+- PDF Presenter is now named Nodus Presenter throughout the current interface, web remote and documentation. The in-app What’s New modal reuses the 5.9.0 highlights in all twelve languages.
+
+## 5.9.0 — 2026-10-12
+
+### New features
+
+- Backups, in Tools, exports the content you choose from one or more vaults as Markdown, CSV or JSON, to a folder or a ZIP file. You can select individual records, include the library documents linked to those vaults or the whole library, and save the selection for later use. Research can be organized by works, authors or ideas. The complete .nodus backup remains available in the same tool. Available on Desktop.
+
+- Nodus Scriptor supports dictation with installed local transcription models. Words appear in the document as you speak, as ordinary text you can edit and undo. You can pause, resume or stop dictation. Audio is not sent to any external service. Available on Desktop.
+
+- When you select text in Nodus Scriptor, you can ask the AI to improve it using a style from your prompt library, the model you choose and optional instructions. The proposal appears in the text as it is generated, with added and removed words marked. The document changes only if you accept the whole proposal, and you can undo it in one step. Available on Desktop.
+
+- Nodus Scriptor can create images with AI from a description. Choose the image model, review the preview and insert the image at the cursor position. You can cancel generation and save favorite models. Available on Desktop.
+
+### Enhancements
+
+- Research Chat is faster in large libraries. Searching documents, collecting evidence for ideas and syntheses, and checking the Zotero scope take less time. Long conversations stay responsive while an answer is being written.
+
+- The graph loads the complete map of large libraries much faster. Ideas and their connections appear in seconds instead of minutes.
+
+- Nodus Scriptor uses the colors of the active vault or the selected theme in light and dark modes. Dictation settings and additional formatting options open in separate menus, and the formatting bar no longer needs scrolling.
+
+- Nodus Cloud deployments on Cloudflare limit daily and monthly synchronization usage. When a limit is reached, synchronization pauses and Nodus shows a notice. Importing large vault copies no longer blocks the app, and connected copies can synchronize with each other while the publishing device is offline. Requires updating the service on Cloudflare.
+
+### Fixes
+
+- Opening an attachment or preserved source that is an executable file shows it in the file manager instead of running it. The local network PIN for PDF Presenter and shared apps limits attempts. Browser downloads no longer overwrite existing files. The HTML of imported publications is cleaned before it is displayed and keeps mathematical formulas.
+
+- Backups larger than 4 GiB are created correctly. Synchronization keeps changes made during an upload, does not restore items deleted in another copy and includes all Nodi notes. If the first download of a connected vault fails, the connection is undone.
+
+- Changes typed just before leaving a page are saved. Closing a recording while microphone permission is being requested releases the microphone. Notion imports with links to files outside the ZIP complete with a notice. GEDCOM export keeps both parents when neither is recorded as male.
+
+- In synthesis route checks, each step shows a result consistent with the route verdict, including continuity errors. Stopping the check keeps the answer you were viewing, and requests to search the web are followed.
+
+- Cancelling a call to a plugin tool stops the processes it started. A timeout in one call no longer makes other calls fail, and removing or updating a plugin stops its running processes.
+
+- Works whose document index completes after an error no longer appear under “With errors”. An unreadable page no longer cancels OCR or causes a whole PDF to be rejected. Duplicate detection checks every record, not only the first 5,000, and ISBNs separated by spaces are read individually.
+
+## 5.8.1 — 2026-10-09
+
+### New features
+
+- Nodus Scriptor, in Tools, lets you write and organize documents with rich text, tables, images and formulas. Insert sources and ideas with [[, add citations, bibliographies and notes, assemble chapters and export to Word, PDF or LaTeX. It includes version history, fullscreen writing and AI text improvements that you can cancel or undo. Available on Desktop and Server web.
+
+### Enhancements
+
+- Chemistry Studio templates take each scheme’s reagents into account. Index preparation validates atom mapping and lets you exclude schemes with mechanism or stereochemistry problems.
+
+- Research Chat adjusts response length to the available context space and the model’s limits. Supported models can produce longer answers and synthesis routes with fewer interruptions caused by the output limit.
+
+### Fixes
+
+- Synthesis route checks use the substances declared in the text and retain repeated salt components. They identify steps that could not be checked and show where structures came from. A route diagram is generated only when the route passes its checks.
+
+- Results saved by plugins record the version of the content that produced them. Replacing an installed package no longer makes a result report an older plugin version.
+
+- Research Chat retrieves passages correctly in large libraries and with lengthy instructions. Saved citations keep resolving and new citations are no longer blocked by the previous limit. The context includes works that contributed to the query without adding unrelated titles.
+
+- The Nodus add-on for Zotero can save API keys and connection credentials in Zotero 10 again. It uses Zotero’s password manager and confirms that credentials have been saved before continuing.
+
+- Installation packages include only files from the current build. Copies from earlier builds are removed to reduce the application’s size.
+
+## 5.8.0 — 2026-10-03
+
+### New features
+
+- Nodus Scriptor, in Tools, lets you write and organize documents with rich text, tables, images and formulas. Insert sources and ideas with [[, add citations, bibliographies and notes, assemble chapters and export to Word, PDF or LaTeX. It includes version history, fullscreen writing and AI text improvements that you can cancel or undo. Available on Desktop and Server web.
+
+### Enhancements
+
+- Nodus Focus is available in Tools for all nine vaults. Switching vaults does not interrupt the timer. Navigation adapts to each vault and the shared history records time spent in each one. Previous histories are retained and each vault’s shortcuts can be customized.
+
+- PDF Presenter adds an alternative native connection for the mobile app on macOS. Enable it by starting Nodus with NODUS_PRESENTER_TRANSPORT=multipeer. This connection improves the responsiveness of the pointer, highlighting and drawing.
+
+- Synthesis queries with Chemistry Studio can use recorded reaction conditions, schemes from your books and commercial stock lists you import. The report shows sources for each step, material availability and possible incompatibilities between reagents and functional groups. Route search also considers reagents in the schemes. Requires Chemistry Studio 2.5.8 and the corresponding local indexes or lists.
+
+- Idea search in Research Chat is faster when you select many works. It keeps the same selected-corpus boundaries and avoids checking every work separately for each idea.
+
+- The Linux AppImage supports updating Nodus with external AppImageUpdate tools. The release includes the required metadata and a .zsync file. The built-in updater and previous download links remain available.
+
+### Fixes
+
+- Long presentation names no longer widen the PDF Presenter sidebar or hide the options button. Cards fit the available width and retain vertical scrolling.
+
+- The browser keeps the page visible when you open menus and dialogs. When you resize the sidebar, the page adjusts without overlapping navigation.
+
+- PDF extraction and source retrieval no longer lose a completed result when their background process exits. Research Chat can receive it while other intensive tasks are running.
+
+- Turning reasoning off no longer causes errors with models that require a specific setting. Nodus uses the supported opt-out or the lowest permitted level when reasoning is mandatory. It preserves your chosen level when reasoning is enabled.
+
+- Update status appears once in the banner below the header. The banner stays visible during backup and installation, including when you install a postponed update from Settings.
+
+## 5.7.4 — 2026-10-02
+
+### New features
+
+- PDF Presenter lets you control a presentation with the iPhone/iPad app by scanning a QR code on macOS, Windows and Linux. The app receives slides and notes and lets you navigate, use the pointer and control the timer and videos. On Windows and Linux, both devices must be on the same local network. Browser control remains available.
+
+- Text extraction can simplify reaction schemes and figure fragments in new PDFs while preserving body text, captions and references. The option is enabled by default in Settings, Text extraction. Previously processed documents keep their existing extraction.
+
+### Enhancements
+
+- PDF Presenter organizes presentations in folders and subfolders. Search them, move them with the menu or drag them, and choose whether to keep their copies when deleting a folder. Existing tags become folders without losing notes or videos. In presenter mode, you can resize the slide previews and notes area.
+
+- Library orientation summaries are generated with reasoning turned off to avoid extra usage on models that support disabling it.
+
+### Fixes
+
+- Nodus retries once when a response loses its connection before delivering text. Research Chat also retries once when a response reaches the output limit during reasoning.
+
+- Immersion can read pages of originals available in Zotero and include citations that open them. Research Chat distinguishes local sources from actual Zotero MCP queries and reports connection failures or queries that return no readable pages.
+
+- In Study and Teaching calendars, day numbers no longer overlap events in the month view.
+
+- The macOS volume control follows system changes and keeps the latest value when you adjust it rapidly. Browser controls identify the active player more accurately to pause and resume readers with custom audio.
+
+- The Documentary Index waits for pending passage indexing of the same work to finish so its result is not discarded. While text is being prepared, progress shows “Preparing…” instead of “passage 1/0”.
+
 ## 5.7.3 — 2026-09-30
 
 ### New features

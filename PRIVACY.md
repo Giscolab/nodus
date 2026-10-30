@@ -90,7 +90,7 @@ The Nodus project, maintained by Jorge Pérez Burgueño, publishes the software 
 or access the content stored in a normal installation or in a third-party-hosted Nodus Server. The
 project does not operate a cloud, account or central backend. For security incidents that need not
 be public, the private channel GitHub can be used:
-https://github.com/Drakonis96/nodus/security/advisories/new
+https://github.com/jorgepb96/nodus/security/advisories/new
 
 The person, university, educational center, company or organization who decides which personal data
 he or she introduces, what he or she uses them for, and how long he or she normally retains them is
@@ -145,6 +145,12 @@ The files that the user incorporates are processed locally and not uploaded to N
 optional publication may include metadata, derived academic content and, only with separate options,
 passages or content created by the user. Before activating the microphone, a previous notice is
 displayed, which the user can accept promptly or remember not to display again.
+
+Narration runs entirely on the user's computer (Ming 3.0 TTS). Reference voices recorded or uploaded
+to clone them stay in the application's data folder on that computer and are never uploaded, synced
+or included in published content; saving one requires confirming that the voice is the user's own or
+that its owner has given permission. Generated narration clips are deleted automatically after the
+retention period chosen in Settings, unless the user keeps them.
 
 Those who record should:
 
@@ -366,3 +372,10 @@ history, synchronization and backup rules. They may be included in later prompts
 to the text provider selected for that chat. Downloads include the same source
 and licence attribution. These are public legislative sources; this feature is
 not a confidential legal advice service.
+
+## Native Presenter remote
+
+The iPhone/iPad companion's own data handling, camera permissions and cache
+retention are described in [Nodus Presenter Privacy Policy](PRESENTER_PRIVACY.md).
+
+While a PDF presentation is active, Nodus for macOS can advertise an Apple local/peer-to-peer service for the optional iPhone/iPad Presenter companion. Scanning its native QR grants that device access to the current PDF, speaker notes and presentation controls through a TLS session with a fresh per-presentation key. That key is discarded when presenting ends. The helper reads only the PDF chosen for that session; no vault or unrelated file paths are exposed. This feature does not create a cloud account, upload presentations to a Nodus server or change the Mac's Wi-Fi configuration. The existing PIN-protected browser remote remains available.

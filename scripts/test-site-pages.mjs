@@ -10,7 +10,7 @@ const siteRoot = path.join(repoRoot, 'site');
 const read = (relative) => fs.readFileSync(path.join(siteRoot, relative), 'utf8');
 
 test('the site has every destination the navigation promises', () => {
-  for (const entry of ['index.html', 'about/index.html', 'app/index.html', 'apps/index.html', 'research-atlas/index.html', 'zotero-plugin/index.html', 'wiki/index.html', 'blog/index.html', 'cite/index.html', 'legal/index.html', 'contribute/index.html', 'faq/index.html']) {
+  for (const entry of ['index.html', 'about/index.html', 'app/index.html', 'apps/index.html', 'research-atlas/index.html', 'zotero-plugin/index.html', 'wiki/index.html', 'blog/index.html', 'cite/index.html', 'legal/index.html', 'contribute/index.html', 'faq/index.html', 'models/index.html']) {
     assert.ok(fs.existsSync(path.join(siteRoot, entry)), `site/${entry} exists`);
   }
   const home = read('index.html');
@@ -36,7 +36,7 @@ test('the home page presents the four main vaults, the rest, and the toolkit', (
     assert.ok(home.includes(`<h3>${name}</h3>`), `the remaining vaults include ${name}`);
   }
   // the six tools the desktop app actually ships (src/navigation.ts TOOLKIT_TOOLS)
-  for (const tool of ['PDF Presenter', 'Nodus Apps', 'Nodus Convert', 'Nodus Protect', 'Nodus Translate', 'OCR Workspace']) {
+  for (const tool of ['Nodus Presenter', 'Nodus Apps', 'Nodus Convert', 'Nodus Protect', 'Nodus Translate', 'OCR Workspace']) {
     assert.ok(home.includes(`<h3>${tool}</h3>`), `the toolkit section includes ${tool}`);
   }
   // every vault mode ships today, so no page may still call one of them unreleased
@@ -250,7 +250,7 @@ test('the organism degrades for visitors who cannot or do not want to run it', (
   assert.match(site, /matchMedia\('\(prefers-reduced-motion: reduce\)'\)/, 'reveals and the cursor respect reduced motion');
 
   // every page that paints the organism has to provide its canvas
-  for (const page of ['index.html', 'about/index.html', 'app/index.html', 'apps/index.html', 'cite/index.html', 'research-atlas/index.html', 'faq/index.html', 'blog/index.html', 'blog/post.html', 'contribute/index.html', 'wiki/index.html', 'research/index.html', 'zotero/index.html', 'ai-research/index.html', 'open-source/index.html']) {
+  for (const page of ['index.html', 'about/index.html', 'app/index.html', 'apps/index.html', 'cite/index.html', 'research-atlas/index.html', 'faq/index.html', 'models/index.html', 'blog/index.html', 'blog/post.html', 'contribute/index.html', 'wiki/index.html', 'research/index.html', 'zotero/index.html', 'ai-research/index.html', 'open-source/index.html']) {
     assert.ok(read(page).includes('<canvas id="organism" aria-hidden="true"></canvas>'), `${page} carries the organism canvas`);
   }
 
@@ -448,6 +448,7 @@ test('the sitemap lists every static page of the site', () => {
     'https://nodusresearch.com/open-source/',
     'https://nodusresearch.com/wiki/',
     'https://nodusresearch.com/faq/',
+    'https://nodusresearch.com/models/',
     'https://nodusresearch.com/cite/',
     'https://nodusresearch.com/contribute/',
   ]) {
@@ -465,14 +466,14 @@ test('the app page documents the current desktop builds and available vaults', (
   const app = read('app/index.html');
   for (const asset of [
     'Nodus-mac-arm64.dmg',
-    'Nodus-mac-x64.dmg',
     'Nodus-win-x64.exe',
     'Nodus-linux-x86_64.AppImage',
     'Nodus-linux-amd64.deb',
     'Nodus-linux-x86_64.rpm',
   ]) {
-    assert.match(app, new RegExp(`https://github\\.com/Drakonis96/nodus/releases/latest/download/${asset.replaceAll('.', '\\.')}`), `${asset} uses the stable release URL`);
+    assert.match(app, new RegExp(`https://github\\.com/jorgepb96/nodus/releases/latest/download/${asset.replaceAll('.', '\\.')}`), `${asset} uses the stable release URL`);
   }
+  assert.match(app, /https:\/\/github\.com\/jorgepb96\/nodus\/releases\/latest\/download\/Nodus-mac-x64\.dmg/, 'Intel downloads follow the latest release');
   for (const vault of ['Academic', 'Teaching', 'Study', 'Databases', 'Genealogy', 'Worldbuilding', 'Primary Sources', 'Testimony', 'Prosopography']) {
     assert.match(app, new RegExp(`\\b${vault}\\b`), `${vault} is represented on the app page`);
   }
@@ -481,7 +482,7 @@ test('the app page documents the current desktop builds and available vaults', (
 });
 
 test('every page is reachable by keyboard and readable by a screen reader', () => {
-  for (const page of ['index.html', 'about/index.html', 'app/index.html', 'apps/index.html', 'cite/index.html', 'legal/index.html', 'research-atlas/index.html', 'faq/index.html', 'blog/index.html', 'blog/post.html', 'contribute/index.html', 'research/index.html', 'zotero/index.html', 'zotero-plugin/index.html', 'ai-research/index.html', 'open-source/index.html']) {
+  for (const page of ['index.html', 'about/index.html', 'app/index.html', 'apps/index.html', 'cite/index.html', 'legal/index.html', 'research-atlas/index.html', 'faq/index.html', 'models/index.html', 'blog/index.html', 'blog/post.html', 'contribute/index.html', 'research/index.html', 'zotero/index.html', 'zotero-plugin/index.html', 'ai-research/index.html', 'open-source/index.html']) {
     const html = read(page);
     assert.match(html, /class="skip-link" href="#/, `${page} offers a skip link`);
     assert.match(html, /<html lang="en">/, `${page} declares its language`);
@@ -502,13 +503,13 @@ test('Support Nodus takes the money the app takes, and names people only', () =>
     assert.ok(html.includes(`href="${url}"`), `the page links to ${url}`);
     assert.ok(settings.includes(url), `the desktop app opens the same ${url}`);
   }
-  assert.match(html, /href="https:\/\/github\.com\/sponsors\/drakonis96"/, 'the page links to GitHub Sponsors');
-  assert.match(funding, /^github: drakonis96$/m, 'the sponsor account matches the funding file');
+  assert.match(html, /href="https:\/\/github\.com\/sponsors\/jorgepb96"/, 'the page links to GitHub Sponsors');
+  assert.match(funding, /^github: jorgepb96$/m, 'the sponsor account matches the funding file');
 
   // The owner opens the wall whatever the counts say, and no assistant or
   // platform account is ever presented as one of the people who built Nodus.
   assert.match(script, /const OWNER = OWNER_LOGIN\.toLowerCase\(\)/, 'the owner is named once and compared in one case');
-  assert.match(script, /const OWNER_LOGIN = 'Drakonis96'/, 'the owner login is spelled the way GitHub spells it');
+  assert.match(script, /const OWNER_LOGIN = 'jorgepb96'/, 'the owner login is spelled the way GitHub spells it');
   assert.match(script, /Number\(b\.login\.toLowerCase\(\) === OWNER\)[\s\S]*?Number\(a\.login\.toLowerCase\(\) === OWNER\)/,
     'the owner is ranked ahead of every contribution count');
   const source = script.match(/const NOT_PEOPLE = (\/[^\n]+?\/i);/)?.[1];
@@ -517,7 +518,7 @@ test('Support Nodus takes the money the app takes, and names people only', () =>
   for (const login of ['claude', 'chatgpt', 'github', 'Claude', 'openai', 'copilot']) {
     assert.ok(notPeople.test(login), `${login} is never shown as a contributor`);
   }
-  for (const login of ['Drakonis96', 'oguzkarayemis', 'sbvelinga', 'mbradaschia', 'githubber']) {
+  for (const login of ['jorgepb96', 'oguzkarayemis', 'sbvelinga', 'mbradaschia', 'githubber']) {
     assert.ok(!notPeople.test(login), `${login} is a person and must stay visible`);
   }
   assert.match(script, /if \(!people\.length\) return false/, 'an unknown list is reported, never shown as zero');
@@ -525,7 +526,7 @@ test('Support Nodus takes the money the app takes, and names people only', () =>
   // The issues card is the community's: the owner's own issues and pull requests
   // are excluded by the query itself, so the total and the faces agree on who
   // counts. The contributor wall is the opposite case and still opens with them.
-  assert.match(script, /repo:Drakonis96\/nodus -author:\$\{OWNER_LOGIN\}/,
+  assert.match(script, /repo:jorgepb96\/nodus -author:\$\{OWNER_LOGIN\}/,
     'the issues query leaves the owner out at the source');
   assert.match(script, /ISSUES_CACHE = 'nodus-issues-community'/,
     'the cache key changed with what the card counts');
@@ -586,7 +587,7 @@ test('every page shows the planet at the Support Nodus size, fixed behind the pa
     'the sections of a planet page ride above the planet');
 
   // Every page that mounts the component loads the stylesheet that places it.
-  for (const page of ['contribute/index.html', 'faq/index.html', 'about/index.html', 'blog/index.html', 'research-atlas/index.html']) {
+  for (const page of ['contribute/index.html', 'faq/index.html', 'models/index.html', 'about/index.html', 'blog/index.html', 'research-atlas/index.html']) {
     assert.match(read(page), /planet\.css\?v=[^"]+/, `${page} loads the planet styles`);
     assert.match(read(page), /planet\.js\?v=[^"]+/, `${page} loads the planet component`);
   }

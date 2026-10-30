@@ -69,8 +69,12 @@ export const browserApi = {
   },
   submitBrowserOmnibox: (input: string): Promise<BrowserOmniboxResult> =>
     ipcRenderer.invoke('browser:submitOmnibox', input),
-  setBrowserViewport: (viewport: BrowserViewport): Promise<void> =>
-    ipcRenderer.invoke('browser:setViewport', viewport).then(() => undefined),
+  setBrowserViewport: (viewport: BrowserViewport): Promise<void> => {
+    // Layout and native bounds must commit together. An async invoke lets the
+    // page cover the sidebar until main processes the next IPC round trip.
+    ipcRenderer.sendSync('browser:setViewportSync', viewport);
+    return Promise.resolve();
+  },
   browserFindInPage: (text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }): Promise<void> =>
     ipcRenderer.invoke('browser:findInPage', text, options ?? {}).then(() => undefined),
   browserStopFindInPage: (action?: 'clearSelection' | 'keepSelection' | 'activateSelection'): Promise<void> =>
@@ -132,6 +136,9 @@ export const browserApi = {
     ipcRenderer.on('browser:media', listener);
     return () => ipcRenderer.removeListener('browser:media', listener);
   },
+  listBrowserCaptureJobs: () => ipcRenderer.invoke('browser:captureJobs:list'),
+  enqueueBrowserCaptures: (requests: BrowserConnectorCaptureRequest[]) => ipcRenderer.invoke('browser:captureJobs:enqueue', requests),
+  retryBrowserCaptureJob: (id: string) => ipcRenderer.invoke('browser:captureJobs:retry', id),
   captureBrowserPage: (): Promise<BrowserCapturePreview | null> => ipcRenderer.invoke('browser:capturePage'),
   saveBrowserCapture: (request: BrowserConnectorCaptureRequest, includeSnapshot: boolean): Promise<BrowserConnectorSaveResult> =>
     ipcRenderer.invoke('browser:saveCapture', request, includeSnapshot),

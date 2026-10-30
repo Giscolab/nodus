@@ -21,6 +21,7 @@ for (const entry of [
   { source: 'server/lib/core/debates.mjs', target: 'debates.mjs' },
   { source: 'server/lib/core/academicWorkspace.mjs', target: 'academicWorkspace.mjs' },
   { source: 'shared/deepResearchReport.ts', target: 'deepResearchReport.mjs' },
+  { source: 'shared/embeddingContract.ts', target: 'embeddingContract.mjs' },
 ]) {
   await build({
     entryPoints: [path.join(root, entry.source)],
@@ -43,7 +44,7 @@ await build({
   target: 'es2022',
   sourcemap: true,
   legalComments: 'external',
-  banner: { js: '/* Nodus Cloud Worker — AGPL-3.0-only; source: https://github.com/drakonis96/nodus */' },
+  banner: { js: '/* Nodus Cloud Worker — AGPL-3.0-only; source: https://github.com/jorgepb96/nodus */' },
 });
 const migrationNames = fs.readdirSync(path.join(root, 'cloudflare', 'migrations')).filter((name) => /^\d{4}_[a-z0-9_-]+\.sql$/.test(name)).sort();
 if (!migrationNames.length) throw new Error('Nodus Cloud needs at least one D1 migration.');

@@ -92,6 +92,8 @@ try {
     'nodus_generate_deep_research',
     'nodus_finalize_deep_research',
     'nodus_enqueue_deep_research',
+    'nodus_list_research_runs',
+    'nodus_control_research_run',
     'nodus_list_deep_research_jobs',
     'nodus_get_deep_research_job',
     'nodus_cancel_deep_research_job',
@@ -1046,7 +1048,7 @@ try {
   const project = await callTool(server, 'nodus_get_project', { projectId: 'project-1', includeChapterText: false });
   assert.equal(project.stats.chapters, 1);
   assert.equal('currentMarkdown' in project.chapters[0], false);
-  assert.match(project.chapters[0].currentMarkdownSnippet, /Capitulo/);
+  assert.equal(project.chapters[0].currentMarkdownSnippet, 'Contenido sobre turismo visual y memoria.', 'MCP reads the canonical manuscript note instead of its stale chapter cache');
 
   const noteSearch = await callTool(server, 'nodus_search_notes', { query: 'turismo', limit: 10, offset: 0 });
   assert.equal(noteSearch.total, 1);
@@ -1066,6 +1068,10 @@ try {
   });
   assert.equal(createdNote.folderId, folder.id);
 
+  const updatedManuscript = await callTool(server, 'nodus_update_note', { id: 'note-1', content: '# Capitulo actualizado\n\nEdición compatible desde MCP.' });
+  const refreshedProject = await callTool(server, 'nodus_get_project', { projectId: 'project-1', includeChapterText: true });
+  assert.equal(refreshedProject.chapters[0].currentMarkdown, updatedManuscript.content, 'legacy Markdown writes are immediately visible in the manuscript');
+
   const aiError = await callToolRaw(server, 'nodus_search_ideas', { query: 'turismo', limit: 5 });
   assert.equal(aiError.isError, true);
   assert.equal(JSON.parse(aiError.content[0].text).error.category, 'ai_unconfigured');
@@ -1074,6 +1080,8 @@ try {
   // The deep-research pipeline degrades gracefully without an AI provider (fallback
   // plan + sections), so it walks every phase and the bridge must fire throughout.
   const deepArgs = {
+    // This transport fixture injects the legacy writer without a provider model.
+    harnessVersion: 'legacy',
     objective: 'Estado del turismo visual en el corpus',
     sectionLimit: 'auto',
     writer: 'nodus',
@@ -1128,11 +1136,13 @@ try {
   // background, one at a time. The second is still waiting when the first is generating,
   // which is exactly when it can be cancelled.
   const firstQueued = await callTool(server, 'nodus_enqueue_deep_research', {
+    harnessVersion: 'legacy', // Queue transport uses the same injected legacy writer as deepArgs.
     objective: 'Informe encolado sobre el corpus',
     sectionLimit: 'single',
     save: true,
   });
   const secondQueued = await callTool(server, 'nodus_enqueue_deep_research', {
+    harnessVersion: 'legacy',
     objective: 'Segundo informe encolado',
     sectionLimit: 'auto',
     save: false,
@@ -1297,8 +1307,8 @@ try {
   );
   setEmbedding.run(ideasRepo.encodeEmbedding([1, 0]), embedConfig.provider, embedConfig.model, 2, 'passage-1');
   setEmbedding.run(ideasRepo.encodeEmbedding([0, 1]), embedConfig.provider, embedConfig.model, 2, 'passage-2');
-  const originalEmbed = aiClient.embed;
-  aiClient.embed = async () => [1, 0];
+  const originalEmbed = aiClient.embedQuery;
+  aiClient.embedQuery = async () => [1, 0];
   try {
     const semantic = await callTool(server, 'nodus_search_passages', {
       query: 'turismo visual',
@@ -1370,15 +1380,19 @@ try {
 
     // Coverage is model-scoped: re-embedding under a different model must resurface the
     // warning, because the stored vectors can no longer match the configured model.
-    const stale = getDb().prepare('UPDATE passages SET embedding_model = ?');
-    stale.run('some-other-model');
+    const indexes = require(path.join(repoRoot, 'electron/db/embeddingIndexesRepo.ts'));
+    const originalIndex = indexes.activeEmbeddingIndex(getDb());
+    const otherIndex = indexes.createIndex(getDb(), { ...originalIndex.profile, model: 'some-other-model' });
+    getDb().prepare('UPDATE embedding_index_state SET pending_id=?').run(otherIndex.id);
+    indexes.commitEmbeddingIndex(getDb(), indexes.indexContext(getDb(), otherIndex));
     const afterModelChange = await callTool(server, 'nodus_search_passages', { query: 'turismo visual', limit: 10, minSimilarity: 0.18 });
     assert.equal(afterModelChange.passages.length, 0, 'vectors from another model cannot match');
     assert.equal(afterModelChange.indexed, 0, 'so coverage drops to zero');
     assert.ok(afterModelChange.warning, 'and the empty result is flagged rather than read as absence');
-    stale.run(embedConfig.model);
+    getDb().prepare('UPDATE embedding_index_state SET pending_id=?').run(originalIndex.indexId);
+    indexes.commitEmbeddingIndex(getDb(), originalIndex);
   } finally {
-    aiClient.embed = originalEmbed;
+    aiClient.embedQuery = originalEmbed;
   }
 
   // A tool that writes before calling the AI must not leave the write behind when the

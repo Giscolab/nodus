@@ -8,6 +8,9 @@ import { databaseCellStorage } from '@shared/databaseCellStorage';
 import { columnTypeDef } from '@shared/databases';
 import { normalizeDatabaseViewConfig } from '@shared/databaseViewConfig';
 import { bibliographicPlainText } from '@shared/bibliographicText';
+import { EMBEDDING_INDEX_SQL, migrateEmbeddingIndexes } from './embeddingIndexSchema';
+import { registerEmbeddingIndexFunctions } from './embeddingIndexesRepo';
+import { EMBEDDING_RUNS_SQL } from './embeddingRunsRepo';
 
 export interface Migration {
   version: number;
@@ -160,7 +163,10 @@ function ensureZoteroTitleMarkupColumn(db: Database.Database): void {
 
 // Versioned, append-only migrations. Never edit an existing migration's SQL once
 // shipped — add a new one. The current schema version is the highest applied.
-export const SCHEMA_VERSION = 197;
+export const SCHEMA_VERSION = 206;
+
+// What this build stamps on what it SENDS to another machine is SYNC_SCHEMA_VERSION
+// (./syncSchemaVersion.ts): raise it too when a migration changes a table's columns.
 
 export const migrations: Migration[] = [
   {
@@ -9576,6 +9582,122 @@ export const migrations: Migration[] = [
       created_at   TEXT NOT NULL
     );
   ` },
+  { version: 198, up: 'SELECT 1;', after: (db) => {
+    // Earlier branch builds can have all or part of these additive columns under
+    // a different version. Complete the schema without replacing saved documents.
+    for (const table of ['study_docs', 'study_doc_versions', 'note_versions']) {
+      addColumnIfMissing(db, table, 'native_document_json', 'TEXT');
+      addColumnIfMissing(db, table, 'native_schema_version', 'INTEGER NOT NULL DEFAULT 1');
+    }
+    addColumnIfMissing(db, 'study_docs', 'editor_revision', 'INTEGER NOT NULL DEFAULT 0');
+    for (const table of ['study_annotations', 'note_annotations']) addColumnIfMissing(db, table, 'anchor_json', 'TEXT');
+  } },
+  { version: 199, up: 'SELECT 1;', after: (db) => {
+    for (const table of ['study_docs', 'study_doc_versions', 'note_versions']) addColumnIfMissing(db, table, 'academic_metadata_json', 'TEXT');
+  } },
+  // Citation receipts of a research scope, one row each, instead of a map inside that scope's
+  // `scope_json`. A scope row also carries a manifest of every authorized document — some 8.6 MB
+  // on a 14,000-work library — so appending a 2 KB receipt there rewrote the whole row, and the
+  // count needed to police it parsed the whole row. That cost is why the store had a hard
+  // lifetime limit, and reaching it refused every passage found afterwards, silently, starving
+  // later runs of corpus evidence (2026-10-04). A row per receipt costs the receipt, so the limit
+  // is gone. Receipts written before this keep resolving from `scope_json`; nothing is moved,
+  // which keeps this body pure-CREATE and therefore safe to replay.
+  { version: 200, up: /* sql */ `
+    CREATE TABLE IF NOT EXISTS research_scope_receipts (
+      scope_id     TEXT NOT NULL,
+      key          TEXT NOT NULL,
+      receipt_json TEXT NOT NULL,
+      created_at   TEXT NOT NULL,
+      PRIMARY KEY (scope_id, key)
+    );
+  ` },
+  // The passage search index is found by passage id, not scanned. `passage_id` is UNINDEXED in
+  // `passages_fts`, so the triggers' `DELETE FROM passages_fts WHERE passage_id=old.passage_id`
+  // read every row of the index for each passage deleted or rewritten: replacing or deleting one
+  // work of 100 passages in a 100,000-passage library took 5.4 s, all of it inside the write
+  // transaction (2026-10-09). FTS5 keeps the column in its content table, `c0` there, and an index
+  // on it turns each delete into a lookup (5 ms for the same work). FTS5 maintains the index like
+  // any other on its own writes; dropping the virtual table drops it.
+  { version: 201, up: /* sql */ `
+    CREATE INDEX IF NOT EXISTS passages_fts_content_passage ON passages_fts_content(c0);
+    DROP TRIGGER IF EXISTS passages_document_fts_au;
+    DROP TRIGGER IF EXISTS passages_document_fts_ad;
+    CREATE TRIGGER passages_document_fts_au AFTER UPDATE OF text, nodus_id ON passages BEGIN
+      DELETE FROM passages_fts WHERE rowid IN (SELECT id FROM passages_fts_content WHERE c0=old.passage_id);
+      INSERT INTO passages_fts(passage_id, nodus_id, text) VALUES (new.passage_id, new.nodus_id, new.text);
+    END;
+    CREATE TRIGGER passages_document_fts_ad AFTER DELETE ON passages BEGIN
+      DELETE FROM passages_fts WHERE rowid IN (SELECT id FROM passages_fts_content WHERE c0=old.passage_id);
+    END;
+  ` },
+  { version: 202, up: /* sql */ `
+    CREATE TABLE IF NOT EXISTS research_harness_runs (
+      id TEXT PRIMARY KEY, mode TEXT NOT NULL, status TEXT NOT NULL,
+      conversation_id TEXT, artifact_id TEXT, summary_json TEXT NOT NULL, record_json TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS research_harness_runs_conversation ON research_harness_runs(conversation_id,updated_at);
+  ` },
+  { version: 203, up: EMBEDDING_INDEX_SQL, after: migrateEmbeddingIndexes },
+  { version: 204, up: EMBEDDING_RUNS_SQL },
+  { version: 205, up: /* sql */ `
+    -- Ming narration: research-chat messages and dictionary entries can be narrated too, and
+    -- a clip can be kept (pinned) so automatic retention never removes it. SQLite cannot
+    -- widen a CHECK constraint in place, so the table is rebuilt. Existing clips keep their
+    -- provider label (piper/kokoro/hume) and stay playable: they are plain WAV files.
+    CREATE TABLE audio_clips_v205 (
+      id            TEXT PRIMARY KEY,
+      entity_kind   TEXT NOT NULL CHECK (entity_kind IN ('immersion', 'deep_research', 'chat_message', 'dictionary_entry')),
+      entity_id     TEXT NOT NULL,
+      segment_index INTEGER NOT NULL,
+      segment_label TEXT NOT NULL DEFAULT '',
+      provider      TEXT NOT NULL DEFAULT 'ming',
+      voice         TEXT NOT NULL DEFAULT '',
+      language      TEXT NOT NULL DEFAULT '',
+      file_name     TEXT NOT NULL,
+      bytes         INTEGER NOT NULL DEFAULT 0,
+      duration_sec  REAL NOT NULL DEFAULT 0,
+      sample_rate   INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT NOT NULL,
+      model_id      TEXT NOT NULL DEFAULT '',
+      pinned        INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO audio_clips_v205 (id, entity_kind, entity_id, segment_index, segment_label, provider, voice, language, file_name, bytes, duration_sec, sample_rate, created_at)
+      SELECT id, entity_kind, entity_id, segment_index, segment_label, provider, voice, language, file_name, bytes, duration_sec, sample_rate, created_at FROM audio_clips;
+    DROP TABLE audio_clips;
+    ALTER TABLE audio_clips_v205 RENAME TO audio_clips;
+    CREATE INDEX idx_audio_clips_entity ON audio_clips(entity_kind, entity_id, segment_index);
+    CREATE INDEX idx_audio_clips_retention ON audio_clips(entity_kind, pinned, created_at);
+  ` },
+  { version: 206, up: /* sql */ `
+    -- Nodus Scriptor narrates its documents too ('scriptor_document'). Same rebuild as v205,
+    -- copying every column so a re-run keeps model and pinned state. Columns are unchanged,
+    -- and v205 and v206 ship in the same release, so SYNC_SCHEMA_VERSION stays at 205.
+    DROP TABLE IF EXISTS audio_clips_v206;
+    CREATE TABLE audio_clips_v206 (
+      id            TEXT PRIMARY KEY,
+      entity_kind   TEXT NOT NULL CHECK (entity_kind IN ('immersion', 'deep_research', 'chat_message', 'dictionary_entry', 'scriptor_document')),
+      entity_id     TEXT NOT NULL,
+      segment_index INTEGER NOT NULL,
+      segment_label TEXT NOT NULL DEFAULT '',
+      provider      TEXT NOT NULL DEFAULT 'ming',
+      voice         TEXT NOT NULL DEFAULT '',
+      language      TEXT NOT NULL DEFAULT '',
+      file_name     TEXT NOT NULL,
+      bytes         INTEGER NOT NULL DEFAULT 0,
+      duration_sec  REAL NOT NULL DEFAULT 0,
+      sample_rate   INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT NOT NULL,
+      model_id      TEXT NOT NULL DEFAULT '',
+      pinned        INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO audio_clips_v206 (id, entity_kind, entity_id, segment_index, segment_label, provider, voice, language, file_name, bytes, duration_sec, sample_rate, created_at, model_id, pinned)
+      SELECT id, entity_kind, entity_id, segment_index, segment_label, provider, voice, language, file_name, bytes, duration_sec, sample_rate, created_at, model_id, pinned FROM audio_clips;
+    DROP TABLE audio_clips;
+    ALTER TABLE audio_clips_v206 RENAME TO audio_clips;
+    CREATE INDEX idx_audio_clips_entity ON audio_clips(entity_kind, entity_id, segment_index);
+    CREATE INDEX idx_audio_clips_retention ON audio_clips(entity_kind, pinned, created_at);
+  ` },
 ];
 
 /**
@@ -9776,6 +9898,9 @@ function backfillMissingCreateOnly(db: Database.Database, current: number): void
 }
 
 export function runMigrations(db: Database.Database): void {
+  // A recovered schema can already contain write-through triggers even when its
+  // version marker is behind. Register their pure functions before any repair SQL.
+  registerEmbeddingIndexFunctions(db);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   const current = db.pragma('user_version', { simple: true }) as number;
@@ -9805,4 +9930,5 @@ export function runMigrations(db: Database.Database): void {
       tx();
     }
   }
+  registerEmbeddingIndexFunctions(db);
 }

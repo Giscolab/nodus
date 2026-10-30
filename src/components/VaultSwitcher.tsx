@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { selectorPanelMotion } from './selectorMotion';
 import type { AppSettings, CustomAppTheme, RemoteSignIn, VaultSummary, VaultType } from '@shared/types';
 import { isPreviewVaultType } from '@shared/vaultTypes';
 import { errorText, t, tr, tx } from '../i18n';
@@ -8,7 +9,6 @@ import { clearFilterPreferences } from '../app/filterPreferences';
 import { ConfirmModal } from './ConfirmModal';
 import { ThemePalettePicker, themePickerOptions } from './ThemePalettePicker';
 import { Icon } from './ui';
-import { setBrowserOverlayVisible } from '../browserOverlay';
 import {
   NEW_VAULT_TYPES,
   isPreAlphaVaultType,
@@ -53,6 +53,7 @@ function generateFourDigitCode(): string {
 
 export function VaultSwitcher({ anchorEl, onClose, vaults, onVaultsChanged, onActiveVaultChanged }: VaultSwitcherProps) {
   const open = anchorEl != null;
+  const reducedMotion = useReducedMotion();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -124,14 +125,6 @@ export function VaultSwitcher({ anchorEl, onClose, vaults, onVaultsChanged, onAc
       window.removeEventListener('scroll', compute, true);
     };
   }, [open, anchorEl]);
-
-  // El panel es un overlay nativo detrás de Browser: sin esto, el WebContentsView
-  // pinta por encima durante el microtask del guard y se ve un flash. LayoutEffect
-  // corre antes del paint, así que el navegador queda oculto desde el primer frame.
-  useLayoutEffect(() => {
-    if (!open) return;
-    void setBrowserOverlayVisible(true).catch(() => undefined);
-  }, [open]);
 
   // Dismiss on outside click / Escape. Clicks on a trigger (`data-vault-trigger`)
   // or inside an open child modal (`[role="dialog"]`) are ignored so they can
@@ -426,12 +419,10 @@ export function VaultSwitcher({ anchorEl, onClose, vaults, onVaultsChanged, onAc
           {open && pos && (
             <motion.div
               ref={panelRef}
+              data-testid="vault-switcher-panel"
               data-browser-native-overlay="true"
               key="vault-panel"
-              initial={{ opacity: 0, scaleY: 0.8, y: -8 }}
-              animate={{ opacity: 1, scaleY: 1, y: 0 }}
-              exit={{ opacity: 0, scaleY: 0.85, y: -8 }}
-              transition={{ duration: 0.16, ease: 'easeOut' }}
+              {...selectorPanelMotion(Boolean(reducedMotion) || document.documentElement.classList.contains('reduce-motion'))}
               style={{
                 position: 'fixed',
                 left: pos.left,

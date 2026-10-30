@@ -14,7 +14,11 @@ test.after(() => rm(dir, { recursive: true, force: true }));
 const stubs = new Map([
   ['adm-zip', 'export default class AdmZip {}'],
   ['../zotero/zoteroClient', 'export const itemChildren = () => []; export const itemAsAttachment = () => null; export const getFulltext = () => null; export const attachmentFilePath = () => null; export class ZoteroRequestError extends Error {}'],
-  ['./pdfjsLoader', 'export const openPdf = async () => globalThis.__pdfOcrProvenance.pdf; export const pageText = async page => page.text;'],
+  ['./pdfjsLoader', 'export const openPdf = async () => globalThis.__pdfOcrProvenance.pdf; export const pageText = async page => page.text; export const pageTextWithSchemes = async page => ({ text: page.text, declutteredText: "[scheme]", schemeLines: [], marginLines: [] });'],
+  // Durable work/attachment choices have real-SQLite coverage in test-scheme-declutter.
+  ['./schemeDeclutter', 'export const declutterForWorkSource = () => false; export const schemeClassifierForWorkSource = () => null; export const declutterCacheKey = file => `${file}#declutter`; export const pdfBodySize = async () => 0;'],
+  ['./pdfBodySize', 'export const pdfBodySize = async () => 0;'],
+  ['../db/settingsRepo', 'export const getSettings = () => ({ declutterNewDocuments: true });'],
   ['./pdfAnalyzer', 'export const analyzePdf = async () => globalThis.__pdfOcrProvenance.analysis;'],
   ['./ocr', 'export const ocrPdfPages = (...args) => globalThis.__pdfOcrProvenance.ocr(...args); export const ocrImageFile = async () => ({text:""});'],
   ['./tabular', 'export const csvFileToText = () => ""; export const xlsxFileToText = () => "";'],
@@ -38,7 +42,7 @@ const parserBundle = path.join(dir, 'parser.mjs');
 await build({ entryPoints: [path.join(root, 'shared/textProvenance.ts')], outfile: parserBundle, bundle: true, platform: 'node', format: 'esm', logLevel: 'silent' });
 const { parseTextNotes } = await import(pathToFileURL(parserBundle).href);
 
-async function extract({ total, cap, failures = [], scanPages = null, weakPages = [], enabled = true, throwAfter = null, signal, onProgress }) {
+async function extract({ total, cap, failures = [], scanPages = null, weakPages = [], enabled = true, throwAfter = null, pageErrors = [], signal, onProgress }) {
   const fail = new Set(failures);
   const scan = scanPages && new Set(scanPages);
   const weak = new Set(weakPages);
@@ -52,12 +56,19 @@ async function extract({ total, cap, failures = [], scanPages = null, weakPages 
       getPage: async (p) => ({ text: weak.has(p) ? '1234567890'.repeat(10) : scan && !scan.has(p) ? goodText : '', cleanup() {} }),
       destroy: async () => { observed.destroyed++; },
     },
-    ocr: async (_pdf, pages, _languages, progress) => {
+    ocr: async (_pdf, pages, _languages, progress, options = {}) => {
       globalThis.__pdfOcrProvenance.ocrCalls++;
       observed.selected = [...pages];
       const results = new Map();
       for (const page of pages) {
         if (globalThis.__pdfOcrProvenance.throwAfter === observed.completed.length) throw new Error('OCR worker failed');
+        // Like the real loop: a page failure rejects the pass unless the caller handles it.
+        if (pageErrors.includes(page)) {
+          const error = new Error('Create skia surface failed');
+          if (!options.onPageError) throw error;
+          options.onPageError(page, error);
+          continue;
+        }
         observed.completed.push(page);
         results.set(page, { text: fail.has(page) ? '' : goodText });
         progress?.({ page: observed.completed.length, totalPages: pages.length });
@@ -113,6 +124,16 @@ test('startup and mid-batch failures never label selected pages as OCR results',
   }
 });
 
+test('one page OCR cannot read keeps every other recognised page, and the result is not final', async () => {
+  const { completed, doc, provenance } = await extract({ total: 6, cap: 1000, pageErrors: [3] });
+  assert.deepEqual(completed, [1, 2, 4, 5, 6]);
+  assert.match(doc.text, /\[\[p\. 2\]\]/);
+  assert.match(doc.text, /\[\[p\. 6\]\]/);
+  assert.doesNotMatch(doc.text, /\[\[p\. 3\]\]/);
+  assert.equal(doc.ocrFailed, true, 'an incomplete OCR pass is never cached as the final text');
+  assert.deepEqual(provenance, { ocrPages: 5, cappedPages: 0, cap: null, blankPages: 0, unresolvedPages: 1, ocrFailed: true });
+});
+
 test('an uncapped OCR failure preserves digital pages and reports only the missing text', async () => {
   const { doc, provenance } = await extract({ total: 5, cap: 1000, scanPages: [4, 5], throwAfter: 0 });
   assert.match(doc.text, /\[\[p\. 3\]\]/);
@@ -160,4 +181,33 @@ test('an OCR failure is not cached, so a retry with unchanged settings can recov
   assert.equal(fixture.cacheWrites, 1);
   assert.deepEqual(await extractFromPath(file, opts), recovered);
   assert.equal(fixture.ocrCalls, 2, 'successful extraction still benefits from the cache');
+});
+
+test('plain and explicitly decluttered extraction of a shared PDF keep independent cache entries', async () => {
+  await extract({ total: 2, cap: 1000, scanPages: [] });
+  const fixture = globalThis.__pdfOcrProvenance;
+  const file = path.join(dir, 'new-book.pdf');
+  await writeFile(file, 'PDF fixture handled by the controlled reader');
+  const opts = { ocr: { enabled: false, languages: 'eng', maxPages: 1000 } };
+  fixture.cache = new Map();
+  const cleaned = await extractFromPath(file, { ...opts, declutter: true });
+  assert.match(cleaned.text, /\[scheme\]/);
+  const keys = [...fixture.cache.keys()].map((key) => JSON.parse(key).filePath);
+  assert.deepEqual(keys, [`${file}#declutter`], 'cached under the decluttered key only');
+  const plain = await extractFromPath(file, opts);
+  assert.match(plain.text, /Scientific text/);
+  assert.notEqual(plain.text, cleaned.text);
+  assert.deepEqual([...fixture.cache.keys()].map((key) => JSON.parse(key).filePath), [`${file}#declutter`, file]);
+  assert.deepEqual(await extractFromPath(file, { ...opts, declutter: true }), cleaned);
+  assert.deepEqual(await extractFromPath(file, opts), plain);
+});
+
+test('scheme-only text stays decluttered without triggering OCR just because the result is short', async () => {
+  await extract({ total: 2, cap: 1000, scanPages: [] });
+  const fixture = globalThis.__pdfOcrProvenance;
+  const doc = await extractPdfStreaming('/fixture.pdf', {
+    declutter: true, ocr: { enabled: true, languages: 'eng', maxPages: 1000 }, analysis: fixture.analysis,
+  });
+  assert.match(doc.text, /\[scheme\]/);
+  assert.equal(fixture.ocrCalls, 0);
 });

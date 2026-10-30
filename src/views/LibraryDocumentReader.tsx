@@ -3,7 +3,7 @@ import { ChatAbortedNotice } from '../components/ChatAbortedNotice';
 import { ChatMarkdown } from '../components/ChatMarkdown';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
-import type { PDFDocumentProxy } from 'pdfjs-dist';
+import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type {
   AppSettings,
@@ -17,11 +17,14 @@ import type {
 } from '@shared/types';
 import { ASSISTANT_CONTEXTS, type PendingAssistantNavigationTarget } from '../navigation';
 import { FindInPage } from '../components/FindInPage';
-import { Markdown, type MarkdownReaderCitation } from '../components/Markdown';
+import { Markdown, type MarkdownCitation, type MarkdownReaderCitation } from '../components/Markdown';
 import { ModelPicker } from '../components/ModelPicker';
 import { NodiViewContextSource } from '../components/NodiViewContextSource';
 import { SourceCitationModal, type CitationTarget } from '../components/SourceCitationModal';
 import { LibraryAttachmentViewer } from '../components/library/LibraryAttachmentViewer';
+import { ListenButton } from '../components/narration/Listen';
+import { ReadAlong } from '../components/narration/ReadAlong';
+import { narrationMarkdownFromView } from '../lib/narration/domNarration';
 import {
   READER_ANNOTATION_COLORS,
   ReaderHighlighterControl,
@@ -184,7 +187,7 @@ function ReaderOpeningFormatDialog({
             onClick={() => onChoose('clean')}
           >
             <span className="grid h-9 w-9 place-items-center rounded-xl bg-indigo-100 text-indigo-600 dark:bg-indigo-950 dark:text-indigo-300"><Icon name="book" size={16} /></span>
-            <strong className="mt-3 block text-sm">{t('Markdown limpio')}</strong>
+            <strong className="mt-3 block text-sm">{t('Markdown')}</strong>
             <span className="mt-1 block text-xs leading-5 text-neutral-500 dark:text-neutral-400">{t('Lectura adaptable con texto, índice e imágenes extraídas.')}</span>
             {!reader.cleanAvailable && <span className="mt-2 block text-[10px] font-medium text-amber-600 dark:text-amber-300">{t('Todavía no está disponible')}</span>}
           </button>
@@ -262,7 +265,7 @@ const ReaderFilesMenu = memo(function ReaderFilesMenu({
   );
 });
 
-function OriginalPagePreview({
+export function OriginalPagePreview({
   documentId, attachmentId, initialPage, title, onClose, onOpenFull,
 }: {
   documentId: string; attachmentId: string; initialPage: number; title: string; onClose: () => void; onOpenFull: () => void;
@@ -293,6 +296,9 @@ function OriginalPagePreview({
   useEffect(() => {
     if (!pdf || !canvasRef.current) return;
     let canceled = false;
+    // pdf.js refuses a second render() on a canvas that is still drawing, so paging or
+    // zooming quickly turned the preview into an error. The previous render is cancelled.
+    let renderTask: ReturnType<PDFPageProxy['render']> | null = null;
     void pdf.getPage(pageNumber).then(async (page) => {
       if (canceled || !canvasRef.current) return;
       const viewport = page.getViewport({ scale });
@@ -300,10 +306,11 @@ function OriginalPagePreview({
       const canvas = canvasRef.current;
       canvas.width = Math.ceil(viewport.width * ratio); canvas.height = Math.ceil(viewport.height * ratio);
       canvas.style.width = `${Math.ceil(viewport.width)}px`; canvas.style.height = `${Math.ceil(viewport.height)}px`;
-      await page.render({ canvasContext: canvas.getContext('2d')!, viewport, transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0] }).promise;
+      renderTask = page.render({ canvasContext: canvas.getContext('2d')!, viewport, transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0] });
+      await renderTask.promise;
       page.cleanup();
-    }).catch((cause) => { if (!canceled) setError(errorText(cause)); });
-    return () => { canceled = true; };
+    }).catch((cause) => { if (!canceled && (cause as { name?: string } | null)?.name !== 'RenderingCancelledException') setError(errorText(cause)); });
+    return () => { canceled = true; renderTask?.cancel(); };
   }, [pdf, pageNumber, scale]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
@@ -362,6 +369,7 @@ export function LibraryDocumentReader({
   const scrollRef = useRef<HTMLElement | null>(null);
   const documentRef = useRef<HTMLDivElement | null>(null);
   const markActionsRef = useRef<ReaderSelectionActionsHandle | null>(null);
+  const [listenOpen, setListenOpen] = useState(false);
   const bookmarkMenuRef = useRef<HTMLDivElement | null>(null);
   const chatMessagesRef = useRef<HTMLDivElement | null>(null);
   const pendingAnnotationsRef = useRef(new Map<string, WritingDraftAnnotation>());
@@ -625,7 +633,9 @@ export function LibraryDocumentReader({
     const measure = () => {
       frame = 0;
       const max = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
-      setProgress(Math.min(100, Math.max(0, (scroller.scrollTop / max) * 100)));
+      // Whole percent: the bar animates its width and the label shows an integer. An unrounded
+      // value changed on every scroll frame and re-rendered the whole reader at 60 fps.
+      setProgress(Math.round(Math.min(100, Math.max(0, (scroller.scrollTop / max) * 100))));
       localStorage.setItem(readingPositionKey(reader.storageId), String(Math.round(scroller.scrollTop)));
       const top = scroller.getBoundingClientRect().top + 120;
       const headings = Array.from(documentRef.current?.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6') ?? []);
@@ -755,6 +765,13 @@ export function LibraryDocumentReader({
     }
   };
 
+  // Stable callbacks for the saved chat answers: fresh closures here defeated ChatMarkdown's
+  // memo, so every reader render (each scroll frame, each streamed delta) re-parsed them all.
+  const openReaderCitationRef = useRef(openReaderCitation);
+  openReaderCitationRef.current = openReaderCitation;
+  const chatReaderCitation = useCallback((target: MarkdownReaderCitation) => openReaderCitationRef.current(target), []);
+  const chatCitation = useCallback((next: MarkdownCitation) => setCitation(next), []);
+
   const openDocumentChat = () => {
     if (window.innerWidth < 1024) setOutlineOpen(false);
     setNotesOpen(true);
@@ -868,7 +885,7 @@ export function LibraryDocumentReader({
         <div className="grid min-h-0 flex-1 place-items-center p-8">
           <div data-testid="library-reader-empty-card" className="library-reader-empty-card max-w-lg rounded-2xl border border-dashed border-neutral-700 bg-neutral-950/30 p-8 text-center">
             <span className="library-reader-empty-icon mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-indigo-950 text-indigo-300"><Icon name="book" size={21} /></span>
-            <h2 className="mt-4 text-base font-semibold text-neutral-100">{t('Todavía no hay una versión limpia de esta obra')}</h2>
+            <h2 className="mt-4 text-base font-semibold text-neutral-100">{t('Todavía no hay una versión Markdown de esta obra')}</h2>
             <p className="mt-2 text-sm leading-6 text-neutral-500">{error ?? tx('El lector buscará el documento en nodus-library/{id}, conservando su identificador estable.', { id: reference.zoteroKey || reference.id })}</p>
             <div className="mt-5 flex justify-center gap-2">
               {reference.zoteroKey && <button className="btn btn-ghost border border-neutral-700" onClick={() => void window.nodus.openInZotero(reference.zoteroKey!)}><Icon name="external" /> {t('Abrir en Zotero')}</button>}
@@ -886,7 +903,7 @@ export function LibraryDocumentReader({
     : reader.freshness === 'current' ? 'current' : 'previous';
   const sourceLabel = selectedAttachment
     ? t(selectedAttachment.role === 'original' ? 'Archivo original' : 'Adjunto conservado')
-    : t(reader.freshness === 'current' ? 'Markdown limpio' : 'Última copia legible');
+    : t(reader.freshness === 'current' ? 'Markdown' : 'Última copia legible');
 
   return (
     <div className="library-document-reader relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
@@ -915,7 +932,7 @@ export function LibraryDocumentReader({
         <label className="relative flex min-w-44 max-w-72 items-center" data-testid="library-reader-source-picker">
           <Icon name={selectedAttachment ? 'archive' : 'book'} size={13} className="pointer-events-none absolute left-2.5 z-10 text-neutral-500" />
           <select className="input input-with-leading-icon h-9 w-full truncate text-xs" value={selectedSource} onChange={(event) => selectReaderSource(event.target.value)} aria-label={t('Versión o archivo')}>
-            <option value="clean" disabled={!reader.cleanAvailable}>{t('Markdown limpio')}</option>
+            <option value="clean" disabled={!reader.cleanAvailable}>{t('Markdown')}</option>
             {reader.attachments.map((attachment) => <option key={attachment.id} value={attachment.id} disabled={!attachment.available}>{attachment.title} · {attachment.fileName}</option>)}
           </select>
         </label>
@@ -925,6 +942,25 @@ export function LibraryDocumentReader({
           className={`library-reader-source-badge is-${sourceKind} hidden rounded-full border px-2 py-1 text-[10px] font-medium md:inline-flex`}
         >{sourceLabel}</span>
         <ReaderHighlighterControl value={highlighterColor} onChange={setHighlighterColor} />
+        {selectedSource === 'clean' && <span className="inline-grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-neutral-700">
+          <ListenButton
+            direct
+            testId="library-reader-listen"
+            size={15}
+            label={t('Leer en voz alta desde aquí')}
+            open={listenOpen}
+            onOpenChange={setListenOpen}
+            onUnavailable={() => setListenOpen(true)}
+            target={{
+              kind: 'library_document',
+              id: reader.storageId,
+              title: reader.title,
+              markdown: () => narrationMarkdownFromView(documentRef.current, scrollRef.current),
+              ephemeral: true,
+              lookahead: true,
+            }}
+          />
+        </span>}
         {selectedSource === 'clean' && <div ref={bookmarkMenuRef} className="relative">
           <button
             className={`btn btn-ghost h-9 w-10 gap-0.5 border p-0 ${hasReaderMark ? 'border-amber-700/60 text-amber-300' : 'border-neutral-700'}`}
@@ -990,10 +1026,10 @@ export function LibraryDocumentReader({
               <ReaderFilesMenu
                 attachments={reader.attachments}
                 cleanAvailable={reader.cleanAvailable}
-                cleanLabel={t('Markdown limpio')}
+                cleanLabel={t('Markdown')}
                 filesLabel={t('Versiones y archivos')}
                 selectedSource={selectedSource}
-                selectedTitle={selectedAttachment?.title ?? t('Markdown limpio')}
+                selectedTitle={selectedAttachment?.title ?? t('Markdown')}
                 onSelect={selectReaderSource}
                 hasOpeningPreference={!!openingFormatPreference}
                 onResetOpeningPreference={resetOpeningFormatPreference}
@@ -1022,6 +1058,7 @@ export function LibraryDocumentReader({
           onOpenExternal={() => { void window.nodus.openGlobalLibraryAttachment(reference.id, selectedAttachment.id).catch(() => window.nodus.openLibraryReaderOriginal(reference.id)); }}
         />}
 
+        {selectedSource === 'clean' && <ReadAlong rootRef={documentRef} scrollRef={scrollRef} matches={(key) => key === `library_document:${reader.storageId}`} />}
         {selectedSource === 'clean' && <ReaderSelectionActions
           ref={markActionsRef}
           targetRef={documentRef}
@@ -1088,7 +1125,7 @@ export function LibraryDocumentReader({
                 </section>}
               </div>}
               {sidebarTab === 'metadata' && <div data-testid="library-reader-metadata" className="h-full space-y-5 overflow-y-auto p-4">
-                <div><span className={`rounded-full px-2 py-1 text-[10px] ${reader.freshness === 'current' ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'}`}>{reader.freshness === 'current' ? t('Markdown limpio') : t('Última copia legible')}</span><h3 className="mt-3 text-sm font-semibold leading-5">{reader.title}</h3><p className="mt-2 text-xs leading-5 text-neutral-500">{reader.authors.join('; ') || t('Sin autoría')}</p></div>
+                <div><span className={`rounded-full px-2 py-1 text-[10px] ${reader.freshness === 'current' ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'}`}>{reader.freshness === 'current' ? t('Markdown') : t('Última copia legible')}</span><h3 className="mt-3 text-sm font-semibold leading-5">{reader.title}</h3><p className="mt-2 text-xs leading-5 text-neutral-500">{reader.authors.join('; ') || t('Sin autoría')}</p></div>
                 {reader.sourceUrl && <button data-testid="library-reader-online-source" className="flex w-full items-center gap-2 rounded-xl border border-neutral-800 px-3 py-2.5 text-left text-xs text-neutral-400 hover:border-indigo-500/40 hover:text-indigo-300" onClick={() => void window.nodus.openExternal(reader.sourceUrl!)}><Icon name="external" size={13} /><span className="min-w-0 flex-1 truncate">{reader.sourceUrl}</span></button>}
                 <dl className="space-y-3 text-xs">{[
                   [t('Año'), reader.year], [t('Identificador'), reader.storageId], [t('Clave Zotero'), reader.zoteroKey],
@@ -1120,7 +1157,7 @@ export function LibraryDocumentReader({
                 <div ref={chatMessagesRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3" aria-live="polite">
                   {!chatMessages.length && !chatSending && <div className="rounded-xl border border-dashed border-indigo-500/20 bg-indigo-500/5 px-4 py-6 text-center"><p className="text-xs leading-5 text-neutral-500">{t('Pregunta por la tesis, un concepto o la relación entre tus subrayados.')}</p></div>}
                   {chatMessages.map((message) => <article key={message.id} className={message.role === 'user' ? 'ml-5 rounded-xl bg-indigo-600/20 px-3 py-2.5 text-xs leading-5 text-indigo-100' : `mr-1 rounded-xl border px-3 py-2.5 text-xs leading-5 ${message.error ? 'border-red-500/25 bg-red-500/5 text-red-300' : 'border-neutral-800 bg-neutral-950/45 text-neutral-300'}`}>
-                    {message.role === 'assistant' && !message.error ? <ChatMarkdown content={message.content} onCitation={(next) => setCitation(next)} onReaderCitation={openReaderCitation} className="text-xs leading-5" /> : <p className="whitespace-pre-wrap">{message.content}</p>}
+                    {message.role === 'assistant' && !message.error ? <ChatMarkdown content={message.content} onCitation={chatCitation} onReaderCitation={chatReaderCitation} className="text-xs leading-5" /> : <p className="whitespace-pre-wrap">{message.content}</p>}
                     {message.role === 'assistant' && message.id === chatStoppedId ? <ChatAbortedNotice /> : null}
                   </article>)}
                   {chatSending && <article data-testid="library-reader-chat-stream" className="mr-1 rounded-xl border border-neutral-800 bg-neutral-950/45 px-3 py-2.5 text-xs leading-5 text-neutral-300">{chatStreaming ? <ChatMarkdown streaming content={chatStreaming} verify={false} className="text-xs leading-5" /> : <span className="flex items-center gap-2 text-neutral-500"><Spinner /> {t('Leyendo el documento…')}</span>}</article>}

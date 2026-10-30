@@ -12,6 +12,31 @@ export type NativeResearchEffort = Exclude<ResearchEffort, 'standard'> | 'none' 
 export function isResearchEffort(value: unknown): value is ResearchEffort {
   return typeof value === 'string' && (RESEARCH_EFFORTS as readonly string[]).includes(value);
 }
+
+/** The ordered rungs, smallest budget first. `standard` is "whatever the model does unasked" and
+ *  `none`/`off`/`on` are not sizes, so none of them appears here. */
+const EFFORT_LADDER = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const;
+
+/**
+ * One supported rung down, or null when there is none to take.
+ *
+ * Written for the retry after a cut-off: a model that spent its whole output ceiling thinking and
+ * never wrote the answer will do it again if asked the same way, so the second attempt asks for
+ * less thinking. Measured 2026-10-12 on four hard synthesis targets at `high` — each spent the
+ * full 149,422-token ceiling on reasoning, and the existing retry, which repeated the request
+ * unchanged, hit the ceiling a second time on all four.
+ *
+ * A step rather than a jump to the floor: the answer needs room, not the smallest budget going,
+ * with gaps and the floor taken from this model's native profile. `standard` returns null
+ * because we did not choose its size and so cannot lower it.
+ */
+export function reducedResearchEffort(effort: ResearchEffort | undefined, profile: ResearchReasoningProfile): ResearchEffort | null {
+  if (!effort || effort === 'standard') return null;
+  const native = resolveResearchEffort(profile, effort);
+  const supported = EFFORT_LADDER.filter(level => profile.levels.includes(level));
+  const at = supported.indexOf(native as (typeof EFFORT_LADDER)[number]);
+  return at > 0 ? supported[at - 1] : null;
+}
 export interface ResearchReasoningProfile {
   levels: NativeResearchEffort[];
   /** Compatibility for old requests and bounded internal validation, never a UI choice. */
@@ -21,6 +46,22 @@ export interface ResearchReasoningProfile {
 const ordered: NativeResearchEffort[] = ['none', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'on'];
 const profile = (mode: ResearchReasoningProfile['mode'], ...levels: NativeResearchEffort[]): ResearchReasoningProfile => ({ mode, levels });
 const unknown = () => profile('none');
+
+/** Lowest legal thinking mode for the documented Claude families. Unknown
+ * models retain disabled until their provider explicitly rejects it. */
+export function anthropicThinkingOffType(model: string): 'disabled' | 'between_tools' | 'adaptive' {
+  if (/^claude-sonnet-5[.-]5(?:[.-]|$)/i.test(model)) return 'between_tools';
+  if (/^claude-opus-5[.-]5(?:[.-]|$)|^claude-(?:mythos|fable)(?:[.-]|$)/i.test(model)) return 'adaptive';
+  return 'disabled';
+}
+
+export function openRouterReasoningMandatory(model: string): boolean {
+  return /^z-ai\/glm-5\.3-flash(?::|$)|^anthropic\/claude-(?:sonnet-5\.5|opus-5\.5|mythos|fable)(?:[.:-]|$)/i.test(model);
+}
+
+export function minimumReasoningEffort(levels: readonly NativeResearchEffort[]): NativeResearchEffort | undefined {
+  return ordered.find(level => levels.includes(level) && level !== 'none' && level !== 'off');
+}
 
 /**
  * Legacy transport routes that require runtime catalogue lookup. Picker availability is
@@ -96,7 +137,7 @@ function legacyResearchReasoningProfile(ref: ModelRef | null | undefined, info?:
     const nativeProvider = ({ google: 'gemini', 'z-ai': 'opencode-go' } as Record<string, string>)[provider] ?? provider;
     if (['openai', 'anthropic', 'gemini', 'deepseek', 'xiaomi'].includes(nativeProvider)) {
       const native = researchReasoningProfile({ provider: nativeProvider as ModelRef['provider'], model: rest.join('/') });
-      if (native.levels.length) return { ...native, mode: 'effort' };
+      if (native.levels.length) return { ...native, mode: 'effort', levels: openRouterReasoningMandatory(id) ? native.levels.filter(level => level !== 'none' && level !== 'off') : native.levels };
     }
     return info?.reasoning ? profile('effort', 'low', 'medium', 'high', 'xhigh', 'max') : unknown();
   }
@@ -120,7 +161,8 @@ function legacyResearchReasoningProfile(ref: ModelRef | null | undefined, info?:
 export function researchAdvertisedEfforts(info?: ModelInfo): NativeResearchEffort[] {
   const levels = info?.researchReasoningLevels ?? info?.supportedReasoningEfforts?.map(entry => entry.reasoningEffort) ?? [];
   if (!Array.isArray(levels)) return [];
-  return [...new Set(levels.filter((level): level is NativeResearchEffort => isResearchEffort(level) && level !== 'standard'))];
+  return [...new Set(levels.filter((level): level is NativeResearchEffort => isResearchEffort(level) && level !== 'standard'
+    && !(info?.reasoningMandatory && (level === 'none' || level === 'off'))))];
 }
 
 /** Native metadata takes precedence in requests too. Keep the old minimum only for
@@ -128,10 +170,12 @@ export function researchAdvertisedEfforts(info?: ModelInfo): NativeResearchEffor
 export function researchReasoningProfile(ref: ModelRef | null | undefined, info?: ModelInfo): ResearchReasoningProfile {
   const legacy = legacyResearchReasoningProfile(ref, info);
   const levels = researchAdvertisedEfforts(info);
-  if (!levels.length) return legacy;
+  const mandatory = info?.reasoningMandatory === true;
+  const supported = mandatory ? levels.filter(level => level !== 'none' && level !== 'off') : levels;
+  if (!supported.length) return mandatory ? { ...legacy, levels: legacy.levels.filter(level => level !== 'none' && level !== 'off') } : legacy;
   const mode = legacy.mode !== 'none' ? legacy.mode
     : ref?.provider === 'deepseek' ? 'toggle' : ref?.provider === 'anthropic' ? 'anthropic-effort' : 'effort';
-  return { mode, levels, legacyStandard: legacy.levels[0] ?? levels[0] };
+  return { mode, levels: supported, legacyStandard: mandatory ? minimumReasoningEffort(supported) : legacy.levels[0] ?? supported[0] };
 }
 
 export function researchEffortChoices(p: ResearchReasoningProfile): NativeResearchEffort[] {
@@ -141,6 +185,22 @@ export function researchEffortChoices(p: ResearchReasoningProfile): NativeResear
 export function resolveResearchEffort(p: ResearchReasoningProfile, requested: unknown): NativeResearchEffort | undefined {
   if (requested === 'standard') return p.legacyStandard ?? p.levels[0];
   return p.levels.includes(requested as NativeResearchEffort) ? requested as NativeResearchEffort : p.legacyStandard ?? p.levels[0];
+}
+
+/** V1's final semantic check needs actual reasoning, even without a job thinking scope.
+ * Keep this bounded to the model's lowest supported reasoning level, while respecting
+ * an explicit user choice to disable it. Legacy Standard transport is unchanged. */
+export function researchSemanticValidationEffort(p: ResearchReasoningProfile, requested: ResearchEffort): ResearchEffort {
+  if (requested === 'none' || requested === 'off') return resolveResearchEffort(p, requested) ?? 'standard';
+  return minimumReasoningEffort(p.levels) ?? resolveResearchEffort(p, requested) ?? 'standard';
+}
+
+/** Ordinary source checks and rewrites need not enable thinking when the turn
+ * uses the standard fast path. A separate whole-answer semantic veto retains
+ * the native reasoning floor. Explicit thinking/off choices remain respected. */
+export function researchProofValidationEffort(p: ResearchReasoningProfile, requested: ResearchEffort): ResearchEffort {
+  if (requested === 'standard') return resolveResearchEffort(p, 'standard') ?? 'standard';
+  return researchSemanticValidationEffort(p, requested);
 }
 
 /**
@@ -230,7 +290,7 @@ export function researchReasoningBody(ref: ModelRef, requested: ResearchEffort, 
       : { thinking_budget: off ? 0 : Math.min(researchThinkingAllowance(effort), Math.max(128, maxTokens - 1024)) } } },
   };
   if (p.mode === 'anthropic-effort') return { output_config: { effort } };
-  if (p.mode === 'anthropic-adaptive') return { thinking: { type: off ? 'disabled' : 'adaptive' }, output_config: { effort: off ? 'low' : effort } };
+  if (p.mode === 'anthropic-adaptive') return { thinking: { type: off ? anthropicThinkingOffType(ref.model) : 'adaptive' }, output_config: { effort: off ? 'low' : effort } };
   if (p.mode === 'anthropic-budget') return { thinking: off ? { type: 'disabled' } : { type: 'enabled', budget_tokens: Math.min(researchThinkingAllowance(effort), Math.max(1024, maxTokens - 1024)) }, ...(researchAdvertisedEfforts(info).includes(effort) ? { output_config: { effort } } : {}) };
   if (p.mode === 'toggle') {
     if (ref.provider === 'groq') return { reasoning_effort: off ? 'none' : 'default' };

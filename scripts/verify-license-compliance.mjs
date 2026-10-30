@@ -41,7 +41,9 @@ const packageLicenses = fs.readFileSync(
 );
 assert.equal(sha256(packageLicenses), buildManifest.packageInventory.sha256);
 for (const requiredPackage of [
-  '@diffusionstudio/vits-web@1.0.3',
+  '@blocknote/core@0.55.0',
+  '@blocknote/react@0.55.0',
+  '@blocknote/ariakit@0.55.0',
   '@github/copilot-sdk@1.0.7',
   '@openai/codex@0.144.6',
   'foundry-local-sdk@1.2.3',
@@ -49,6 +51,9 @@ for (const requiredPackage of [
   'libheif-js@1.19.8',
   'onnxruntime-node@1.21.0',
   `sharp@${json('package-lock.json').packages['node_modules/sharp'].version}`,
+  // Development dependencies of the desktop that ship anyway, in the bundled server's node_modules.
+  `esbuild@${json('package-lock.json').packages['node_modules/esbuild'].version}`,
+  `playwright-core@${json('package-lock.json').packages['node_modules/playwright-core'].version}`,
 ]) {
   assert.match(packageLicenses, new RegExp(`Package: ${requiredPackage.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
 }

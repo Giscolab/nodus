@@ -1,0 +1,203 @@
+// CI-only orchestration. Discover the same files as npm test; never filter by
+// changed paths. Every file keeps Node's process isolation and its Electron ABI.
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { run } from 'node:test';
+import { tap } from 'node:test/reporters';
+import { pipeline } from 'node:stream/promises';
+
+export const shardCount = 6;
+export const fileConcurrency = 2;
+const allowedSkips = new Map([
+  ['streamed protection handles files larger than four GiB', 'Runs in the mandatory four-platform Nodus Support native matrix'],
+  ['Windows PowerShell can load its security module when called through Node from PowerShell 7', 'Runs in the mandatory Windows Nodus Support native matrix'],
+  ['CompassStore persists pagination, selections, saved/dismissed records and bounded cache state', 'better-sqlite3 native addon requires the Electron ABI'],
+  // The fake sidecar needs no model, but its clone-prompt cache is a real NumPy .npz written by
+  // serve.py; a runner without NumPy still exercises every other protocol case.
+  ['caches a clone voice and reuses it', 'numpy is not installed'],
+  ['every published skill has an icon the application can draw', 'no marketplace checkout beside this one; set NODUS_MARKETPLACE_DIR'],
+  // The route-program contract is checked against the chemistry package's own parser and manifest,
+  // which live in a separate repository. Both cases run wherever that checkout is beside this one.
+  ['every program example in the prompt parses against the real grammar', 'the chemistry package checkout is not beside this one'],
+  ['the package declares the fence the rule names, with the fields the rule names', 'the chemistry package checkout is not beside this one'],
+  // Same reason: the application's own tool input is checked against the manifest that declares it.
+  ['every key the forward-step input carries is one the package declares', 'no marketplace checkout beside this one; set NODUS_MARKETPLACE_DIR'],
+  // Local only, with the held rules it checks: the RDKit layer of the stereo guard needs the
+  // operator's index venv and tools/check-prompt-stereo.py, neither of which is in any checkout.
+  ['RDKit agrees with the allow-list, when the index venv is available', 'ord-index/.venv or tools/check-prompt-stereo.py not present; the allow-list check still ran'],
+  // Nodus Sign's real-cryptography cases need a pyHanko interpreter; run them with NODUS_SIGN_PYTHON.
+  ['real PKCS#12 inspection handles wrong, missing and expired certificates', 'Set NODUS_SIGN_PYTHON to run real crypto tests'],
+  ['real PAdES B-B signs incrementally, validates and preserves a previous signature', 'Set NODUS_SIGN_PYTHON to run real crypto tests'],
+  ['multi-page real signatures preserve an earlier signature and reject invalid page selections', 'Set NODUS_SIGN_PYTHON to run real crypto tests'],
+  ['tampering and expired signing are rejected, no output presented as valid', 'Set NODUS_SIGN_PYTHON to run real crypto tests'],
+  ['engine cancellation interrupts the subprocess', 'Set NODUS_SIGN_PYTHON to run real crypto tests'],
+  ['a signature without appearance adds one valid signature and draws nothing on any page', 'Set NODUS_SIGN_PYTHON to run real crypto tests'],
+  ['real automatic Python download and installation can sign and validate without any preinstalled Python', 'Set NODUS_SIGN_INSTALL_TEST=1 to download and install the real engine'],
+]);
+// These ten native macOS cases run as mandatory release checks on Apple
+// silicon. Linux still runs their files and every platform-independent case.
+const macOnlySkips = new Map([
+  ['unsigned macOS updates survive force quit and report interrupted installation', 'scripts/test-unsigned-mac-update.mjs'],
+  ['macOS Multipeer transport completes the native peer protocol', 'scripts/test-presenter-multipeer.mjs'],
+  ['macOS service keeps vaults isolated, persists opt-in, preserves events on disable and retries on restart', 'scripts/test-calendar-integrations.mjs'],
+  ['THE USER-VISIBLE BUG: the released helper cannot install a renamed bundle', 'scripts/test-mac-bundle-name.mjs'],
+  ['the current helper installs a renamed bundle, so this cannot recur after 4.2.4', 'scripts/test-mac-bundle-name.mjs'],
+  ['a released helper installs the bundle name we are about to ship', 'scripts/test-mac-bundle-name.mjs'],
+  ['the update does not leave a second application behind', 'scripts/test-mac-bundle-name.mjs'],
+  ['macOS denies outside writes, descendant writes and forbidden network connections', 'scripts/test-research-isolation.mjs'],
+  ['explicit disposable endpoints are reachable while all other network destinations are denied', 'scripts/test-research-isolation.mjs'],
+  ['the macOS addon starts and stops cleanly, with or without a trackpad', 'scripts/test-sign-trackpad.mjs'],
+]);
+export const isAllowedSkip = (skip, platform = process.platform) =>
+  (allowedSkips.has(skip.name) && allowedSkips.get(skip.name) === skip.reason) ||
+  (platform === 'linux' && skip.reason === true && macOnlySkips.get(skip.name) === skip.file);
+export const commitAt = (root) => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+export const discoverTests = (root) => fs.readdirSync(path.join(root, 'scripts'), { withFileTypes: true })
+  .filter(entry => entry.isFile() && /^test-.*\.mjs$/.test(entry.name))
+  .map(entry => `scripts/${entry.name}`).sort();
+export const browserFixtures = (root, files) => files.filter(file =>
+  /^\s*import\s+[^;]*?\bfrom\s*(['"])playwright(?:-core)?\1/m.test(fs.readFileSync(path.join(root, file), 'utf8')));
+const writeJson = (file, value) => {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+};
+
+export function createPlan(files, commit, durations = {}, count = shardCount, browsers = []) {
+  assert.ok(Number.isInteger(count) && count > 0 && files.length >= count, 'Every shard must contain tests');
+  assert.equal(new Set(files).size, files.length, 'Duplicate test discovery');
+  const browserSet = new Set(browsers);
+  const weight = file => (Number.isFinite(durations[file]) && durations[file] > 0 ? durations[file] : 1000)
+    * (browserSet.has(file) ? fileConcurrency : 1);
+  // E2E has its own runner. Balance only the complete unit/integration suite;
+  // reserving app time in the last shard would leave that runner underused.
+  const shards = Array.from({ length: count }, (_, index) => ({ index: index + 1, files: [], estimatedMs: 0 }));
+  // Longest files first, on the lightest group. Hints only affect placement;
+  // unknown/new files always run and actual process durations are reported.
+  for (const file of [...files].sort((a, b) => weight(b) - weight(a) || a.localeCompare(b))) {
+    // Seed every group before balancing, including small regression fixtures.
+    const empty = shards.filter(shard => shard.files.length === 0);
+    const shard = [...(empty.length ? empty : shards)].sort((a, b) => a.estimatedMs - b.estimatedMs || a.index - b.index)[0];
+    shard.files.push(file);
+    shard.estimatedMs += weight(file);
+  }
+  return { schemaVersion: 1, commit, files: [...files].sort(), shards };
+}
+
+export function validatePlan(plan, files, commit) {
+  assert.equal(plan.schemaVersion, 1, 'Unsupported plan');
+  assert.equal(plan.commit, commit, 'Plan belongs to a different commit');
+  assert.deepEqual(plan.files, [...files].sort(), 'Test discovery changed');
+  assert.equal(plan.shards.length, shardCount, 'Missing shard');
+  assert.deepEqual(plan.shards.map(s => s.index).sort((a, b) => a - b),
+    Array.from({ length: shardCount }, (_, index) => index + 1), 'Duplicate shard index');
+  const assigned = plan.shards.flatMap(shard => {
+    assert.ok(shard.files.length > 0, 'Empty shard');
+    return shard.files;
+  });
+  assert.equal(new Set(assigned).size, assigned.length, 'A test file is assigned more than once');
+  assert.deepEqual(assigned.sort(), [...files].sort(), 'A test file was omitted');
+}
+
+export function validateReports(plan, reports, platform = process.platform) {
+  assert.equal(reports.length, plan.shards.length, 'Missing shard report');
+  assert.equal(new Set(reports.map(r => r.index)).size, reports.length, 'Duplicate shard report');
+  for (const shard of plan.shards) {
+    const report = reports.find(r => r.index === shard.index);
+    assert.ok(report, `Missing report for shard ${shard.index}`);
+    assert.equal(report.schemaVersion, 1);
+    assert.equal(report.commit, plan.commit, 'Report belongs to a different commit');
+    assert.equal(report.success, true, `Shard ${shard.index} did not succeed`);
+    assert.deepEqual([...report.assignedFiles].sort(), [...shard.files].sort(), 'Assigned inventory differs');
+    assert.deepEqual(report.completed.map(r => r.file).sort(), [...shard.files].sort(), 'Incomplete/duplicate execution');
+    assert.ok(report.completed.every(r => r.passed === true && Number.isFinite(r.durationMs)), 'A file did not pass');
+    assert.ok(report.summary?.success && report.summary.counts.tests > 0, 'Missing successful runner summary');
+    assert.equal(report.summary.counts.failed, 0);
+    assert.equal(report.summary.counts.cancelled, 0);
+    assert.equal(report.summary.counts.todo, 0);
+    assert.equal(report.summary.counts.skipped, report.skips.length, 'Unaccounted skipped tests');
+    for (const skip of report.skips) {
+      assert.ok(isAllowedSkip(skip, platform), `New skipped check: ${skip.file}: ${skip.name}`);
+    }
+  }
+}
+
+export async function executeShard(plan, index, root, destination, output = process.stdout) {
+  const shard = plan.shards.find(s => s.index === index);
+  assert.ok(shard, `Unknown shard ${index}`);
+  const selected = new Map(shard.files.map(file => [path.resolve(root, file), file]));
+  const report = { schemaVersion: 1, commit: plan.commit, index, assignedFiles: shard.files, completed: [], skips: [], success: false };
+  const started = Date.now();
+  const browsers = new Set(browserFixtures(root, shard.files));
+  const phases = [
+    { name: 'browser', concurrency: 1, files: shard.files.filter(file => browsers.has(file)) },
+    { name: 'other', concurrency: fileConcurrency, files: shard.files.filter(file => !browsers.has(file)) },
+  ].filter(phase => phase.files.length);
+  report.phases = phases;
+  try {
+    for (const phase of phases) {
+      const stream = run({ files: phase.files.map(file => path.resolve(root, file)), concurrency: phase.concurrency });
+      stream.on('test:complete', data => {
+        // These are the runner's file-process completions, including scripts that
+        // use plain assertions or re-exec under Electron instead of node:test.
+        if (selected.has(data.file) && path.resolve(root, data.name) === data.file) {
+          report.completed.push({ file: selected.get(data.file), passed: data.details.passed, durationMs: data.details.duration_ms });
+        }
+      });
+      stream.on('test:pass', data => {
+        if (data.skip) report.skips.push({ file: path.relative(root, data.file), name: data.name, reason: data.skip });
+      });
+      stream.on('test:summary', data => {
+        if (data.file) return;
+        report.summary ??= { success: true, counts: {}, duration_ms: 0 };
+        report.summary.success &&= data.success;
+        report.summary.duration_ms += data.duration_ms;
+        for (const [key, value] of Object.entries(data.counts)) report.summary.counts[key] = (report.summary.counts[key] ?? 0) + value;
+      });
+      await pipeline(stream.compose(tap), output, { end: false });
+    }
+    report.elapsedMs = Date.now() - started;
+    report.success = Boolean(report.summary?.success) && report.completed.length === shard.files.length
+      && report.completed.every(file => file.passed) && report.summary.counts.todo === 0
+      && report.summary.counts.skipped === report.skips.length
+      && report.skips.every(skip => isAllowedSkip(skip));
+  } finally {
+    writeJson(destination, report);
+  }
+  return report;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const root = process.cwd();
+  const planFile = path.join(root, '.ci/plan.json');
+  const command = process.argv[2];
+  if (command === 'plan') {
+    const hints = JSON.parse(fs.readFileSync(new URL('./ci-test-durations.json', import.meta.url), 'utf8'));
+    const files = discoverTests(root);
+    const plan = createPlan(files, commitAt(root), hints.files, shardCount, browserFixtures(root, files));
+    validatePlan(plan, discoverTests(root), commitAt(root));
+    writeJson(planFile, plan);
+    console.log(JSON.stringify({ files: plan.files.length, shards: plan.shards.map(s => ({ index: s.index, files: s.files.length, estimatedMs: s.estimatedMs })) }));
+  } else if (command === 'run' || command === 'verify') {
+    const plan = JSON.parse(fs.readFileSync(planFile, 'utf8'));
+    validatePlan(plan, discoverTests(root), commitAt(root));
+    if (command === 'run') {
+      const index = Number(process.argv[3]);
+      const report = await executeShard(plan, index, root, path.join(root, `.ci/reports/shard-${index}.json`));
+      if (!report.success) process.exitCode = 1;
+    } else {
+      const reports = fs.readdirSync(path.join(root, '.ci/reports')).filter(f => /^shard-\d+\.json$/.test(f))
+        .map(file => JSON.parse(fs.readFileSync(path.join(root, '.ci/reports', file), 'utf8')));
+      validateReports(plan, reports);
+      const counts = Object.fromEntries(['tests', 'passed', 'failed', 'cancelled', 'skipped', 'todo'].map(key =>
+        [key, reports.reduce((sum, report) => sum + report.summary.counts[key], 0)]));
+      const summary = `All ${plan.files.length} test files completed exactly once.\n\n${JSON.stringify(counts)}\n\n`
+        + '| Group | Files | Execution |\n| --- | ---: | ---: |\n'
+        + reports.map(r => `| ${r.index} | ${r.completed.length} | ${(r.elapsedMs / 60000).toFixed(2)} min |`).join('\n') + '\n';
+      console.log(summary);
+      if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
+    }
+  } else throw new Error('Usage: node scripts/ci-test-shards.mjs plan|run INDEX|verify');
+}

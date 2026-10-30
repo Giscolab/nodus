@@ -1,4 +1,5 @@
 import type { StellarPageRequest, StellarPage, StellarSession, StellarTheme } from '../stellarGraph';
+import type { EmbeddingIndexesApi } from '../embeddingIndexes';
 // The academic and study slice of the window.nodus contract. NodusApi extends it,
 // so the renderer surface stays flat and every call site is unchanged.
 import type { StudyAnnotation, StudyAnnotationInput, StudyDocEditorData, StudyDocUpdateInput } from '../studyEditor';
@@ -238,7 +239,8 @@ export interface AcademicApi extends Pick<import('../researchCorpus').ResearchCo
   'getResearchCorpusSources' | 'listResearchNotebooks' | 'saveResearchNotebook' | 'deleteResearchNotebook' | 'resolveResearchNotebook' | 'updateResearchNotebookAppearance' | 'getResearchNotebookPreparation' | 'searchResearchNotebook' | 'readResearchDocument'
   | 'getResearchPreparationPolicy' | 'setResearchPreparationPolicy' | 'previewResearchPreparation' | 'startResearchPreparationCampaign' | 'getResearchPreparationProgress' | 'onResearchPreparationProgress' | 'controlResearchPreparationCampaign' | 'controlAllResearchPreparation'
   | 'getResearchPreparationInventory' | 'prepareResearchDocuments' | 'indexResearchWorks' | 'cancelResearchDocuments' | 'setResearchPreparationEnabled' | 'setResearchPreparationPaused'
-  | 'setResearchZoteroAutomatic' | 'getZoteroMcpStatus' | 'connectResearchZotero' | 'disconnectResearchZotero' | 'readResearchZotero'> {
+  | 'setResearchZoteroAutomatic' | 'getZoteroMcpStatus' | 'connectResearchZotero' | 'disconnectResearchZotero' | 'readResearchZotero'>, EmbeddingIndexesApi {
+  exportAcademicDocument(input: {documentId:string;kind:'note'|'study';expectedRevision?:number;format:import('../academicDocument').AcademicExportFormat;acceptWarnings?:boolean}): Promise<{base64:string;mime:string;fileName:string;html:string}>;
   // Dictionary: persistent evidence-backed concept syntheses
   listDictionaryEntries(request: DictionaryListRequest): Promise<DictionaryEntryPage>;
   listDictionaryFacets(): Promise<DictionaryFacets>;
@@ -307,7 +309,7 @@ export interface AcademicApi extends Pick<import('../researchCorpus').ResearchCo
   /** Snapshot the DB into userData/backups before a destructive maintenance action; returns the path. */
   backupDatabase(): Promise<string>;
   /** Live bibliographic metadata for a work (journal/book, pages, publisher, …). */
-  getWorkMeta(nodusId: string): Promise<WorkMeta | null>;
+  getWorkMeta(nodusId: string, options?: { timeoutMs: number }): Promise<WorkMeta | null>;
   openInZotero(zoteroKey: string): Promise<void>;
   /**
    * Open an evidence locator at its exact page. Zotero's own reader is preferred
@@ -465,7 +467,7 @@ export interface AcademicApi extends Pick<import('../researchCorpus').ResearchCo
   updateStudyAnnotation(id: string, patch: Partial<StudyAnnotationInput> & { resolved?: boolean }): Promise<StudyAnnotation | null>;
   deleteStudyAnnotation(id: string): Promise<void>;
   transcribeStudyAudio(request: StudySttRequest, handlers?: StudySttStreamHandlers): Promise<StudySttResult>;
-  cancelStudyTranscription(): Promise<void>;
+  cancelStudyTranscription(requestId?: string): Promise<void>;
   getWhisperCppStatus(): Promise<WhisperCppStatus>;
   installWhisperCpp(): Promise<WhisperCppStatus>;
   uninstallWhisperCpp(): Promise<WhisperCppStatus>;
@@ -561,7 +563,8 @@ export interface AcademicApi extends Pick<import('../researchCorpus').ResearchCo
   updateStudyAssistantConversation(id: string, patch: StudyAssistantConversationPatch): Promise<StudyAssistantConversation | null>;
   deleteStudyAssistantConversation(id: string): Promise<void>;
   streamStudyAssistant(request: StudyAssistantRequest, handlers: StudyAssistantStreamHandlers): Promise<StudyAssistantResponse>;
-  cancelStudyAssistant(): Promise<void>;
+  /** Without a conversation, aborts the stream started last. */
+  cancelStudyAssistant(conversationId?: string): Promise<void>;
   exportStudyAssistantConversation(id: string): Promise<{ path: string } | null>;
   listStudyQuestions(filters?: StudyQuestionFilters): Promise<StudyQuestion[]>;
   getStudyQuestion(id: string): Promise<StudyQuestion | null>;
@@ -730,11 +733,18 @@ export interface AcademicApi extends Pick<import('../researchCorpus').ResearchCo
   researchChat(request: ResearchChatRequest): Promise<ResearchChatResponse>;
   researchChatStream(request: ResearchChatRequest, handlers: ResearchChatStreamHandlers): Promise<ResearchChatResponse>;
   /**
-   * Abort the research-chat stream currently in flight. The pending
+   * Abort the research-chat stream of that conversation (without one, the stream
+   * started last). Other conversations keep answering. The pending
    * {@link researchChatStream} promise then resolves with whatever partial
    * answer had streamed so far (never rejects), so the UI can keep the text.
    */
-  cancelResearchChat(): Promise<void>;
+  cancelResearchChat(conversationId?: string): Promise<void>;
+  listResearchRuns?(conversationId?: string, entryId?: string): Promise<import('../researchHarness').ResearchRunSummary[]>;
+  getResearchRun?(id: string): Promise<import('../researchHarness').ResearchRunSummary | null>;
+  pauseResearchRun?(id: string): Promise<import('../researchHarness').ResearchRunSummary | null>;
+  cancelResearchRun?(id: string): Promise<import('../researchHarness').ResearchRunSummary | null>;
+  resumeResearchRun?(id: string): Promise<{ mode: string; artifactId?: string }>;
+  onResearchRun?(callback: (run: import('../researchHarness').ResearchRunSummary) => void): () => void;
 
   // writing workshop
   getWritingWorkshopSnapshot(brief: WritingWorkshopBrief): Promise<WritingWorkshopSnapshot>;
@@ -829,7 +839,7 @@ export interface AcademicApi extends Pick<import('../researchCorpus').ResearchCo
   saveConversationMessages(
     id: string,
     messages: ChatMessageRecord[],
-    meta?: { model?: ModelRef | null; selection?: ResearchContextSelection | null }
+    meta?: { model?: ModelRef | null; selection?: ResearchContextSelection | null; vaultId?: string }
   ): Promise<void>;
   /** Ask the model for a short title from the conversation so far; persists + returns it. */
   generateConversationTitle(id: string, model?: ModelRef | null): Promise<string>;
@@ -960,6 +970,9 @@ export interface AcademicApi extends Pick<import('../researchCorpus').ResearchCo
   /** Search across ideas, works, gaps, themes, authors and notes. */
   searchVaultContent(query: string, kinds?: string[], semantic?: boolean, limit?: number): Promise<import('../hybridSearch').VaultContentSearchResponse>;
   globalSearch(query: string, limitPerKind?: number, kinds?: SearchResultKind[]): Promise<GlobalSearchResult[]>;
+  /** Metadata-only link catalogue, scoped to the active vault and visible ideas. */
+  inspectAcademicDocument(input:{documentId:string;kind:'note'|'study';expectedRevision?:number}):Promise<import('../academicDocument').AcademicIssue[]>;
+  listEditorReferences(options?:import('../editorReferences').EditorReferenceOptions): Promise<import('../editorReferences').EditorReference[]>;
   getSearchResultDetail(kind: SearchResultKind, id: string): Promise<SearchResultDetail | null>;
   /** Search by meaning over embedded ideas, passages and works. */
   semanticSearch(query: string, options?: SemanticSearchOptions): Promise<SemanticSearchResponse>;

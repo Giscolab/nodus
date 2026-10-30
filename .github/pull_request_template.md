@@ -4,7 +4,7 @@
 
 ## Related issue
 
-<!-- Required: every pull request must reference an existing issue. Open one first if none exists, and use "Closes #123" when this pull request should close it. -->
+<!-- Required: link an existing issue from Development, or use "Closes #123" / "Fixes #123" below when targeting the default branch. A plain issue mention does not create the link checked by "Issue linked". Open an issue first if none exists. -->
 
 ## Type of change
 
@@ -40,7 +40,7 @@
 
 - [ ] This pull request is written in English and references an existing issue.
 - [ ] I attached screenshots whenever possible (before-and-after for UI changes, reproduction evidence for bug fixes).
-- [ ] I have read [CLA.md](https://github.com/Drakonis96/nodus/blob/main/CLA.md) and accepted it through the **CLA / signature** check. Every author and coauthor must accept separately; this checkbox alone is not acceptance.
+- [ ] I have read [CLA.md](https://github.com/jorgepb96/nodus/blob/main/CLA.md) and accepted it through the **CLA / signature** check. Every author and coauthor must accept separately; this checkbox alone is not acceptance.
 - [ ] I added or updated focused tests.
 - [ ] I updated documentation where behavior changed.
 - [ ] I updated every language table for new static UI text.

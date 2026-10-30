@@ -1,21 +1,35 @@
+import { RESEARCH_QUEUE_TRANSLATIONS } from './i18n.researchQueue';
+import { EMBEDDING_INDEX_TRANSLATIONS } from './i18n.embeddingIndexes';
+import { RESEARCH_HARNESS_TRANSLATIONS } from './i18n.researchHarness';
+import { EMBEDDING_GEMMA2_TRANSLATIONS } from './i18n.embeddingGemma2';
+import { SIGN_TRANSLATIONS } from './i18n.sign';
+import { CHAT_ORGANIZATION_HELP_TRANSLATIONS } from './i18n.chatOrganizationHelp';
+import { RESEARCH_CHAT_SELECTION_TRANSLATIONS } from './i18n.researchChatSelection';
+import { ACADEMIC_INTERFACE_TRANSLATIONS } from './i18n.academicInterface';
+import { BACKUPS_TRANSLATIONS } from './i18n.backups';
+import { SCRIPTOR_AI_TRANSLATIONS } from './i18n.scriptorAi';
 import { RESEARCH_CHAT_HISTORY_TRANSLATIONS } from './i18n.researchChatHistory';
 import { RESEARCH_ACTIVITY_TRANSLATIONS } from './i18n.researchActivity';
 import { RESEARCH_NOTEBOOK_TRANSLATIONS } from './i18n.researchNotebooks';
 import { CALENDAR_SYNC_TRANSLATIONS } from './i18n.calendarSync';
+import { AGENT_RUNTIME_TRANSLATIONS } from './i18n.agentRuntimes';
 import { ACADEMIC_MANUAL_TRANSLATIONS } from './i18n.academicManual';
 import { STUDY_SOURCE_TRANSLATIONS } from './i18n.studySources';
 import { COMPLETE_GUIDE_TRANSLATIONS } from './i18n.completeGuide';
 import { STUDY_FOCUS_TRANSLATIONS } from './i18n.studyFocus';
 import { STUDY_NOTE_LINKS_TRANSLATIONS } from './i18n.studyNoteLinks';
+import { BOOKMARK_SORT_TRANSLATIONS } from './i18n.bookmarkSort';
 import { CONCILIUM_TRANSLATIONS } from './i18n.concilium';
 import { DRIFT_TRANSLATIONS } from './i18n.drift';
 import { RESEARCH_ATTACHMENT_TRANSLATIONS } from './i18n.researchAttachments';
+import { RESEARCH_VERIFICATION_TRANSLATIONS } from './i18n.researchVerification';
 import { VAULT_FILE_DROP_TRANSLATIONS } from './i18n.vaultFileDrop';
 import { DOCUMENT_SKILLS_TRANSLATIONS } from './i18n.documentSkills';
 import { RESEARCH_PROMPT_TRANSLATIONS } from './i18n.researchPrompts';
 import { RESEARCH_SOURCE_TRANSLATIONS } from './i18n.researchSources';
 import { RESEARCH_REASONING_TRANSLATIONS } from './i18n.researchReasoning';
 import { CHAT_SKILLS_TRANSLATIONS } from './i18n.chatSkills';
+import { NARRATION_TRANSLATIONS } from './i18n.narration';
 import { CAPABILITIES_TRANSLATIONS } from './i18n.capabilities';
 import { STELLAR_GRAPH_TRANSLATIONS } from './i18n.stellarGraph';
 import { PROTECT_TRANSLATIONS } from './i18n.protect';
@@ -66,11 +80,15 @@ import { SOURCE_CITATION_TRANSLATIONS } from './i18n.sourceCitation';
 import { DEEP_RESEARCH_APPROACH_TRANSLATIONS } from './i18n.deepResearchApproaches';
 import { DICTIONARY_TRANSLATIONS } from './i18n.dictionary';
 import { DEEP_RESEARCH_VERSION_TRANSLATIONS } from './i18n.deepResearchVersions';
+import { GALLERY_FILTER_TRANSLATIONS } from './i18n.galleryFilters';
 import { DOCUMENT_UNDERSTANDING_TRANSLATIONS } from './i18n.documentUnderstanding';
 import { STALE_MODEL_TRANSLATIONS } from './i18n.staleModels';
+import { SCHEME_DECLUTTER_TRANSLATIONS } from './i18n.schemeDeclutter';
+import { CHEMISTRY_STOCK_TRANSLATIONS } from './i18n.chemistryStock';
 import { DEEP_RESEARCH_QUALITY_TRANSLATIONS } from './i18n.deepResearchQuality';
 import { TEXT_PROVENANCE_TRANSLATIONS } from './i18n.textProvenance';
 import { MODEL_SETTINGS_TRANSLATIONS } from './i18n.modelSettings';
+import { SETTINGS_LAYOUT_TRANSLATIONS } from './i18n.settingsLayout';
 import { ADAPTIVE_CONCURRENCY_TRANSLATIONS } from './i18n.adaptiveConcurrency';
 import { DATABASE_DEEP_RESEARCH_TRANSLATIONS } from './i18n.databaseDeepResearch';
 import { ACADEMIC_TOUR_TRANSLATIONS } from './i18n.academicTour';
@@ -82,9 +100,12 @@ import { ACADEMIC_TOUR_TRANSLATIONS } from './i18n.academicTour';
  * translator's review debt and should be treated as a first pass.
  */
 export const KO: Record<string, string> = {
+  ...EMBEDDING_INDEX_TRANSLATIONS["ko"],
+  ...BACKUPS_TRANSLATIONS.ko,
   // First, so every entry below wins: the server's English-only keys.
   ...SERVER_ENGLISH_FALLBACKS.ko,
   ...CALENDAR_SYNC_TRANSLATIONS["ko"],
+  ...AGENT_RUNTIME_TRANSLATIONS["ko"],
   ...ACADEMIC_MANUAL_TRANSLATIONS["ko"],
   // Nodus Tools catalogue
   "Navega por la web y guarda fuentes para tu investigación.": "웹을 탐색하고 연구 자료를 저장하세요.",
@@ -96,13 +117,16 @@ export const KO: Record<string, string> = {
   ...RESEARCH_ACTIVITY_TRANSLATIONS.ko,
   ...RESEARCH_CHAT_HISTORY_TRANSLATIONS.ko,
   ...RESEARCH_ATTACHMENT_TRANSLATIONS.ko,
+  ...RESEARCH_VERIFICATION_TRANSLATIONS['ko'],
   ...VAULT_FILE_DROP_TRANSLATIONS['ko'],
   ...DOCUMENT_SKILLS_TRANSLATIONS.ko,
   ...RESEARCH_PROMPT_TRANSLATIONS.ko,
   ...RESEARCH_SOURCE_TRANSLATIONS.ko,
+  ...RESEARCH_HARNESS_TRANSLATIONS["ko"],
   ...RESEARCH_REASONING_TRANSLATIONS.ko,
   ...RESEARCH_NOTEBOOK_TRANSLATIONS["ko"],
   ...CHAT_SKILLS_TRANSLATIONS.ko,
+  ...NARRATION_TRANSLATIONS['ko'],
   ...CAPABILITIES_TRANSLATIONS.ko,
   ...STELLAR_GRAPH_TRANSLATIONS.ko,
   ...PROTECT_TRANSLATIONS.ko,
@@ -121,6 +145,8 @@ export const KO: Record<string, string> = {
   ...COMPLETE_GUIDE_TRANSLATIONS["ko"],
   ...STUDY_FOCUS_TRANSLATIONS["ko"],
   ...STUDY_NOTE_LINKS_TRANSLATIONS["ko"],
+  ...BOOKMARK_SORT_TRANSLATIONS["ko"],
+  ...SCRIPTOR_AI_TRANSLATIONS["ko"],
   ...STUDY_IMPROVE_TRANSLATIONS.ko,
   ...WORKSPACE_TRANSLATIONS.ko,
   ...WORLDBUILDING_TRANSLATIONS.ko,
@@ -157,11 +183,16 @@ export const KO: Record<string, string> = {
   ...DEEP_RESEARCH_APPROACH_TRANSLATIONS.ko,
   ...DICTIONARY_TRANSLATIONS.ko,
   ...DEEP_RESEARCH_VERSION_TRANSLATIONS.ko,
+  ...GALLERY_FILTER_TRANSLATIONS.ko,
   ...DOCUMENT_UNDERSTANDING_TRANSLATIONS.ko,
   ...STALE_MODEL_TRANSLATIONS.ko,
+  ...SCHEME_DECLUTTER_TRANSLATIONS.ko,
+  ...CHEMISTRY_STOCK_TRANSLATIONS.ko,
   ...DEEP_RESEARCH_QUALITY_TRANSLATIONS.ko,
   ...TEXT_PROVENANCE_TRANSLATIONS.ko,
   ...MODEL_SETTINGS_TRANSLATIONS.ko,
+  ...SETTINGS_LAYOUT_TRANSLATIONS.ko,
+  ...EMBEDDING_GEMMA2_TRANSLATIONS['ko'],
   ...ADAPTIVE_CONCURRENCY_TRANSLATIONS.ko,
   ...DATABASE_DEEP_RESEARCH_TRANSLATIONS.ko,
   ...ACADEMIC_TOUR_TRANSLATIONS.ko,
@@ -793,7 +824,7 @@ export const KO: Record<string, string> = {
   "Resume las ideas esenciales y señala qué debería recordar.": "핵심 아이디어를 요약하고 기억해야 할 사항을 지적합니다.",
   "¿Qué contradicciones o puntos incompletos aparecen en el material?": "자료에 어떤 모순이나 격차가 나타나는가?",
   "Documento": "문서",
-  "En lectura": "독서",
+  "En lectura": "읽는 중",
   "Revisado": "검토됨",
   "Nuevo material": "신소재",
   "Causa": "원인",
@@ -870,7 +901,7 @@ export const KO: Record<string, string> = {
   "Tests": "테스트",
   "Exámenes": "시험",
   "Planificador": "입안자",
-  "Progreso": "진전",
+  "Progreso": "진행률",
   "Chat de estudio": "스터디 채팅",
   "Organiza cursos, asignaturas, temas y apuntes.": "코스, 과목, 주제 및 메모를 구성합니다.",
   "Reúne documentos, grabaciones y fuentes.": "문서, 녹음, 소스를 함께 가져오세요.",
@@ -1152,7 +1183,7 @@ export const KO: Record<string, string> = {
   "Ver en Debates": "토론에서 보기",
   "Esta sub-pregunta no está cubierta por mi biblioteca. Sugiere cómo abordarla y qué tipo de fuentes buscar.": "이 하위 질문은 내 라이브러리에서 다루지 않습니다. 이를 해결하는 방법과 찾을 소스의 종류를 제안하십시오.",
   "Sub-pregunta sin cubrir": "밝혀진 하위 질문",
-  "No leída": "읽히지 않는",
+  "No leída": "읽지 않음",
   "borrador": "초안",
   "descompuesta": "분해된",
   "mapeada": "매핑된",
@@ -1268,7 +1299,7 @@ export const KO: Record<string, string> = {
   "Nodus Compass": "Nodus 나침반",
   "Nodus Tools": "Nodus 도구",
   "Herramientas prácticas y local-first para convertir archivos y procesar documentos, integradas en Nodus.": "Nodus에 내장된 파일 변환 및 문서 처리를 위한 편리한 로컬 우선 도구입니다.",
-  "Nodus PDF Presenter": "Nodus PDF 발표자",
+  'Nodus Presenter': 'Nodus Presenter',
   "Presentar archivos PDF y presentaciones externas con vista del presentador, control remoto desde el móvil, notas del orador y herramientas de anotación en directo.": "발표자 보기, 모바일 원격 제어, 발표자 노트, 실시간 주석 도구를 사용하여 PDF와 외부에서 제작한 프레젠테이션을 발표하세요.",
   "Nodus OCR Workspace": "Nodus OCR 작업 공간",
   "OCR asistido por IA para PDF escaneados e imágenes, con revisión página a página, limpieza de texto, reprocesamiento e integración directa con las bóvedas de Nodus.": "페이지별 검토, 텍스트 정리, 재처리 및 Nodus 저장소와의 직접 통합을 통해 스캔한 PDF 및 이미지에 대한 AI 기반 OCR입니다.",
@@ -2039,7 +2070,7 @@ export const KO: Record<string, string> = {
   "Detener y eliminar de la cola": "중지하고 대기열에서 제거",
   "Eliminar de la cola": "대기열에서 제거",
   "Se quitarán de la cola los elementos pendientes y los ya terminados. El elemento en curso seguirá procesándose.": "보류 중인 항목과 이미 완료된 항목은 대기열에서 제거됩니다. 진행 중인 항목은 계속 처리됩니다.",
-  "Limpiar": "분명한",
+  "Limpiar": "지우기",
   "Se detendrá el escaneo en curso y se eliminarán todos los elementos de la cola. Esta acción no se puede deshacer.": "진행 중인 검사가 중지되고 모든 대기열 항목이 제거됩니다. 이 작업은 취소할 수 없습니다.",
   "Detener y vaciar": "멈추고 비워라",
   "Error": "오류",
@@ -2102,7 +2133,7 @@ export const KO: Record<string, string> = {
   "trabajos en cola": "대기 중인 작업",
   "trabajos registrados": "기록된 작업",
   "Ver obras": "작품보기",
-  "progreso": "진전",
+  "progreso": "진행 상황",
   "pausada": "일시중지됨",
   "activa": "활성",
   "{n} fallidos": "{n} 실패",
@@ -2117,7 +2148,7 @@ export const KO: Record<string, string> = {
   "huecos minados": "채굴된 격차",
   "Revisar": "검토",
   "contradicciones": "모순",
-  "por leer": "읽기",
+  "por leer": "읽지 않음",
   "lista": "준비가 된",
   "pendiente": "보류 중",
   "taller académico": "학술 워크숍",
@@ -2406,15 +2437,15 @@ export const KO: Record<string, string> = {
   "Incluir leídas": "읽은 내용 포함",
   "Describe tu investigación, preguntas principales, objetivos o prioridades actuales...": "연구, 주요 질문, 목표 또는 현재 우선순위를 설명하세요.",
   "Mostradas": "표시됨",
-  "Leídas": "읽다",
-  "Por leer": "읽으려면",
+  "Leídas": "읽음",
+  "Por leer": "읽지 않음",
   "Analizadas": "분석됨",
   "Pendientes": "보류 중",
   "Sin plan calculado.": "계산된 계획이 없습니다.",
   "Recalculando ruta...": "경로를 다시 계산하는 중...",
   "{n} fuera del bloque": "{n} 블록 외부",
   "No hay obras que cumplan los filtros actuales.": "현재 필터와 일치하는 작품이 없습니다.",
-  "leída": "읽다",
+  "leída": "읽음",
   "ideas analizadas": "분석된 아이디어",
   "ideas pendientes": "보류 중인 아이디어",
   "temas analizados": "분석된 주제",
@@ -2721,8 +2752,8 @@ export const KO: Record<string, string> = {
   "Buscar dentro del documento": "이 문서 내에서 검색",
   "Preparando el índice de búsqueda…": "검색 색인 작성 중…",
   "Este archivo no contiene una capa de texto que Nodus pueda buscar.": "이 파일에는 Nodus가 검색할 수 있는 텍스트 레이어가 없습니다.",
-  "Este PDF no contiene texto buscable. Abre el Markdown limpio para consultar el OCR.": "이 PDF에는 검색 가능한 텍스트가 없습니다. 깨끗한 Markdown을 열어 OCR 텍스트를 참조하세요.",
-  "Las imágenes no contienen una capa textual. Usa el Markdown limpio para buscar el OCR.": "이미지에는 텍스트 레이어가 없습니다. OCR 텍스트를 검색하려면 클린 Markdown을 사용하세요.",
+  "Este PDF no contiene texto buscable. Abre el Markdown para consultar el OCR.": "이 PDF에는 검색 가능한 텍스트가 없습니다. Markdown을 열어 OCR 텍스트를 참조하세요.",
+  "Las imágenes no contienen una capa textual. Usa el Markdown para buscar el OCR.": "이미지에는 텍스트 레이어가 없습니다. OCR 텍스트를 검색하려면 Markdown을 사용하세요.",
   "Coincidencia {current} de {total}": "{total} 중 {current} 일치",
   "No se encontró ese texto": "일치하는 항목이 없습니다.",
   "Ir a la coincidencia anterior": "이전 경기로 이동",
@@ -2749,7 +2780,7 @@ export const KO: Record<string, string> = {
   "Abrir a pantalla completa": "전체 화면 열기",
   "Lectura a pantalla completa": "전체 화면 읽기",
   "Salir de pantalla completa": "전체 화면 나가기",
-  "Leer": "읽다",
+  "Leer": "읽기",
   "Reutilizar la idea para un informe nuevo": "새 보고서에 아이디어 재사용",
   "Volver a la galería": "갤러리로 돌아가기",
   "El informe desarrolla tu idea por completo, citando todo el corpus.": "보고서는 전체 자료를 인용하여 귀하의 아이디어를 전체적으로 전개합니다.",
@@ -2842,7 +2873,7 @@ export const KO: Record<string, string> = {
   "Toda la mesa": "테이블 전체",
   "Todas las ideas": "모든 아이디어",
   "Vaciar ideas": "명확한 아이디어",
-  "Vaciar": "분명한",
+  "Vaciar": "비우기",
   "Contrad.": "대조.",
   "Rutas": "노선",
   "{a}/{b} en esta pestaña": "이 탭의 {a}/{b}",
@@ -3228,7 +3259,7 @@ export const KO: Record<string, string> = {
   "temas comunes": "공유 테마",
   "Ideas del autor": "작가의 아이디어",
   "Este autor aún no tiene ideas extraídas. Analiza sus obras.": "이 작성자는 아직 추출된 아이디어가 없습니다. 그들의 작품을 분석해보세요.",
-  "Leído": "읽다",
+  "Leído": "읽음",
   "Construyendo la matriz…": "매트릭스 구축…",
   "Aún no hay suficientes autores y temas analizados para construir la matriz.": "분석된 작성자와 테마가 아직 충분하지 않아 매트릭스를 구축할 수 없습니다.",
   "Filas = autores, columnas = temas. Cada celda muestra cuántas ideas aporta ese autor al tema; haz clic para ver las ideas y generar una postura.": "행 = 작성자, 열 = 테마. 각 셀은 저자가 주제에 얼마나 많은 아이디어를 기여했는지 보여줍니다. 아이디어를 보고 입장을 생성하려면 클릭하세요.",
@@ -3297,7 +3328,7 @@ export const KO: Record<string, string> = {
   "Evaluando": "평가 중",
   "Evaluando...": "평가 중...",
   "Falta": "없어진",
-  "Leída": "읽다",
+  "Leída": "읽음",
   "principales": "기본",
   "pasajes": "구절",
   "Sin enlace Zotero": "Zotero 링크 없음",
@@ -3417,7 +3448,7 @@ export const KO: Record<string, string> = {
   "Contenido": "콘텐츠",
   "Crear una idea manual indexable": "색인 생성 가능한 수동 아이디어 만들기",
   "Cuerpo de cada nota": "각 음표의 본문",
-  "Deshacer": "끄르다",
+  "Deshacer": "실행 취소",
   "elemento": "목",
   "Esta carpeta tiene un resumen": "이 폴더에는 요약이 있습니다.",
   "Estructura completa con ids y metadatos, ideal para procesar.": "ID와 메타데이터가 포함된 전체 구조로 처리에 이상적입니다.",
@@ -3430,7 +3461,7 @@ export const KO: Record<string, string> = {
   "Jerarquía legible, ideal para entregar a una IA.": "AI에 전달하는 데 이상적인 읽기 가능한 계층 구조입니다.",
   "JSON": "JSON",
   "Mantener": "유지하다",
-  "Markdown": "가격 인하",
+  "Markdown": "Markdown",
   "Mover": "이동하다",
   "Notas reordenadas por IA.": "AI가 메모를 재정렬했습니다.",
   "Ordenar notas": "메모 정렬",
@@ -5349,6 +5380,7 @@ export const KO: Record<string, string> = {
   "Cambiar modelo": "모델 변경",
   "Si cambias de modelo de embeddings, los vectores anteriores no servirán con el nuevo modelo y tendrás que reindexar.": "임베딩 모델을 변경하면 기존 벡터가 새 모델에서 작동하지 않으므로 다시 색인을 생성해야 합니다.",
   "Embeddings multilingües de alta calidad para corpus amplios.": "대규모 말뭉치를 위한 고품질 다국어 임베딩입니다.",
+  "Embeddings multilingües de Microsoft con instrucción de búsqueda. La mejor puntuación MTEB multilingüe de los modelos locales; reserva unos 6,5 GB de memoria de GPU, así que conviene un equipo con 16 GB o más.": "검색 지시문을 사용하는 Microsoft의 다국어 임베딩입니다. 로컬 모델 중 다국어 MTEB 점수가 가장 높으며 약 6.5GB의 GPU 메모리를 예약하므로 16GB 이상의 메모리를 갖춘 컴퓨터를 권장합니다.",
   "Embeddings multilingües con contexto largo y buen equilibrio entre precisión y memoria.": "정확성과 메모리 사용의 균형이 잘 잡힌 긴 상황의 다국어 임베딩입니다.",
   "Opción ligera y rápida para equipos con menos memoria.": "메모리가 적은 컴퓨터를 위한 가볍고 빠른 옵션입니다.",
   "Modelo visual muy ligero para conversación, resúmenes e ideas.": "대화, 요약 및 아이디어를 위한 매우 가벼운 비전 모델입니다.",
@@ -6450,7 +6482,7 @@ export const KO: Record<string, string> = {
   "Notas del presentador": "발표자 노트",
   "Notas importadas": "가져온 메모",
   "Notas — {name}": "참고 — {name}",
-  "Rehacer": "다시 하다",
+  "Rehacer": "다시 실행",
   "Se guarda automáticamente": "자동으로 저장됨",
   "Se importaron notas para {n} diapositivas.": "{n} 슬라이드에 대한 노트를 가져왔습니다.",
   "Aumentar": "증가하다",
@@ -7601,7 +7633,7 @@ export const KO: Record<string, string> = {
   "Activar Global": "글로벌 활성화",
   "Configura las copias de seguridad para activar Global.": "글로벌을 활성화하도록 백업을 구성합니다.",
   "Biblioteca global activada.": "전역 라이브러리가 활성화되었습니다.",
-  "Global reúne originales y Markdown limpio para todos tus vaults.": "Global은 모든 저장소에 원본과 깨끗한 Markdown을 함께 제공합니다.",
+  "Global reúne originales y Markdown para todos tus vaults.": "Global은 모든 저장소에 원본과 Markdown을 함께 제공합니다.",
   "Este vault conserva colecciones, scans, resúmenes, embeddings y análisis existentes.": "이 저장소는 기존 컬렉션, 스캔, 요약, 임베딩 및 분석을 보존합니다.",
   "Activa la Biblioteca global cuando quieras; este vault no cambiará.": "원할 때마다 글로벌 라이브러리를 활성화하세요. 이 저장소는 변경되지 않습니다.",
   "Light": "빛",
@@ -8231,4 +8263,53 @@ export const KO: Record<string, string> = {
   "Sent": "전송됨",
   ...CONCILIUM_TRANSLATIONS['ko'],
   ...DRIFT_TRANSLATIONS['ko'],
+  // PDF Presenter — editorial workspace
+  "Organiza tus diapositivas. Comparte tus ideas.": "슬라이드를 정리하고 아이디어를 공유하세요.",
+  "Buscar por número o notas…": "번호 또는 노트로 검색…",
+
+  // PDF Presenter folder navigation.
+  "Editar carpeta": "폴더 편집",
+  "Carpeta principal": "상위 폴더",
+  "Biblioteca principal": "기본 라이브러리",
+  "Color personalizado": "사용자 지정 색상",
+  "Ruta de carpetas": "폴더 경로",
+  "Opciones de la carpeta {name}": "{name} 폴더 옵션",
+  "No se pudo eliminar la carpeta.": "폴더를 삭제할 수 없습니다.",
+  "Se eliminará la carpeta «{name}» y sus subcarpetas ({n}).": "“{name}” 폴더와 하위 폴더({n}개)가 삭제됩니다.",
+  "¿Qué quieres hacer con sus {n} presentaciones?": "포함된 프레젠테이션 {n}개를 어떻게 처리할까요?",
+  "Conservar presentaciones": "프레젠테이션 유지",
+  "Moverlas a la biblioteca principal, con sus notas y vídeos.": "노트 및 동영상과 함께 기본 라이브러리로 이동합니다.",
+  "Eliminar también las presentaciones": "프레젠테이션도 삭제",
+  "Se eliminarán sus copias de la biblioteca. Los archivos originales se conservarán.": "라이브러리의 복사본이 삭제됩니다. 원본 파일은 유지됩니다.",
+  "Eliminar carpeta y presentaciones": "폴더 및 프레젠테이션 삭제",
+  "Ciencia": "과학",
+  "Arte": "예술",
+  "Favoritos": "즐겨찾기",
+  "Conexión móvil": "모바일 연결",
+  "Navegador web": "웹 브라우저",
+  "App iPhone–iPad": "iPhone–iPad 앱",
+  "Escanea desde Nodus Presenter. Mantén Wi-Fi encendido en el Mac y el móvil; no necesitas el router de la sala.": "Nodus Presenter로 스캔하세요. Mac과 모바일 기기의 Wi-Fi를 켜 두세요. 현장 라우터는 필요하지 않습니다.",
+  "El enlace nativo no está disponible. Requiere macOS y permiso de red local.": "네이티브 연결을 사용할 수 없습니다. macOS와 로컬 네트워크 권한이 필요합니다.",
+  "Escanea desde Nodus Presenter. Conecta el ordenador y el móvil a la misma red local.": "Nodus Presenter로 스캔하세요. 컴퓨터와 휴대폰을 같은 로컬 네트워크에 연결하세요.",
+  "El enlace de la app no está disponible. Comprueba la conexión de red e inicia de nuevo la presentación.": "앱 연결을 사용할 수 없습니다. 네트워크 연결을 확인하고 프레젠테이션을 다시 시작하세요.",
+  // Live local dictation in Scriptor.
+  "No se pudo iniciar el micrófono.": "마이크를 시작할 수 없습니다.",
+  "Dictado pausado para terminar el audio pendiente. Reanuda cuando esté listo.": "대기 중인 오디오를 처리하기 위해 받아쓰기를 일시 중지했습니다. 완료되면 다시 시작하세요.",
+  "Preparando dictado…": "받아쓰기 준비 중…",
+  "Cancelar dictado": "받아쓰기 취소",
+  "Dictado en directo · Local": "실시간 받아쓰기 · 로컬",
+  "Escuchando…": "듣는 중…",
+  "El texto se inserta automáticamente en el cursor.": "텍스트가 커서 위치에 자동으로 삽입됩니다.",
+  "Opciones de dictado": "받아쓰기 옵션",
+  "Descarga un modelo local de transcripción en Ajustes → Modelos IA para dictar.": "받아쓰기를 사용하려면 설정 → AI 모델에서 로컬 전사 모델을 다운로드하세요.",
+  "Audio pendiente": "대기 중인 오디오",
+  "Modelo local": "로컬 모델",
+  "Detener dictado": "받아쓰기 중지",
+  ...ACADEMIC_INTERFACE_TRANSLATIONS["ko"],
+  ...CHAT_ORGANIZATION_HELP_TRANSLATIONS["ko"],
+  ...RESEARCH_CHAT_SELECTION_TRANSLATIONS["ko"],
 };
+
+Object.assign(KO, SIGN_TRANSLATIONS['ko']);
+
+Object.assign(KO, RESEARCH_QUEUE_TRANSLATIONS['ko']);

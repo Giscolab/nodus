@@ -3,21 +3,63 @@ import type { NodusDocTopic } from './types';
 /** Nodus Toolkit: the hub and each tool with its requirements and limits. */
 export const TOOL_DOC_TOPICS: readonly NodusDocTopic[] = [
   {
+    id: 'toolkit-sign', area: 'tools',
+    title: { es: 'Nodus Sign: firmas PDF locales', en: 'Nodus Sign: local PDF signatures' },
+    keywords: ['sign', 'firma', 'manuscrita', 'certificado', 'pades', 'pkcs12', 'pdf'],
+    body: {
+      es: `- Abre Nodus Sign desde Tools y fija su tarjeta en la barra lateral. Importa un PDF del equipo, arrástralo o elígelo de los archivos de Nodus.
+- Crea varias firmas dibujando con cursor, lápiz o pantalla táctil, o importa una imagen. La captura directa del dedo sobre el trackpad no está disponible. La biblioteca de firmas y perfiles es global entre bóvedas.
+- Inserta firmas y texto en varias páginas. Arrastra, redimensiona, rota y usa deshacer/rehacer. Exporta una copia o guárdala en los archivos de Nodus; el original permanece intacto. El historial permite abrir, localizar, exportar y borrar sus copias.
+- Las firmas manuscritas son marcas visuales, sin criptografía. Para firmar con PKCS#12 (.p12/.pfx), pulsa «Instalar motor de firma»: Nodus prepara automáticamente Python y las dependencias en un entorno privado, con progreso, cancelación y reintento. No necesitas usar la terminal.
+- Ajusta posición y tamaño con el ratón o valores porcentuales. Elige página actual, todas o intervalos como «1, 3-5». Con certificado se aplica una firma criptográfica incremental real por página seleccionada.
+- Elige el certificado, comprueba su contraseña y validez, prepara un perfil de apariencia y autoriza expresamente la firma. Un diálogo nativo vuelve a identificar el documento y el certificado antes de firmar.
+- La firma PAdES B-B se comprueba sin red. Integridad criptográfica y confianza son resultados diferentes; la revocación no se consulta en línea. No se garantiza una firma cualificada ni aceptación administrativa.
+- La edición visual de un PDF firmado está bloqueada. Se permiten firmas criptográficas incrementales compatibles y se rechazan conservadoramente los PDF restringidos. AutoFirma, almacenes nativos, PKCS#11 y captura nativa del trackpad están pendientes.`,
+      en: `- Open Nodus Sign from Tools and pin its card in the sidebar. Import a local PDF, drop it or select it from Nodus files.
+- Create multiple signatures with a cursor, pen or touchscreen, or import an image. Direct finger capture on a trackpad is unavailable. Signatures and appearance profiles are global across vaults.
+- Place signatures and text on multiple pages. Move, resize, rotate and undo/redo. Export a copy or save it in Nodus files; the original remains untouched. History can open, locate, export and delete its copies.
+- Handwritten signatures are visual marks without cryptography. For PKCS#12 (.p12/.pfx), click “Install signing engine”: Nodus automatically prepares Python and dependencies in a private environment, with progress, cancellation and retry. No terminal is required.
+- Adjust position and size by dragging or entering percentages. Choose the current page, all pages or ranges such as “1, 3-5”. Certificate mode applies one real incremental cryptographic signature per selected page.
+- Choose a certificate, check its password and validity, prepare an appearance profile and explicitly authorize signing. A native dialog identifies the document and certificate again before signing.
+- PAdES B-B is checked offline. Cryptographic integrity and trust are separate results; revocation is not queried online. Qualified signing and administrative acceptance are not guaranteed.
+- Visual editing of signed PDFs is blocked. Compatible incremental cryptographic signatures are allowed; restricted PDFs are conservatively rejected. AutoFirma, native certificate stores, PKCS#11 and native trackpad capture remain pending.`,
+    }, related: ['toolkit-hub', 'toolkit-presenter', 'toolkit-protect'],
+  },
+  {
+    id: 'toolkit-focus', area: 'tools',
+    title: { es: 'Nodus Focus: concentración entre bóvedas', en: 'Nodus Focus: focus across vaults' },
+    keywords: ['focus', 'concentración', 'temporizador', 'pomodoro', 'sesión', 'bóveda', 'historial'],
+    body: {
+      es: `- Nodus Focus aparece en Nodus Tools y en Herramientas por defecto. También puedes abrir el temporizador desde la cabecera o la paleta de comandos.
+- Iniciar o reanudar un bloque de trabajo activa el modo concentración. Si desmarcas la casilla, se recuerda tu elección en todas las bóvedas.
+- Cambiar de bóveda conserva la sesión y el temporizador en marcha; el panel se adapta a las secciones y la personalización de la nueva bóveda. Estudio y Docencia mantienen sus asignaturas, apuntes y materiales.
+- El historial es global y muestra cuánto tiempo has dedicado a cada bóveda. Los descansos y las pausas no suman tiempo de trabajo.
+- Salir del modo pausa el bloque y permite finalizar la sesión o dejarla en pausa. La suspensión y el cierre también pausan; tras un fallo se recupera hasta el último punto guardado.`,
+      en: `- Nodus Focus appears in Nodus Tools and the Tools sidebar group by default. You can also open the timer from the header or command palette.
+- Starting or resuming a work block enables focus mode. Unticking the checkbox remembers your choice across all vaults.
+- Switching vaults preserves the session and running timer; the panel adapts to the new vault's sections and customisation. Study and Teaching retain their subjects, notes and materials.
+- History is global and shows the time spent in each vault. Breaks and pauses do not count as work time.
+- Leaving focus mode pauses the block and offers to end the session or keep it paused. Suspension and closing also pause; after a crash, recovery uses the last checkpoint.`,
+    }, related: ['toolkit-hub'],
+  },
+  {
     id: 'toolkit-hub',
     area: 'tools',
     title: { es: 'Nodus Toolkit: el hub de herramientas', en: 'Nodus Toolkit: the tools hub' },
-    keywords: ['toolkit', 'herramientas', 'hub', 'nodus tools', 'catalogo', 'fijar', 'desfijar', 'utilidades', 'convert', 'protect', 'translate', 'presenter', 'ocr'],
+    keywords: ['toolkit', 'herramientas', 'hub', 'nodus tools', 'catalogo', 'fijar', 'desfijar', 'nodus scriptor', 'utilidades', 'convert', 'protect', 'translate', 'presenter', 'sign', 'firma', 'certificado', 'ocr'],
     body: {
       es: `- Herramientas es una sección de la barra lateral en su propio grupo y también tiene icono en la cabecera («Abrir Nodus Toolkit»). Aparece en todos los tipos de bóveda.
-- Su página principal es un hub con las tarjetas del catálogo: Nodus Apps, Nodus Convert, Nodus Protect, Nodus Translate, PDF Presenter y OCR Workspace. Cada tarjeta se puede fijar como atajo en la barra lateral («Fijar» / «Desfijar»).
+- Su página principal es un hub con las tarjetas del catálogo: Nodus Apps, Nodus Browser, Nodus Compass, Nodus Convert, Nodus Drift, Nodus Focus, Nodus Protect, Nodus Radar, Nodus Scriptor, Nodus Translate, Nodus Presenter, Nodus Sign y OCR Workspace. Cada tarjeta se puede fijar como atajo en la barra lateral («Fijar» / «Desfijar»).
+- Nodus Scriptor está fijado por defecto en Herramientas, con fondo blanco y edición por bloques. El usuario puede desfijarlo; la elección se conserva después de la activación inicial de esta actualización.
 - Dentro de una herramienta, el botón a la izquierda de su título vuelve al hub.
 - Utilidades locales para investigación, docencia y estudio: convertir y procesar archivos sin salir de Nodus.`,
       en: `- Tools is a sidebar section in its own group and also has a header icon ("Open Nodus Toolkit"). It appears in every vault type.
-- Its home is a hub with the catalogue cards: Nodus Apps, Nodus Convert, Nodus Protect, Nodus Translate, PDF Presenter and OCR Workspace. Each card can be pinned as a sidebar shortcut ("Pin" / "Unpin").
+- Its home is a hub with the catalogue cards: Nodus Apps, Nodus Browser, Nodus Compass, Nodus Convert, Nodus Drift, Nodus Focus, Nodus Protect, Nodus Radar, Nodus Scriptor, Nodus Translate, Nodus Presenter, Nodus Sign and OCR Workspace. Each card can be pinned as a sidebar shortcut ("Pin" / "Unpin").
+- Nodus Scriptor is pinned under Tools by default, with a white background and block editing. Users can unpin it; that choice persists after this update initially enables it.
 - Inside a tool, the button to the left of its title returns to the hub.
 - Local utilities for research, teaching and study: convert and process files without leaving Nodus.`,
     },
-    related: ['toolkit-convert', 'toolkit-ocr'],
+    related: ['toolkit-focus', 'toolkit-convert', 'toolkit-ocr', 'sections-workspace-notes'],
   },
   {
     id: 'toolkit-convert',
@@ -81,16 +123,16 @@ export const TOOL_DOC_TOPICS: readonly NodusDocTopic[] = [
   {
     id: 'toolkit-presenter',
     area: 'tools',
-    title: { es: 'PDF Presenter: biblioteca de presentaciones', en: 'PDF Presenter: presentation library' },
+    title: { es: 'Nodus Presenter: biblioteca de presentaciones', en: 'Nodus Presenter: presentation library' },
     keywords: ['presenter', 'presentaciones', 'diapositivas', 'powerpoint', 'keynote', 'libreoffice', 'notas del orador', 'youtube', 'video', 'pdf', 'biblioteca', 'pantalla externa', 'mando', 'qr', 'pin'],
     body: {
-      es: `- PDF Presenter importa archivos PDF o presentaciones creadas en PowerPoint, LibreOffice o Keynote a una biblioteca global de Herramientas, con etiquetas, búsqueda, orden (añadido recientemente, abierto recientemente, nombre A→Z y Z→A), renombrar, descargar, eliminar y miniaturas.
+      es: `- Nodus Presenter importa archivos PDF o presentaciones creadas en PowerPoint, LibreOffice o Keynote a una biblioteca global de Herramientas, con etiquetas, búsqueda, orden (añadido recientemente, abierto recientemente, nombre A→Z y Z→A), renombrar, descargar, eliminar y miniaturas.
 - Las presentaciones externas se convierten localmente a PDF y se avisa de que las animaciones y transiciones no se conservan; las notas de los PowerPoint modernos se importan automáticamente.
 - Permite escribir notas por diapositiva, exportarlas e importarlas juntas en TXT, añadir vídeos de YouTube por diapositiva y descargar el PDF de la presentación.
 - Al presentar abre la diapositiva a pantalla completa (en la pantalla externa si hay dos) y una vista del presentador con la diapositiva actual, la siguiente, las notas, un temporizador y el reloj, además de herramientas de anotación en directo (linterna, dibujo, puntero y lupa), pantalla en negro y control remoto desde el móvil con un código QR protegido por PIN.
 - Lo único que necesita conexión son los vídeos de YouTube; el resto funciona sin internet.
 - En esta versión, la vista disponible en Herramientas es la biblioteca con sus modales de notas y vídeo: si alguien pregunta por la presentación en vivo o el mando remoto dentro de Nodus, indícalo como no verificado en vez de prometerlo.`,
-      en: `- PDF Presenter imports PDF files or presentations made in PowerPoint, LibreOffice or Keynote into a global Tools library, with tags, search, ordering (recently added, recently opened, name A→Z and Z→A), rename, download, delete and thumbnails.
+      en: `- Nodus Presenter imports PDF files or presentations made in PowerPoint, LibreOffice or Keynote into a global Tools library, with tags, search, ordering (recently added, recently opened, name A→Z and Z→A), rename, download, delete and thumbnails.
 - External presentations are converted locally to PDF and a notice says animations and transitions are not preserved; notes from modern PowerPoint files are imported automatically.
 - It supports per-slide speaker notes, exporting and importing them together as TXT, per-slide YouTube videos and downloading the presentation's PDF.
 - While presenting it opens the slide full screen (on the external display when there are two) and a presenter view with the current slide, the next one, the notes, a timer and the clock, plus live annotation tools (flashlight, drawing, pointer and magnifier), a black screen, and a mobile remote through a QR code protected by a PIN.

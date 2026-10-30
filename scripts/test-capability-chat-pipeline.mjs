@@ -211,7 +211,10 @@ test('a failing or truncated request becomes inert text, never a re-readable req
 
   const failing = runnerOf({ invoke: () => { throw new Error('OPSIN could not resolve `that`\nname'); } });
   const output = await runTrustedChatPipeline('```chemistry-plan\n{}\n```', registryOf(chemistry), failing, { onProblem: () => {} });
-  assert.match(output, /Capability error: OPSIN could not resolve  that  name/);
+  assert.match(output, /Capability error, from the application and not the model: OPSIN could not resolve  that  name/);
+  // Attributed on purpose: the failure replaces the directive where it stood, so an unattributed
+  // line there reads as the model's own words to a reader, a replay or a blind reviewer.
+  assert.match(output, /_Capability error, from the application and not the model: [^\n]*_/);
   assert.doesNotMatch(output, /```/, 'the error carries no fence for the next turn to act on');
 
   const truncated = runnerOf();
@@ -278,7 +281,7 @@ test('a nested mistake in a tool input is named by path', async () => {
     { plan: 'x', source: { label: 'Ethanol', license: 'CC0' }, period: {} },
   ]) {
     const answer = await runTrustedChatPipeline('```chemistry-plan\n' + JSON.stringify(input) + '\n```', registryOf(chemistry), runner, { onProblem: () => {} });
-    refusals.push(/Capability error: ([^\n]+)/.exec(answer)?.[1] ?? 'no refusal');
+    refusals.push(/Capability error, from the application and not the model: ([^\n]+)/.exec(answer)?.[1] ?? 'no refusal');
   }
   assert.match(refusals[0], /the input\.source is missing required property "license"/, refusals[0]);
   assert.match(refusals[1], /the input\.source has unknown property "extra"; allowed: label, license/, refusals[1]);
@@ -297,4 +300,89 @@ test('cancellation propagates instead of being swallowed as a provider problem',
     runTrustedChatPipeline('```chemistry-plan\n{}\n```', registryOf(chemistry), runner, { onProblem: () => {} }),
     error => error.name === 'AbortError',
   );
+});
+
+test('a refusal over a size limit names the size that arrived, not the type', async () => {
+  // B46. "the input.question must be a string of at most 8000 characters (received string)" is
+  // true, tautological and unactionable — it restates the rule and says nothing about the value.
+  // B45 hid behind exactly that sentence for a whole 30-target sweep: 58 refused calls, and no
+  // line anywhere said whether the string was 8001 characters or 80000, which is the difference
+  // between a clamp and a design problem.
+  const chemistry = provider({
+    id: 'nodus:chemistry', priority: 300,
+    tools: [tool('compile', {
+      inputSchema: {
+        type: 'object',
+        properties: { plan: { type: 'string', maxLength: 64_000 }, question: { type: 'string', maxLength: 8_000 } },
+        required: ['plan'], additionalProperties: false,
+      },
+    })],
+    requests: [{ fence: 'chemistry-plan', toolId: 'compile', maxPerReply: 1, answerMode: 'replace-block' }],
+  });
+  const question = 'x'.repeat(8_461);
+  const answer = `\`\`\`chemistry-plan\n${JSON.stringify({ plan: '{"version":2}', question })}\n\`\`\``;
+  const output = await runTrustedChatPipeline(answer, registryOf(chemistry), runnerOf());
+
+  assert.match(output, /the input\.question is 8461 characters; at most 8000 are allowed/,
+    'the measured length comes first, then the rule it broke');
+  assert.doesNotMatch(output, /received string/, 'and the sentence that said nothing is gone');
+  // The offending text is never echoed back: it can be enormous and it is the user's own writing.
+  assert.ok(!output.includes('x'.repeat(100)), 'the content itself is not quoted into the answer');
+
+  // A string inside its limits still passes, so this did not turn into a new refusal.
+  const ok = `\`\`\`chemistry-plan\n${JSON.stringify({ plan: '{"version":2}', question: 'Draw ethanol.' })}\n\`\`\``;
+  assert.doesNotMatch(await runTrustedChatPipeline(ok, registryOf(chemistry), runnerOf()), /was not run/);
+});
+
+test('a too-short string and an out-of-range number are reported the same way', async () => {
+  // The same defect class: a minimum and a numeric range both used to report only the type.
+  const widgets = provider({
+    id: 'nodus:widgets', priority: 100,
+    tools: [tool('make', {
+      inputSchema: {
+        type: 'object',
+        properties: { colour: { type: 'string', minLength: 7 }, count: { type: 'integer', minimum: 1, maximum: 12 } },
+        required: ['colour'], additionalProperties: false,
+      },
+    })],
+    requests: [{ fence: 'widget-plan', toolId: 'make', maxPerReply: 1, answerMode: 'replace-block' }],
+  });
+  const short = await runTrustedChatPipeline('```widget-plan\n{"colour":"#abc"}\n```', registryOf(widgets), runnerOf());
+  assert.match(short, /the input\.colour is 4 characters; at least 7 are required/);
+
+  const high = await runTrustedChatPipeline('```widget-plan\n{"colour":"#abcdef","count":17}\n```', registryOf(widgets), runnerOf());
+  assert.match(high, /the input\.count must be an integer between 1 and 12 \(received 17\)/,
+    'a number reports the value that arrived');
+});
+
+test('a reply cannot hand a tool the directories the application supplies', async () => {
+  // The chemistry tools accept local reference directories (a PubChem mirror, an OPSIN
+  // install that the package RUNS, reaction indexes, stock lists). The application fills
+  // them on its own calls; a reply that names one would point the package at a folder of
+  // the reply's choosing. Reached whenever a request fence outlives the prepare hook, for
+  // example because the hook failed.
+  const chemistry = provider({
+    id: 'nodus:chemistry', priority: 300, hooks: { prepare: true },
+    tools: [tool('compile', { inputSchema: { type: 'object', properties: { plan: { type: 'string' }, opsinDir: { type: 'string' }, pubchemDir: { type: 'string' } }, additionalProperties: false } })],
+    artifacts: [{ type: 'compile-result', version: 1, label: { en: 'Compiled' }, modelVisibility: 'projection' }],
+    requests: [{ fence: 'chemistry-plan', toolId: 'compile', maxPerReply: 1, answerMode: 'replace-block' }],
+  });
+  const inputs = [];
+  const runner = runnerOf({
+    hook: () => { throw new Error('worker restarting'); },
+    invoke: ({ input }) => { inputs.push(input); return { artifacts: [] }; },
+  });
+  const fence = '```chemistry-plan\n{"plan":"{}","opsinDir":"/Users/someone/Downloads/kit"}\n```';
+  const output = await runTrustedChatPipeline(`Here.\n\n${fence}\n`, registryOf(chemistry), runner, { onProblem: () => {} });
+  assert.deepEqual(inputs, [], 'the tool is not run with a directory the reply chose');
+  assert.match(output, /opsinDir/, 'and the refusal names the field');
+
+  // A promoted request is held to the same rule: the plugin built it, but from the reply.
+  const promoted = [];
+  const promoting = runnerOf({
+    hook: ({ nodes }) => [{ op: 'promote-request', nodeId: nodes.find(node => node.kind === 'fence').id, toolId: 'compile', input: { plan: '{}', pubchemDir: '/tmp/elsewhere' } }],
+    invoke: ({ input }) => { promoted.push(input); return { artifacts: [] }; },
+  });
+  await runTrustedChatPipeline(`Here.\n\n${fence}\n`, registryOf(chemistry), promoting, { onProblem: () => {} });
+  assert.deepEqual(promoted, []);
 });

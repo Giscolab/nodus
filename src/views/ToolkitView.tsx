@@ -1,3 +1,5 @@
+import { ToolkitSignView } from './ToolkitSignView';
+import { ACADEMIC_ALWAYS_VISIBLE, academicCustomizationPatch } from '../academicInterfaceProfiles';
 // Nodus Tools combines nested file utilities and existing standalone research
 // views. Standalone cards reuse their sidebar visibility; nested tools use pins.
 import { useState } from 'react';
@@ -6,7 +8,8 @@ import { effectiveSidebarHidden } from '@shared/vaultTypes';
 import { normalizeToolkitToolPages } from '@shared/toolkitNavigation';
 import { Icon } from '../components/ui';
 import { t } from '../i18n';
-import { TOOLKIT_TOOLS, isToolkitStandalonePage, toolkitSidebarId, type ToolkitCatalogPage, type ToolkitStandalonePage, type ToolkitPage } from '../navigation';
+import { TOOLKIT_TOOLS, isToolkitStandalonePage, scriptorViewForVault, toolkitSidebarId, type ToolkitCatalogPage, type ToolkitStandalonePage, type ToolkitPage } from '../navigation';
+import { ToolkitBackupsView } from './ToolkitBackupsView';
 import { ToolkitConvertView } from './ToolkitConvertView';
 import { ToolkitProtectView } from './ToolkitProtectView';
 import { ToolkitPresenterView } from './ToolkitPresenterView';
@@ -27,13 +30,14 @@ interface ToolCardProps {
   pinBusy: boolean;
   onOpen?: () => void;
   onTogglePinned: () => void;
+  alwaysVisible?: boolean;
 }
 
 /** Tarjeta del hub. Todas se renderizan con la MISMA estructura y altura
  *  (grid + h-full); el icono va en una loseta cuadrada fija para que quede
  *  perfectamente centrado. Solo las herramientas aún no disponibles muestran
  *  estado: las aplicaciones navegables no necesitan una etiqueta de desarrollo. */
-function ToolCard({ testid, icon, name, description, state, pinned, pinBusy, onOpen, onTogglePinned }: ToolCardProps) {
+function ToolCard({ testid, icon, name, description, state, pinned, pinBusy, alwaysVisible = false, onOpen, onTogglePinned }: ToolCardProps) {
   const disabled = state === 'soon';
   return (
     <div className="relative h-full">
@@ -64,9 +68,9 @@ function ToolCard({ testid, icon, name, description, state, pinned, pinBusy, onO
         type="button"
         data-testid={`${testid}-pin`}
         aria-pressed={pinned}
-        aria-label={`${name} · ${t(pinned ? 'Desfijar' : 'Fijar')}`}
-        title={t(pinned ? 'Desfijar' : 'Fijar')}
-        disabled={disabled || pinBusy}
+        aria-label={`${name} · ${t(alwaysVisible ? 'Siempre visible' : pinned ? 'Desfijar' : 'Fijar')}`}
+        title={t(alwaysVisible ? 'Siempre visible' : pinned ? 'Desfijar' : 'Fijar')}
+        disabled={disabled || pinBusy || alwaysVisible}
         onClick={onTogglePinned}
         className={`toolkit-pin-button absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-lg border transition-colors disabled:cursor-wait disabled:opacity-50 ${
           pinned
@@ -98,15 +102,19 @@ export function ToolkitView({
   const normalizeSearch = (value: string) => value.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase();
   const search = normalizeSearch(query.trim());
   const visibleTools = TOOLKIT_TOOLS.filter((tool) => normalizeSearch(`${tool.name} ${t(tool.description)}`).includes(search));
-  const sidebarHidden = effectiveSidebarHidden(settings?.sidebarHidden ?? [], settings?.sidebarCustomized ?? false, vaultType);
+  const customization = settings && vaultType === 'academic' ? academicCustomizationPatch(settings) : {};
+  const navigationSettings = settings ? { ...settings, ...customization } : null;
+  const sidebarHidden = effectiveSidebarHidden(navigationSettings?.sidebarHidden ?? [], navigationSettings?.sidebarCustomized ?? false, vaultType);
   const pinnedPages = normalizeToolkitToolPages(settings?.toolkitPinnedPages);
   const pinned = new Set(pinnedPages);
 
+  const destination = (page: ToolkitCatalogPage): ToolkitCatalogPage => page === 'workspace' ? scriptorViewForVault(vaultType) : page;
   const isToolPinned = (toolPage: ToolkitCatalogPage) => isToolkitStandalonePage(toolPage)
-    ? Boolean(settings && !sidebarHidden.includes(toolPage))
+    ? Boolean(settings && !sidebarHidden.includes(destination(toolPage)))
     : pinned.has(toolPage);
 
   const togglePinned = async (toolPage: ToolkitCatalogPage) => {
+    toolPage = destination(toolPage);
     if (!settings || pinBusy) return;
     setPinBusy(toolPage);
     try {
@@ -115,28 +123,28 @@ export function ToolkitView({
       if (isToolkitStandalonePage(toolPage)) {
         const wasPinned = isToolPinned(toolPage);
         await window.nodus.updateSettings({
+          ...customization,
           sidebarCustomized: true,
           sidebarHidden: wasPinned
             ? [...sidebarHidden, toolPage]
             : sidebarHidden.filter((id) => id !== toolPage),
-          sidebarOrder: wasPinned
-            ? settings.sidebarOrder.filter((id) => id !== toolPage)
-            : settings.sidebarOrder,
+          sidebarOrder: navigationSettings!.sidebarOrder,
         });
         return;
       }
       const id = toolkitSidebarId(toolPage);
       const isPinned = pinned.has(toolPage);
       await window.nodus.updateSettings({
+          ...customization,
         toolkitPinnedPages: isPinned
           ? pinnedPages.filter((pageId) => pageId !== toolPage)
           : [...pinnedPages, toolPage],
         // A fresh pin must be visible. Unpinning also retires its ordering and
         // visibility residue so pinning it again starts beside Nodus Tools.
-        sidebarHidden: settings.sidebarHidden.filter((itemId) => itemId !== id),
+        sidebarHidden: navigationSettings!.sidebarHidden.filter((itemId) => itemId !== id),
         sidebarOrder: isPinned
-          ? settings.sidebarOrder.filter((itemId) => itemId !== id)
-          : settings.sidebarOrder,
+          ? navigationSettings!.sidebarOrder.filter((itemId) => itemId !== id)
+          : navigationSettings!.sidebarOrder,
       });
     } catch (error) {
       console.error('[toolkit] no se pudo actualizar la chincheta', error);
@@ -151,7 +159,11 @@ export function ToolkitView({
     <div className="theme-workspace-surface toolkit-workspace h-full overflow-y-auto px-6 py-6 max-md:px-4">
       {/* Las herramientas tienen página propia; cualquier otra página
           cae en el catálogo en lugar de dejar el panel en blanco. */}
-      {page === 'convert' ? (
+      {page === 'sign' ? (
+        <ToolkitSignView onBack={() => onNavigate('home')} />
+      ) : page === 'backups' ? (
+        <ToolkitBackupsView onBack={() => onNavigate('home')} />
+      ) : page === 'convert' ? (
         <ToolkitConvertView onBack={() => onNavigate('home')} />
       ) : page === 'apps' ? (
         <ToolkitAppsView onBack={() => onNavigate('home')} settings={settings} />
@@ -170,7 +182,7 @@ export function ToolkitView({
               <Icon name="tools" size={22} />
             </span>
             <div className="min-w-0">
-              <h1 className="toolkit-page-title text-lg font-semibold text-neutral-900 dark:text-neutral-100">{t('Herramientas')}</h1>
+              <h1 className="toolkit-page-title text-lg font-semibold text-neutral-900 dark:text-neutral-100">Nodus Tools</h1>
               <p className="toolkit-page-description text-sm text-neutral-500">
                 {t('Explora fuentes, sigue novedades y trabaja con tus archivos sin salir de Nodus.')}
               </p>
@@ -214,9 +226,10 @@ export function ToolkitView({
                 name={tool.name}
                 description={t(tool.description)}
                 state={tool.state}
-                pinned={isToolPinned(tool.page)}
+                pinned={isToolPinned(tool.page) || (vaultType === 'academic' && ['workspace', 'drift', 'presenter'].includes(tool.page))}
+                alwaysVisible={vaultType === 'academic' && ACADEMIC_ALWAYS_VISIBLE.includes(tool.page === 'workspace' ? tool.page : `toolkit:${tool.page}`)}
                 pinBusy={!settings || pinBusy !== null}
-                onOpen={() => isToolkitStandalonePage(tool.page) ? onOpenView(tool.page) : onNavigate(tool.page)}
+                onOpen={() => { const target = destination(tool.page); if (isToolkitStandalonePage(target)) onOpenView(target); else onNavigate(target); }}
                 onTogglePinned={() => void togglePinned(tool.page)}
               />
             ))}

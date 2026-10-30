@@ -6,10 +6,14 @@ import { StudyChatView } from '../src/views/StudyChatView';
 import { WorldChatView } from '../src/views/WorldChatView';
 import ReactDOM from 'react-dom/client';
 import { ResearchAssistantModal } from '../src/views/ResearchAssistantModal';
+import { AcademicLearningContext } from '../src/learning/AcademicLearningContext';
+import { AcademicInterfaceContext } from '../src/components/AcademicInterfaceContext';
 import { setActiveLang } from '../src/i18n';
-import type { AppSettings } from '../shared/types';
+import { normalizeUiLanguage } from '../shared/uiLanguage';
+import type { AcademicInterfaceProfile, AppSettings } from '../shared/types';
 import '../src/index.css';
 const params = new URLSearchParams(location.search);
+const language = normalizeUiLanguage(params.get('lang') ?? 'es');
 const view = params.get('view');
 const vaultType = params.get('vault') ?? ({ database: 'databases', study: 'estudio', teaching: 'docencia', world: 'worldbuilding' }[view ?? ''] ?? 'academic');
 // `?memory=` stands in for a relaunch: the composer then reads the levels a previous session
@@ -21,13 +25,14 @@ const storedEffort = (): Record<string, string> => {
     return {};
   }
 };
-const settings = { synthesisModel: { provider: 'openai', model: 'gpt-5.4' }, uiLanguage: 'es', chatModel: { provider: 'openai', model: 'gpt-5.4' }, favorites: [
+const settings = { synthesisModel: { provider: 'openai', model: 'gpt-5.4' }, uiLanguage: language, chatModel: { provider: 'openai', model: 'gpt-5.4' }, favorites: [
   { provider: 'gemini', model: 'gemini-3-pro-preview' }, { provider: 'xiaomi', model: 'mimo-v2.5' },
   { provider: 'openai', model: 'gpt-4.1' }, { provider: 'codex', model: 'gpt-6-astra' },
   // The unversioned DeepSeek ids each route serves, so the effort control they publish can be
   // captured and inspected here rather than only asserted.
   { provider: 'deepseek', model: 'deepseek-flash' }, { provider: 'opencode-go', model: 'deepseek-flash' },
 ], sttProvider: 'transformers', sttTransformersModel: 'whisper-tiny', researchEffortByModel: storedEffort() } as AppSettings;
+if (params.get('harness') === 'v1') settings.researchHarnessVersion = 'v1';
 if (params.get('concilium')) {
   settings.uiLanguage = 'en';
   settings.chatModel = { provider: 'deepseek', model: 'deepseek-flash' };
@@ -151,8 +156,9 @@ window.nodus = new Proxy({
     return { answer: 'Respuesta de prueba.', stats: { sections: [], works: 0, documents: 0, passages: 0, contextChars: 0, truncated: false } };
   },
 }, { get(target: any, key: string) { return target[key] ?? (key.startsWith('on') ? () => () => {} : async () => []); } });
-setActiveLang(params.get('lang') === 'en' || params.get('concilium') ? 'en' : 'es');
+setActiveLang(params.get('concilium') ? 'en' : language);
 document.documentElement.className = `${params.get('theme') === 'dark' ? 'dark' : 'light'} ${vaultType}`;
 if (params.get('fallback') === 'chat') delete (settings as any).synthesisModel;
+const draftContext = params.get('draft') === '1' ? { vaultId: 'test', epoch: 0, session: null, observe: () => {}, requestExtraction: () => false, requireModels: () => true, prepareAddition: async () => true } : null;
 const onEvidence = (id: string) => { win.openedEvidence = id; };
-ReactDOM.createRoot(document.getElementById('root')!).render(<div style={{ height: '100vh', '--vault-accent': params.get('accent') || vaultTypeColor(vaultType) } as React.CSSProperties}>{view === 'database' ? <DatabasesChatView settings={settings} initialDatabaseId="database-1" /> : view === 'study' || view === 'teaching' ? <StudyChatView settings={settings} variant={view === 'teaching' ? 'teaching' : 'study'} onOpenDocument={onEvidence} onOpenMaterial={onEvidence} onOpenRecording={onEvidence} /> : view === 'world' ? <WorldChatView settings={settings} onNavigate={onEvidence} /> : <ResearchAssistantModal settings={settings} embedded={view === 'embedded'} isGenealogy={params.get('genealogy') === '1'} isAcademic={vaultType === 'academic'} onClose={() => {}} />}</div>);
+ReactDOM.createRoot(document.getElementById('root')!).render(<div style={{ height: '100vh', '--vault-accent': params.get('accent') || vaultTypeColor(vaultType) } as React.CSSProperties}><AcademicLearningContext.Provider value={draftContext}>{view === 'database' ? <DatabasesChatView settings={settings} initialDatabaseId="database-1" /> : view === 'study' || view === 'teaching' ? <StudyChatView settings={settings} variant={view === 'teaching' ? 'teaching' : 'study'} onOpenDocument={onEvidence} onOpenMaterial={onEvidence} onOpenRecording={onEvidence} /> : view === 'world' ? <WorldChatView settings={settings} onNavigate={onEvidence} /> : <AcademicInterfaceContext.Provider value={params.get('profile') as AcademicInterfaceProfile | null}><ResearchAssistantModal settings={settings} embedded={view === 'embedded'} isGenealogy={params.get('genealogy') === '1'} isAcademic={vaultType === 'academic'} onClose={() => {}} /></AcademicInterfaceContext.Provider>}</AcademicLearningContext.Provider></div>);

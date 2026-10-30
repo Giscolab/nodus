@@ -17,6 +17,7 @@ import type {
   DeepResearchReport,
   DeepResearchRequest,
   ModelRef,
+  PromptLanguage,
   WritingWorkshopBrief,
   WritingWorkshopDraft,
   WritingWorkshopMatrixRow,
@@ -52,7 +53,7 @@ import { findSimilarWorksPaged } from '../db/workSummariesRepo';
 import { getWork } from '../db/worksRepo';
 import { resolveWorkText } from '../extraction/textExtractor';
 import { LOCAL_USER_ID } from '../zotero/zoteroClient';
-import { completeJson, completeText, embed } from './aiClient';
+import { completeJson, completeText, embedQuery } from './aiClient';
 import { deepResearchLengthPromptPack, isEmptyContinuation } from '@shared/deepResearchLengthPromptPacks';
 import {
   countDeepResearchWords,
@@ -198,7 +199,7 @@ export async function buildGenealogySourcePool(objective: string, focusPersonId?
   if (focusPerson) for (const item of listItemsForPerson(focusPerson.personId)) addDoc(item);
 
   const queryText = focusPerson ? `${objective.trim()}\n${focusPerson.displayName}`.trim() : objective.trim();
-  const objVec = queryText ? await embed(queryText) : null;
+  const objVec = queryText ? await embedQuery(queryText) : null;
   if (objVec) for (const item of await findArchiveItemsSimilar(objVec, { limit: MAX_DOC_SOURCES, minSimilarity: 0.2 })) addDoc(item);
   // Fallback / backfill: recent documents so the report always has primary material.
   for (const item of listItems({}).slice(0, MAX_DOC_SOURCES)) addDoc(item);
@@ -1115,13 +1116,24 @@ function authorYear(author: string | undefined, year: number | null, fallbackAut
   const surname = raw.includes(',') ? raw.split(',')[0].trim() : raw.split(/\s+/).slice(-1)[0] || raw;
   return year ? `${surname || fallbackAuthor} (${year})` : surname || fallbackAuthor;
 }
+const REPORT_LABELS: Record<PromptLanguage, { abstract: string; limitations: string; sources: string; noSources: string }> = {
+  es: { abstract: 'Resumen', limitations: 'Limitaciones', sources: 'Fuentes', noSources: 'Sin fuentes citadas.' },
+  en: { abstract: 'Abstract', limitations: 'Limitations', sources: 'Sources', noSources: 'No sources cited.' },
+  fr: { abstract: 'Résumé', limitations: 'Limites', sources: 'Sources', noSources: 'Aucune source citée.' },
+  tr: { abstract: 'Özet', limitations: 'Sınırlılıklar', sources: 'Kaynaklar', noSources: 'Kaynak belirtilmedi.' },
+  de: { abstract: 'Zusammenfassung', limitations: 'Einschränkungen', sources: 'Quellen', noSources: 'Keine Quellen angegeben.' },
+  it: { abstract: 'Abstract', limitations: 'Limitazioni', sources: 'Fonti', noSources: 'Nessuna fonte citata.' },
+  pt: { abstract: 'Resumo', limitations: 'Limitações', sources: 'Fontes', noSources: 'Nenhuma fonte citada.' },
+  'pt-BR': { abstract: 'Resumo', limitations: 'Limitações', sources: 'Fontes', noSources: 'Nenhuma fonte citada.' },
+  'zh-Hans': { abstract: '摘要', limitations: '局限性', sources: '来源', noSources: '未引用任何来源。' },
+  'zh-Hant': { abstract: '摘要', limitations: '限制', sources: '來源', noSources: '未引用任何來源。' },
+  vi: { abstract: 'Tóm tắt', limitations: 'Hạn chế', sources: 'Nguồn', noSources: 'Không có nguồn nào được trích dẫn.' },
+  ja: { abstract: '要旨', limitations: '限界', sources: '出典', noSources: '引用された出典はありません。' },
+  ru: { abstract: 'Аннотация', limitations: 'Ограничения', sources: 'Источники', noSources: 'Источники не цитировались.' },
+  uk: { abstract: 'Анотація', limitations: 'Обмеження', sources: 'Джерела', noSources: 'Джерела не цитовано.' },
+  ko: { abstract: '초록', limitations: '한계', sources: '출처', noSources: '인용된 출처가 없습니다.' },
+};
+
 function labels(language: string) {
-  if (language === 'en') return { abstract: 'Abstract', limitations: 'Limitations', sources: 'Sources', noSources: 'No sources cited.' };
-  if (language === 'fr') return { abstract: 'Résumé', limitations: 'Limites', sources: 'Sources', noSources: 'Aucune source citée.' };
-  if (language === 'tr') return { abstract: 'Özet', limitations: 'Sınırlılıklar', sources: 'Kaynaklar', noSources: 'Kaynak belirtilmedi.' };
-  if (language === 'de') return { abstract: 'Zusammenfassung', limitations: 'Einschränkungen', sources: 'Quellen', noSources: 'Keine Quellen angegeben.' };
-  if (language === 'it') return { abstract: 'Abstract', limitations: 'Limitazioni', sources: 'Fonti', noSources: 'Nessuna fonte citata.' };
-  if (language === 'pt') return { abstract: 'Resumo', limitations: 'Limitações', sources: 'Fontes', noSources: 'Nenhuma fonte citada.' };
-  if (language === 'pt-BR') return { abstract: 'Resumo', limitations: 'Limitações', sources: 'Fontes', noSources: 'Nenhuma fonte citada.' };
-  return { abstract: 'Resumen', limitations: 'Limitaciones', sources: 'Fuentes', noSources: 'Sin fuentes citadas.' };
+  return REPORT_LABELS[normalizePromptLanguage(language)];
 }

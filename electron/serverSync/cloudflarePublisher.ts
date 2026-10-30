@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { gzip } from 'node:zlib';
 import { promisify } from 'node:util';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type Database from 'better-sqlite3';
 import type { VaultSummary } from '@shared/types';
 import type { CloudflareCapabilityDocument, CloudflarePublicationManifest, CloudflarePublicationSession } from '@shared/cloudflare';
@@ -9,13 +10,21 @@ import { buildServerSnapshot, type SnapshotAsset, type SnapshotAssetRef } from '
 import type { BuiltServerLibraryPublication, ServerLibraryPackage } from './serverLibrary';
 import { buildVectorSet, buildVectorizeChunks, describeVectorSet, type VectorKind } from './serverVectors';
 import type { VaultServerConfig } from './serverSyncShared';
-import { normalizeServerUrl, serverFetchWithTimeout } from './serverNetwork';
+import { normalizeServerUrl, serverFetchWithTimeout, ServerHttpError, assertCloudflareSafetyCapabilities } from './serverNetwork';
+import { cloudflareTableChunks, CLOUDFLARE_MAX_PUBLICATION_REQUESTS, validateCloudflarePartBytes } from './cloudflarePublicationProtocol';
 
 const gzipAsync = promisify(gzip);
-const DIRECT_OBJECT_BYTES = 96 * 1024 * 1024;
-const EXACT_VECTOR_SEARCH_BYTES = 64 * 1024 * 1024;
+const DIRECT_OBJECT_BYTES = 8 * 1024 * 1024;
+const EXACT_VECTOR_SEARCH_BYTES = 32 * 1024 * 1024;
 const INLINE_D1_ROW_BYTES = 512 * 1024;
 const DIRECT_R2_ROW_BYTES = 8 * 1024 * 1024;
+const publicationBudget = new AsyncLocalStorage<{ remaining: number }>();
+
+async function publicationFetch(url: string, init: RequestInit): Promise<Response> {
+  const budget = publicationBudget.getStore();
+  if (!budget || budget.remaining-- <= 0) throw new Error('La publicación alcanzó el límite de seguridad de llamadas a Cloudflare.');
+  return serverFetchWithTimeout(url, { ...init, redirect: 'error' });
+}
 
 interface SnapshotPayload {
   vault: { id: string; name: string; type: string };
@@ -30,19 +39,19 @@ async function jsonRequest<T>(url: string, token: string, init: RequestInit): Pr
   const headers = new Headers(init.headers);
   headers.set('authorization', `Bearer ${token}`); headers.set('accept', 'application/json');
   if (init.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
-  const response = await serverFetchWithTimeout(url, { ...init, headers });
+  const response = await publicationFetch(url, { ...init, headers });
   const result = await response.json().catch(() => ({})) as T & { error?: string; detail?: string; title?: string };
-  if (!response.ok) throw new Error(result.detail || result.error || result.title || `Nodus Cloud respondió con HTTP ${response.status}.`);
+  if (!response.ok) throw new ServerHttpError(response.status, result.detail || result.error || result.title || `Nodus Cloud respondió con HTTP ${response.status}.`);
   return result;
 }
 
 async function putObject(base: string, spaceId: string, publicationId: string, token: string, purpose: string, objectHash: string, mime: string, data: Buffer): Promise<void> {
   const directLimit = purpose === 'row' ? DIRECT_R2_ROW_BYTES : DIRECT_OBJECT_BYTES;
   if (data.length <= directLimit) {
-    const response = await serverFetchWithTimeout(`${base}/api/v3/spaces/${encodeURIComponent(spaceId)}/objects/${purpose}/${objectHash}?publicationId=${encodeURIComponent(publicationId)}`, {
+    const response = await publicationFetch(`${base}/api/v3/spaces/${encodeURIComponent(spaceId)}/objects/${purpose}/${objectHash}?publicationId=${encodeURIComponent(publicationId)}`, {
       method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': mime, 'content-length': String(data.length) }, body: data,
     });
-    if (!response.ok) { const value = await response.json().catch(() => ({})) as { detail?: string; error_description?: string }; throw new Error(value.detail || value.error_description || `Nodus Cloud rechazó un archivo (HTTP ${response.status}).`); }
+    if (!response.ok) { const value = await response.json().catch(() => ({})) as { detail?: string; error_description?: string }; throw new ServerHttpError(response.status, value.detail || value.error_description || `Nodus Cloud rechazó un archivo (HTTP ${response.status}).`); }
     return;
   }
   const started = await jsonRequest<{ id: string; partBytes: number }>(`${base}/api/v3/spaces/${encodeURIComponent(spaceId)}/publications/${publicationId}/uploads`, token, {
@@ -50,8 +59,9 @@ async function putObject(base: string, spaceId: string, publicationId: string, t
   });
   const parts: Array<{ partNumber: number; etag: string }> = [];
   try {
-    for (let offset = 0, partNumber = 1; offset < data.length; offset += started.partBytes, partNumber += 1) {
-      const chunk = data.subarray(offset, Math.min(data.length, offset + started.partBytes));
+    const partBytes = validateCloudflarePartBytes(started.partBytes);
+    for (let offset = 0, partNumber = 1; offset < data.length; offset += partBytes, partNumber += 1) {
+      const chunk = data.subarray(offset, Math.min(data.length, offset + partBytes));
       const result = await jsonRequest<{ etag: string }>(`${base}/api/v3/spaces/${encodeURIComponent(spaceId)}/uploads/${started.id}/parts/${partNumber}`, token, {
         method: 'PUT', headers: { 'content-type': 'application/octet-stream', 'x-nodus-part-sha256': hash(chunk) }, body: chunk,
       });
@@ -128,10 +138,12 @@ async function uploadLibrary(base: string, spaceId: string, publicationId: strin
   return missing.size;
 }
 
-async function vectorizeDimensions(base: string): Promise<Set<number>> {
-  const response = await serverFetchWithTimeout(`${base}/api/v3/capabilities`, { headers: { accept: 'application/json' } });
-  if (!response.ok) return new Set();
+async function vectorizeDimensions(base: string, requireIdentity: boolean): Promise<Set<number>> {
+  const response = await publicationFetch(`${base}/api/v3/capabilities`, { headers: { accept: 'application/json' } });
+  if (!response.ok) throw new ServerHttpError(response.status, `Nodus Cloud respondió con HTTP ${response.status}.`);
   const value = await response.json().catch(() => ({})) as Partial<CloudflareCapabilityDocument>;
+  assertCloudflareSafetyCapabilities(value);
+  if (requireIdentity && !value.features?.embeddingIndexIdentity) throw new ServerHttpError(426, 'Actualiza Nodus Cloud antes de publicar el índice de embeddings. La publicación anterior se ha conservado.');
   return new Set((value.storage?.vectorizeDimensions || []).filter((dimension) => Number.isSafeInteger(dimension) && dimension > 0 && dimension <= 1536));
 }
 
@@ -148,10 +160,10 @@ async function uploadVectors(base: string, spaceId: string, publicationId: strin
     } else {
       const exact = buildVectorSet(db, kind);
       if (!exact || exact.buffer.length > EXACT_VECTOR_SEARCH_BYTES) throw new Error(`El índice ${kind} (${exact ? exact.buffer.length : 0} bytes) supera el límite seguro de búsqueda exacta. Añade en Cloudflare un índice Vectorize de ${summary.dim} dimensiones o desactiva esta proyección.`);
-      const response = await serverFetchWithTimeout(`${base}/api/v3/spaces/${encodeURIComponent(spaceId)}/publications/${publicationId}/vectors/${kind}/exact`, {
+      const response = await publicationFetch(`${base}/api/v3/spaces/${encodeURIComponent(spaceId)}/publications/${publicationId}/vectors/${kind}/exact`, {
         method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/vnd.nodus.vectors' }, body: exact.buffer,
       });
-      if (!response.ok) throw new Error(`Nodus Cloud rechazó el índice ${kind} (HTTP ${response.status}).`);
+      if (!response.ok) throw new ServerHttpError(response.status, `Nodus Cloud rechazó el índice ${kind} (HTTP ${response.status}).`);
     }
   }
 }
@@ -165,11 +177,18 @@ export async function publishVaultToCloudflare(
   db: Database.Database,
   preparedLibrary: BuiltServerLibraryPublication | null,
 ): Promise<CloudflarePublishResult> {
+  return publicationBudget.run({ remaining: CLOUDFLARE_MAX_PUBLICATION_REQUESTS },
+    () => publishVault(config, token, vault, db, preparedLibrary));
+}
+
+async function publishVault(config: VaultServerConfig, token: string, vault: VaultSummary,
+  db: Database.Database, preparedLibrary: BuiltServerLibraryPublication | null): Promise<CloudflarePublishResult> {
   const base = normalizeServerUrl(config.url); const spaceId = config.spaceId;
-  const availableVectorizeDimensions = await vectorizeDimensions(base);
+  const availableVectorizeDimensions = await vectorizeDimensions(base, !!config.includeVectors);
   const library = preparedLibrary;
   const snapshot = buildServerSnapshot(vault, {
     nodusServerIncludeUserContent: config.includeUserContent,
+    nodusServerIncludeVectors: config.includeVectors,
     nodusServerIncludePassages: config.includePassages,
     nodusServerIncludePrimarySources: config.includePrimarySources,
     nodusServerIncludeTestimonies: config.includeTestimonies,
@@ -185,11 +204,13 @@ export async function publishVaultToCloudflare(
     const summary = describeVectorSet(db, kind); if (!summary) return [];
     const exact = availableVectorizeDimensions.has(summary.dim) ? null : buildVectorSet(db, kind);
     if (!availableVectorizeDimensions.has(summary.dim) && !exact) return [];
+    if (exact && exact.buffer.length > EXACT_VECTOR_SEARCH_BYTES) throw new Error(`El índice ${kind} supera el límite seguro de búsqueda exacta de Cloudflare.`);
     let count = exact?.summary.count || 0;
     if (!exact) for (const chunk of buildVectorizeChunks(db, kind)) count += chunk.vectors.length;
     if (!count) return [];
     const effective = exact?.summary || { ...summary, count };
     return [{ kind, provider: effective.provider, model: effective.model, dimensions: effective.dim, count,
+      indexId: summary.indexId, generation: summary.generation, embeddingContract: summary.embeddingContract,
       sha256: exact ? hash(exact.buffer) : hash(`${kind}:${snapshot.revision}:${effective.provider}:${effective.model}:${effective.dim}:${count}`),
       bytes: exact?.buffer.length || count * effective.dim * 4, mode: availableVectorizeDimensions.has(effective.dim) ? 'vectorize' as const : 'r2-exact' as const }];
   });
@@ -199,14 +220,14 @@ export async function publishVaultToCloudflare(
     assets: payload.assets,
     rowObjects: preparedRows.rowObjects.map(({ hash: objectHash, bytes, table, key }) => ({ hash: objectHash, bytes, table, key })),
     library: library ? { ...library.manifest, packages: library.packages.map((entry) => ({ hash: entry.hash, bytes: entry.bytes, documentId: entry.documentId })) } : null,
-    snapshot: { bytes: compressed.length, sha256: snapshotHash, contentEncoding: 'gzip' }, vectors,
+    snapshot: { bytes: compressed.length, sha256: snapshotHash, contentEncoding: 'gzip' }, embeddingIndex: snapshot.embeddingIndex, vectors,
   };
   const publication = await jsonRequest<CloudflarePublicationSession>(`${base}/api/v3/spaces/${encodeURIComponent(spaceId)}/publications`, token, { method: 'POST', body: JSON.stringify(manifest) });
   if (publication.committed) return { revision: snapshot.revision, updatedAt: new Date().toISOString(), bytes: compressed.length, assetsSent: 0, libraryPackagesSent: 0 };
   for (const [table, rows] of Object.entries(preparedRows.tables)) {
     // Re-send deterministic keys on resume. D1 upserts make this idempotent and it avoids
     // relying on a count as a positional cursor if local row order changed after a crash.
-    for (let index = 0; index < rows.length; index += 15) await jsonRequest(`${base}/api/v3/spaces/${encodeURIComponent(spaceId)}/publications/${publication.id}/tables/${encodeURIComponent(table)}`, token, { method: 'PUT', body: JSON.stringify({ rows: rows.slice(index, index + 15) }) });
+    for (const chunk of cloudflareTableChunks(rows)) await jsonRequest(`${base}/api/v3/spaces/${encodeURIComponent(spaceId)}/publications/${publication.id}/tables/${encodeURIComponent(table)}`, token, { method: 'PUT', body: JSON.stringify({ rows: chunk }) });
   }
   await uploadRowObjects(base, spaceId, publication.id, token, preparedRows.rowObjects);
   const assetsSent = await uploadAssets(base, spaceId, publication.id, token, snapshot.assets);

@@ -8,8 +8,14 @@
 
 export const NODUS_CLOUDFLARE_PROTOCOL = 3 as const;
 export const NODUS_CLOUDFLARE_SERVICE = 'nodus-cloudflare' as const;
+
+export const CLOUDFLARE_SAFETY_UPGRADE_MESSAGE = 'Actualiza el Worker de Nodus Cloud y aplica sus migraciones antes de sincronizar: esta instalación todavía no anuncia los límites acumulados y la limpieza persistente.';
+export function hasCloudflareSafetyFeatures(value: unknown): boolean {
+  const features = (value as { features?: Record<string, unknown> } | null)?.features;
+  return ['syncBudget','durableObjectCleanup','binarySync','mutationRelay'].every((name)=>features?.[name]===true);
+}
 export const NODUS_CLOUDFLARE_WORKER_VERSION = '1.0.0' as const;
-export const NODUS_CLOUDFLARE_TEMPLATE_URL = 'https://github.com/drakonis96/nodus/tree/main/cloudflare' as const;
+export const NODUS_CLOUDFLARE_TEMPLATE_URL = 'https://github.com/jorgepb96/nodus/tree/main/cloudflare' as const;
 export const NODUS_CLOUDFLARE_DEPLOY_ORIGIN = 'https://deploy.workers.cloudflare.com' as const;
 
 export type NodusServerKind = 'classic' | 'cloudflare';
@@ -47,7 +53,12 @@ export interface CloudflareCapabilityDocument {
     assets: true;
     library: true;
     vectors: true;
+    embeddingIndexIdentity?: true;
     mutations: true;
+    binarySync?: true;
+    mutationRelay?: true;
+    syncBudget?: true;
+    durableObjectCleanup?: true;
     nodiNotes: true;
     oauth: true;
     mcp: true;
@@ -250,6 +261,7 @@ export interface CloudflarePublicationManifest {
   rowObjects?: Array<{ hash: string; bytes: number; table: string; key: string }>;
   library: unknown | null;
   snapshot?: { bytes: number; sha256: string; contentEncoding: 'gzip' | 'identity' };
+  embeddingIndex?: { id: string; generation: number } | null;
   vectors?: Array<{
     kind: 'ideas' | 'documents' | 'passages';
     provider: string;
@@ -259,6 +271,9 @@ export interface CloudflarePublicationManifest {
     sha256: string;
     bytes: number;
     mode: CloudflareVectorMode;
+    indexId?: string;
+    generation?: number;
+    embeddingContract?: import('./embeddingContract').EmbeddingContract;
   }>;
 }
 

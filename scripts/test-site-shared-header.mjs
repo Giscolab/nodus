@@ -19,6 +19,7 @@ const systemPages = [
   ['site/ai-research/index.html', 'ai-research', '../'],
   ['site/open-source/index.html', 'open-source', '../'],
   ['site/faq/index.html', 'faq', '../'],
+  ['site/models/index.html', 'models', '../'],
   ['site/blog/index.html', 'blog', '../'],
   ['site/blog/post.html', 'blog', '../'],
   ['site/contribute/index.html', 'contribute', '../'],
@@ -46,7 +47,7 @@ test('every page mounts the one shared header and marks its own destination', ()
     );
     assert.match(html, new RegExp(`src="${base.replace(/\//g, '\\/').replace(/\./g, '\\.')}site-header\\.js\\?v=[^"]+"`), `${relative} loads the shared header component`);
     assert.doesNotMatch(html, /class="site-nav"|id="site-stars"/, `${relative} has no legacy duplicate header`);
-    assert.doesNotMatch(html, /api\.github\.com\/repos\/Drakonis96\/nodus/, `${relative} delegates header data loading to the component`);
+    assert.doesNotMatch(html, /api\.github\.com\/repos\/jorgepb96\/nodus/, `${relative} delegates header data loading to the component`);
   }
 });
 
@@ -98,10 +99,10 @@ test('the shared component owns every control visible in the header', () => {
       'blog:Blog',
       'atlas:Atlas',
       'faq:FAQ',
-      'about:About',
-      'contribute:Support Nodus',
+      'models:Models',
+      'contribute:Support',
     ],
-    'the header reads Home, Wiki, Blog, Atlas, FAQ, About, Support Nodus',
+    'the header reads Home, Wiki, Blog, Atlas, FAQ, Models, Support',
   );
 });
 

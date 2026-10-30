@@ -1,7 +1,12 @@
+import { isEmbeddingGemma2, embeddingGemma2Contract } from '@shared/embeddingGemma2';
+import { canonicalizeEmbeddingContract } from '@shared/embeddingContract';
 import { listResearchNotebooks } from '../db/researchNotebooksRepo';
+import { recordEmbeddingTrace } from '../qa/embeddingTrace';
+import { researchTestEmbeddingEndpointIdentity } from '../qa/researchProviderProxy';
 import { selectResearchDocuments } from './researchCorpusScope';
 import { researchActivityEnabled, startResearchActivity } from './researchActivity';
 import { app } from 'electron';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import fs from 'node:fs';
 import path from 'node:path';
 import { backgroundProcess, type BackgroundProcess } from '../workers/backgroundProcess';
@@ -11,10 +16,17 @@ import { unpreparedResearchAttachmentIds } from '@shared/researchCorpus';
 import type { DocumentaryIndexIdentity, ResearchCorpusDocument, ResearchDocumentRead, ResearchEvidence, ResearchPreparationInventory, ResolvedResearchScope, RetrievalSettings } from '@shared/researchCorpus';
 import { DocumentaryRequests } from '../db/documentaryRequests';
 import { DocumentaryCampaigns } from '../db/documentaryCampaigns';
+import type { EmbeddingRunReason } from '@shared/embeddingRuns';
+import { rerank, rerankerAvailable } from './localReranker';
+import { rerankDocumentaryCandidates, type RerankResult } from './documentaryReranking';
+import { beginEmbeddingOperation } from './embeddingOperations';
 import { DocumentaryStore, type DocumentaryChunk } from '../db/documentaryStore';
+import { activeEmbeddingIndex, embeddingIndexHead, indexContext, indexRow } from '../db/embeddingIndexesRepo';
+import { recordDocumentaryIndexReference } from '../db/embeddingDocumentaryRefs';
+import { schemeCleaningFor, type SchemeCleaning } from './schemeCleaning';
 import { documentaryChunks } from './documentaryChunking';
 import { researchCorpusInventory } from './researchCorpusInventory';
-import { assertResearchDocumentPermission, researchFingerprint } from './researchCorpusScope';
+import { assertResearchDocumentPermission, documentsById, researchFingerprint } from './researchCorpusScope';
 import { getLibraryReaderRawContent } from '../libraryReader/libraryReaderStore';
 import { getGlobalLibraryItem } from '../library/libraryService';
 import { currentEmbeddingConfig } from '../db/ideasRepo';
@@ -29,10 +41,11 @@ import { getSettings } from '../db/settingsRepo';
 import { getItem, LOCAL_USER_ID } from '../zotero/zoteroClient';
 import { documentarySourceText, documentaryReaderComplete, readDocumentarySourceMap, extractTraditionalResearchWork, extractGlobalResearchAttachments, DOCUMENTARY_EXTRACTION_OPTIONS, type DocumentarySourcePart } from './documentaryExtraction';
 import { onGlobalLibraryChanged } from '../library/libraryRuntime';
-import { getActiveVault, getVault, listVaults, withOwningVault, withoutOwningVault } from '../vaults/vaultRegistry';
-import { withVaultDatabase, withoutDatabaseContext } from '../db/database';
+import { getActiveVault, getVault, getVaultByPath, listVaults, withOwningVault, withoutOwningVault } from '../vaults/vaultRegistry';
+import { getDb, withVaultDatabase, withoutDatabaseContext } from '../db/database';
 import { notifyDocumentaryPreparation } from './documentaryPreparationEvents';
 import { onResearchCorpusChanged } from './researchCorpusEvents';
+import { startPerf } from '../perf';
 
 let shared: DocumentaryStore | null = null;
 let stopping = false;
@@ -87,10 +100,41 @@ export function documentaryMaintenanceSettled(): Promise<void> {
 /** Work that writes the store outside the drain waits for maintenance to finish, and
  * holds the next one off while it runs. */
 export async function withDocumentaryWrites<T>(work: () => Promise<T> | T): Promise<T> {
+  if (documentaryWriteScope.getStore()?.active) return work();
   // Starts synchronously when nothing is being maintained, like the work it wraps did.
-  while (maintenance) await maintenance;
+  while (maintenance || snapshotBarrier) await (maintenance ?? snapshotBarrier);
   documentaryWriters += 1;
-  try { return await work(); } finally { documentaryWriters -= 1; }
+  const scope = { active: true };
+  try { return await documentaryWriteScope.run(scope, work); } finally {
+    scope.active = false;
+    documentaryWriters -= 1;
+    if (!documentaryWriters) for (const resolve of writerIdleWaiters.splice(0)) resolve();
+  }
+}
+let snapshotBarrier: Promise<void> | null = null;
+const documentaryWriteScope = new AsyncLocalStorage<{ active: boolean }>();
+const writerIdleWaiters: Array<() => void> = [];
+/** A backup snapshots vault references before the shared immutable revisions. Hold off
+ * documentary publication/collection until both halves have been captured. */
+export async function withDocumentarySnapshotBarrier<T>(work: () => Promise<T>): Promise<T> {
+  while (snapshotBarrier || maintenance) await (snapshotBarrier ?? maintenance);
+  let release!: () => void;
+  snapshotBarrier = new Promise<void>(resolve => { release = resolve; });
+  try {
+    if (documentaryWriters) await new Promise<void>(resolve => writerIdleWaiters.push(resolve));
+    return await work();
+  } finally { snapshotBarrier = null; release(); }
+}
+
+export function restoreDocumentaryBackupFile(source: string): void {
+  if (draining || documentaryWriters || maintenance || snapshotBarrier) throw new Error('Espera a que finalice la preparación documental antes de restaurar la copia.');
+  stopDocumentaryRetrievalWorker();
+  shared?.close(); shared = null;
+  const directory = path.join(app.getPath('userData'), 'documentary');
+  fs.mkdirSync(directory, { recursive: true });
+  const target = path.join(directory, 'store.sqlite');
+  fs.rmSync(`${target}-wal`, { force: true }); fs.rmSync(`${target}-shm`, { force: true });
+  fs.renameSync(source, target);
 }
 const COMPACTION_MIN_FREE_BYTES = 256 * 1024 * 1024;
 const COMPACTION_MIN_FREE_RATIO = 0.3;
@@ -105,6 +149,7 @@ function maintenanceWorkerFile(): string | null {
  * holds the write lock for tens of seconds, so it runs in its own process and only while
  * nothing writes: the drain, reconciliation and preparation actions wait for it. */
 export function compactDocumentaryStoreWhenIdle(threshold = { minFreeBytes: COMPACTION_MIN_FREE_BYTES, minFreeRatio: COMPACTION_MIN_FREE_RATIO }): void {
+  if (snapshotBarrier) return;
   if (!initialized || compactionFailed || maintenance || !shared || stopping || draining || lanes || activePreparations.size || documentaryWriters) return;
   const store = shared;
   const pages = store.db.pragma('page_count', { simple: true }) as number;
@@ -138,6 +183,7 @@ export function compactDocumentaryStoreWhenIdle(threshold = { minFreeBytes: COMP
 /** Resolves once the shared store is closed: at once when idle, or when a drain in
  * progress has stopped (it closes the store itself, so no write is cut short). */
 export function closeDocumentaryPreparation(): Promise<void> {
+  if (closing) return closing;
   stopping = true;
   if (corpusPoll) clearInterval(corpusPoll); corpusPoll = null;
   for (const active of activePreparations.values()) active.controller.abort();
@@ -146,10 +192,15 @@ export function closeDocumentaryPreparation(): Promise<void> {
   if (vectorConversion) clearTimeout(vectorConversion); vectorConversion = null;
   // An interrupted VACUUM rolls back; the store stays as it was.
   if (maintenanceWorker) void maintenanceWorker.terminate().catch(() => undefined);
+  stopDocumentaryRetrievalWorker();
   unsubscribe?.(); unsubscribe = null;
-  if (!draining) { shared?.close(); shared = null; return Promise.resolve(); }
-  return new Promise(resolve => { drainClosed = resolve; });
+  const drain = draining ? new Promise<void>(resolve => { drainClosed = resolve; }) : Promise.resolve();
+  return closing = drain.then(async () => {
+    if (documentaryWriters) await new Promise<void>(resolve => writerIdleWaiters.push(resolve));
+    shared?.close(); shared = null;
+  }).finally(() => { closing = null; });
 }
+let closing: Promise<void> | null = null;
 let drainClosed: (() => void) | null = null;
 
 /** Shared text writer used once extraction has supplied a real source revision. */
@@ -158,9 +209,13 @@ export function prepareDocumentaryText(document: ResearchCorpusDocument, text: s
 }
 async function prepareDocumentaryTextNow(document: ResearchCorpusDocument, text: string, sourceMap: Record<string, string>, signal: AbortSignal | undefined, processingVersion: string): Promise<{ indexKey: string; chunks: DocumentaryChunk[] }> {
   const store = documentaryStore();
+  // Scheme decluttering, where a layout file matches this text's pages: a separate identity,
+  // so its chunks and vectors are never taken for the uncleaned index's or the reverse.
+  const cleaning = schemeCleaningFor(text, sourceMap);
   const identity: DocumentaryIndexIdentity = { documentId: document.id, attachmentId: document.attachmentId, revision: document.revision,
     attachmentRevision: document.attachments?.find(attachment => attachment.id === document.attachmentId)?.revision,
-    coverage: document.coverage, textFingerprint: createHash('sha256').update(text).digest('hex'), chunkerVersion: RETRIEVAL_CHUNKER_VERSION, processingVersion, embedding: null };
+    coverage: document.coverage, textFingerprint: createHash('sha256').update(text).digest('hex'), chunkerVersion: RETRIEVAL_CHUNKER_VERSION, processingVersion, embedding: null,
+    ...(cleaning ? { layout: cleaning.signature } : {}) };
   const indexKey = store.enqueue(identity, { text, sourceMap });
   const existing = store.revision(indexKey);
   if (existing?.lexical_ready) return { indexKey, chunks: JSON.parse(existing.chunks_json!) };
@@ -170,7 +225,7 @@ async function prepareDocumentaryTextNow(document: ResearchCorpusDocument, text:
   try {
     signal?.throwIfAborted();
     if (job.stage === 'extract') store.saveExtraction(job, text);
-    const chunks = existing?.chunks_json ? JSON.parse(existing.chunks_json) as DocumentaryChunk[] : await documentaryChunks(text, sourceMap, signal);
+    const chunks = existing?.chunks_json ? JSON.parse(existing.chunks_json) as DocumentaryChunk[] : cleanedChunks(await documentaryChunks(text, sourceMap, signal), cleaning, document.id);
     signal?.throwIfAborted();
     if (job.stage === 'chunk') store.saveChunks(job, chunks);
     if (job.stage === 'lexical') store.publishLexical(job);
@@ -185,37 +240,73 @@ async function prepareDocumentaryTextNow(document: ResearchCorpusDocument, text:
   } finally { clearInterval(heartbeat); }
 }
 
+function cleanedChunks(chunks: DocumentaryChunk[], cleaning: SchemeCleaning | null, documentId: string): DocumentaryChunk[] {
+  if (!cleaning) return chunks;
+  const cleaned = chunks.map(chunk => cleaning.clean(chunk));
+  const before = chunks.reduce((sum, chunk) => sum + chunk.text.length, 0), after = cleaned.reduce((sum, chunk) => sum + chunk.text.length, 0);
+  console.log(`[scheme-layout] ${documentId}: ${cleaning.pages} page layouts matched; ${cleaned.filter((chunk, index) => chunk !== chunks[index]).length}/${chunks.length} chunks cleaned; ${before} → ${after} chars`);
+  return cleaned;
+}
+
 /** Upper bound per document; the provider gate (automatic 2→4, halved on a 429) is the real limit. */
 const DOCUMENTARY_EMBEDDING_BATCHES_IN_FLIGHT = 4;
 
-function embeddingIdentityParameters(config: EmbeddingExecutionConfig) {
-  return { endpoint: createHash('sha256').update(config.endpoint).digest('hex'), inputPolicy: 'utf8-4096/2' };
+export function embeddingIdentityParameters(config: EmbeddingExecutionConfig): Record<string, string | number | boolean> {
+  if (config.provider === 'nodus' && isEmbeddingGemma2(config.modelId)) return {
+    endpoint: createHash('sha256').update(config.endpoint).digest('hex'),
+    inputPolicy: 'utf8-4096/2', contract: canonicalizeEmbeddingContract(embeddingGemma2Contract(config.modelId)), embeddingProfile: config.profileFingerprint ?? 'legacy',
+  };
+  return { endpoint: createHash('sha256').update(researchTestEmbeddingEndpointIdentity(config.provider, config.endpoint)).digest('hex'), inputPolicy: 'utf8-4096/2', embeddingProfile: config.profileFingerprint ?? 'legacy' };
 }
 
-export function prepareDocumentaryEmbeddings(indexKey: string, chunks: DocumentaryChunk[], signal?: AbortSignal, execution = effectiveEmbeddingConfig(), assertAuthorized: (final?: boolean) => void = () => {}, progress: (completed: number, unknown: number) => void = () => {}): Promise<{ indexKey: string; vectors: number[][]; provider: string; model: string }> {
-  return withDocumentaryWrites(() => prepareDocumentaryEmbeddingsNow(indexKey, chunks, signal, execution, assertAuthorized, progress));
+interface PreparedDocumentaryEmbeddings { indexKey: string; vectors: number[][]; provider: string; model: string; reused: boolean; computedInputs: number }
+export function prepareDocumentaryEmbeddings(indexKey: string, chunks: DocumentaryChunk[], signal?: AbortSignal, execution = effectiveEmbeddingConfig(), assertAuthorized: (final?: boolean) => void = () => {}, progress: (completed: number, unknown: number) => void = () => {}, onInputs: (count: number) => void = () => {}): Promise<PreparedDocumentaryEmbeddings> {
+  return withDocumentaryWrites(async () => {
+    const result = await prepareDocumentaryEmbeddingsNow(indexKey, chunks, signal, execution, assertAuthorized, progress, onInputs);
+    if (execution.indexId && execution.scope === getDb().name) {
+      signal?.throwIfAborted(); assertAuthorized(true);
+      retainDocumentaryEmbeddingRevision(execution, result.indexKey);
+    }
+    return result;
+  });
 }
-async function prepareDocumentaryEmbeddingsNow(indexKey: string, chunks: DocumentaryChunk[], signal: AbortSignal | undefined, execution: EmbeddingExecutionConfig, assertAuthorized: (final?: boolean) => void, progress: (completed: number, unknown: number) => void): Promise<{ indexKey: string; vectors: number[][]; provider: string; model: string }> {
+function retainDocumentaryEmbeddingRevision(execution: EmbeddingExecutionConfig, indexKey: string): void {
+  if (!execution.indexId || execution.scope !== getDb().name) return;
+  const owner = getVaultByPath(getDb().name);
+  const row = indexRow(getDb(), execution.indexId);
+  const head = embeddingIndexHead(getDb());
+  if (execution.preparing ? row.preparation !== 'running' || execution.generation !== (row.staging_generation ?? row.generation)
+    : !head?.enabled || head.active_id !== row.id || execution.generation !== row.generation) throw new Error('embedding_index_configuration_changed');
+  const context = indexContext(getDb(), row, !!execution.preparing);
+  const identity = documentaryStore().jobIdentity(indexKey);
+  if (owner && identity) recordDocumentaryIndexReference(getDb(), documentaryStore().db, owner.id, context, indexKey, identity.documentId);
+}
+async function prepareDocumentaryEmbeddingsNow(indexKey: string, chunks: DocumentaryChunk[], signal: AbortSignal | undefined, execution: EmbeddingExecutionConfig, assertAuthorized: (final?: boolean) => void, progress: (completed: number, unknown: number) => void, onInputs: (count: number) => void): Promise<PreparedDocumentaryEmbeddings> {
   const store = documentaryStore();
   assertAuthorized(true);
   const base = JSON.parse(store.getJob(indexKey)!.identity_json) as DocumentaryIndexIdentity;
   const config = { provider: execution.provider, model: execution.modelId };
   const parameters = embeddingIdentityParameters(execution);
+  const buildGeneration = execution.force ? `${execution.indexId}:${execution.generation}` : null;
   const cached = store.db.prepare(`SELECT index_key FROM documentary_revisions WHERE document_id=? AND embedding_ready=1
     AND json_extract(identity_json,'$.textFingerprint')=? AND json_extract(identity_json,'$.revision')=?
     AND json_extract(identity_json,'$.chunkerVersion')=? AND json_extract(identity_json,'$.embedding.provider')=?
     AND json_extract(identity_json,'$.embedding.model')=? AND json_extract(identity_json,'$.processingVersion')=?
     AND json_extract(identity_json,'$.attachmentId') IS ?
-    AND json_extract(identity_json,'$.embedding.parameters')=?`).get(base.documentId, base.textFingerprint, base.revision, base.chunkerVersion, config.provider, config.model, base.processingVersion, base.attachmentId, JSON.stringify(parameters)) as { index_key: string } | undefined;
+    AND json_extract(identity_json,'$.embedding.parameters')=? AND json_extract(identity_json,'$.layout') IS ?
+    AND (? IS NULL OR json_extract(identity_json,'$.buildGeneration')=?)`).get(base.documentId, base.textFingerprint, base.revision, base.chunkerVersion, config.provider, config.model, base.processingVersion, base.attachmentId, JSON.stringify(parameters), base.layout ?? null, buildGeneration, buildGeneration) as { index_key: string } | undefined;
   if (cached) {
+    // Claim reuse synchronously with the cache lookup, so deleting another vault's
+    // last reference cannot collect this revision in the awaiting caller's gap.
+    retainDocumentaryEmbeddingRevision(execution, cached.index_key);
     const rows = store.db.prepare('SELECT vector,vector_json FROM documentary_passages WHERE index_key=? ORDER BY ordinal').all(cached.index_key) as Array<{ vector: Buffer | null; vector_json: string | null }>;
     progress(rows.length, 0);
-    return { indexKey: cached.index_key, vectors: rows.map(row => storedDocumentaryVector(row)!), ...config };
+    return { indexKey: cached.index_key, vectors: rows.map(row => storedDocumentaryVector(row)!), ...config, reused: true, computedInputs: 0 };
   }
   if (store.preference('paused')) throw new Error('documentary_paused');
   // Dimensions are measured from the response, so lease a persistent operation
   // identity before calling the provider, then publish under the complete space.
-  const operation = `embedding:${base.documentId}:${researchFingerprint([indexKey, config, parameters])}`;
+  const operation = `embedding:${base.documentId}:${researchFingerprint([indexKey, config, parameters, execution.force ? `${execution.indexId}:${execution.generation}` : null])}`;
   const requests = new DocumentaryRequests(store.db);
   store.db.transaction(() => {
     if (!store.db.prepare('SELECT 1 FROM documentary_requests WHERE document_id=?').get(operation)) requests.enqueue(operation, base.revision, operation);
@@ -226,9 +317,9 @@ async function prepareDocumentaryEmbeddingsNow(indexKey: string, chunks: Documen
     // cancelled or is waiting out a retry backoff is taken over by the request that is
     // here to run it now; one another request is computing right now is left to it.
     const existing = store.db.prepare('SELECT state,error FROM documentary_requests WHERE document_id=?').get(operation) as { state: string; error: string | null } | undefined;
-    if (existing && ['failed', 'cancelled', 'queued'].includes(existing.state)) {
+    if (existing && ['failed', 'cancelled', 'queued', 'complete'].includes(existing.state)) {
       store.db.prepare(`UPDATE documentary_requests SET state='queued',attempts=0,error=NULL,available_at=?,lease_token=NULL,lease_until=NULL
-        WHERE document_id=? AND state IN ('failed','cancelled','queued')`).run(Date.now(), operation);
+        WHERE document_id=? AND state IN ('failed','cancelled','queued','complete')`).run(Date.now(), operation);
       lease = requests.claim(operation, Date.now(), 60000, true);
     }
     if (!lease) throw new Error(existing?.state === 'running' ? 'documentary_embedding_busy' : existing?.error || 'documentary_embedding_job_unavailable');
@@ -238,6 +329,7 @@ async function prepareDocumentaryEmbeddingsNow(indexKey: string, chunks: Documen
   signal?.addEventListener('abort', abort, { once: true });
   const heartbeat = setInterval(() => { try { requests.renew(lease); } catch { controller.abort(); } }, 15000);
   let job: ReturnType<DocumentaryStore['claim']> = null;
+  let computedInputs = 0;
   try {
     signal?.throwIfAborted();
     const checkpoints = new DocumentaryEmbeddingBatches(store.db);
@@ -262,9 +354,13 @@ async function prepareDocumentaryEmbeddingsNow(indexKey: string, chunks: Documen
       batchSignal.throwIfAborted();
       requests.renew(lease);
       const batch = texts.slice(start, end);
+      computedInputs += batch.length;
+      onInputs(batch.length);
       const attempt = checkpoints.begin(operation, start, batch.length);
       try {
-        const received = await embedMany(batch, batchSignal, { config: execution, jobId: `${operation}:${start}` });
+        const received = await embedMany(batch, batchSignal, { config: execution, role: 'document',
+          title: researchCorpusInventory().documents.find(document => document.id === base.documentId)?.title,
+          jobId: `${operation}:${start}` });
         // A sibling's failure cancels what is still in flight, but a response that has
         // already arrived was paid for and is kept; only a pause or a lost lease drops it.
         controller.signal.throwIfAborted();
@@ -279,16 +375,18 @@ async function prepareDocumentaryEmbeddingsNow(indexKey: string, chunks: Documen
     if (store.preference('paused')) throw new Error('documentary_paused');
     if (vectors.some(vector => !vector?.length) || !vectors.length) throw new Error('documentary_embeddings_unavailable');
     assertAuthorized(true);
-    const identity: DocumentaryIndexIdentity = { ...base, embedding: { ...config, dimensions: vectors[0]!.length, metric: 'cosine', parameters } };
+    const identity: DocumentaryIndexIdentity = { ...base, embedding: { ...config, dimensions: vectors[0]!.length, metric: 'cosine', parameters },
+      ...(execution.force ? { buildGeneration: `${execution.indexId}:${execution.generation}` } : {}) };
     const id = store.enqueue(identity, {});
     job = store.claim(Date.now(), 60000, id);
     if (!job) throw new Error('documentary_embedding_publication_unavailable');
     store.saveChunks(job, chunks);
     store.publishLexical(job);
     store.publishEmbeddings(job, vectors as number[][]);
+    retainDocumentaryEmbeddingRevision(execution, id);
     requests.finish(lease, null);
     checkpoints.discard(operation);
-    return { indexKey: id, vectors: vectors as number[][], ...config };
+    return { indexKey: id, vectors: vectors as number[][], ...config, reused: computedInputs === 0, computedInputs };
   } catch (error) {
     if (job && store.getJob(job.id)?.state === 'running') store.fail(job, 'documentary_embedding_publication_failed');
     try { requests.finish(lease, 'documentary_embedding_failed', store.preference('paused') || stopping || !!signal?.aborted); } catch { /* Lease was fenced. */ }
@@ -300,27 +398,32 @@ async function prepareDocumentaryEmbeddingsNow(indexKey: string, chunks: Documen
  * and chunk JSON (327 MB over 453 revisions in a real library) into the main process for each
  * of 1,229 sources, and the inventory parsed the chunks twice to count them: 1.3–2.7 s with
  * the window frozen, at every Research Chat question and every documentary search. */
-function revisionsFor(document: ResearchCorpusDocument): Array<{ index_key: string; identity_json: string; embedding_ready: number; lexical_ready: number }> {
+function revisionsFor(document: ResearchCorpusDocument, lookups?: DocumentaryLookups): Array<{ index_key: string; identity_json: string; embedding_ready: number; lexical_ready: number }> {
+  const revision = document.indexedSource?.revision ?? document.revision;
+  if (lookups) return (lookups.revisions.get(document.id) ?? []).filter(row => row.revision === revision);
   return documentaryStore().db.prepare(`SELECT index_key,identity_json,embedding_ready,lexical_ready FROM documentary_revisions WHERE document_id=? AND json_extract(identity_json,'$.revision')=? ORDER BY embedding_ready DESC,created_at DESC`)
-    .all(document.id, document.indexedSource?.revision ?? document.revision) as ReturnType<typeof revisionsFor>;
+    .all(document.id, revision) as ReturnType<typeof revisionsFor>;
 }
-/** Chunks in a revision. A published one has exactly one passage per chunk (publishLexical
- * writes them in the transaction that sets lexical_ready), so they are counted on an index
- * instead of parsing the chunk JSON; an unpublished one is counted by SQLite. */
-function chunkCount(store: DocumentaryStore, row: { index_key: string; lexical_ready: number }): number {
-  const counted = row.lexical_ready
-    ? store.db.prepare('SELECT COUNT(*) n FROM documentary_passages WHERE index_key=?').get(row.index_key)
-    : store.db.prepare('SELECT json_array_length(chunks_json) n FROM documentary_revisions WHERE index_key=?').get(row.index_key);
-  return (counted as { n: number | null } | undefined)?.n ?? 0;
+/** What `revisionsFor` and `attachmentRevisions` read, for every document of an inventory or a
+ *  scope at once. They were read one source at a time — a statement prepared and run per source,
+ *  then one more per published index key — which was the largest share of the main thread's
+ *  SQLite time in a retrieval round (2026-10-09). The same rows, in the same order per source. */
+interface DocumentaryLookups {
+  revisions: ReturnType<DocumentaryStore['revisionsOf']>;
+  identities: Map<string, DocumentaryIndexIdentity>;
 }
-function attachmentRevisions(document: ResearchCorpusDocument): Array<ReturnType<typeof revisionsFor>> {
+function documentaryLookups(documents: ResearchCorpusDocument[]): DocumentaryLookups {
+  const store = documentaryStore();
+  return { revisions: store.revisionsOf(documents.map(document => document.id)), identities: store.jobIdentities(documents.flatMap(document => document.indexedSource?.indexKeys ?? [])) };
+}
+function attachmentRevisions(document: ResearchCorpusDocument, lookups?: DocumentaryLookups): Array<ReturnType<typeof revisionsFor>> {
   const groups = new Map<string | null, ReturnType<typeof revisionsFor>>();
   const attachments = document.indexedSource ? document.indexedSource.attachments : document.attachments;
-  const published = document.indexedSource?.indexKeys.flatMap(key => documentaryStore().jobIdentity(key) ?? []);
-  for (const row of revisionsFor(document)) {
+  const published = document.indexedSource?.indexKeys.flatMap(key => (lookups ? lookups.identities.get(key) : documentaryStore().jobIdentity(key)) ?? []);
+  for (const row of revisionsFor(document, lookups)) {
     const identity: DocumentaryIndexIdentity = JSON.parse(row.identity_json);
     if (published && !published.some(base => base.attachmentId === identity.attachmentId && base.textFingerprint === identity.textFingerprint
-      && base.chunkerVersion === identity.chunkerVersion && base.processingVersion === identity.processingVersion)) continue;
+      && base.chunkerVersion === identity.chunkerVersion && base.processingVersion === identity.processingVersion && (base.layout ?? null) === (identity.layout ?? null))) continue;
     if (attachments?.length && identity.attachmentId !== null
         && !attachments.some(attachment => attachment.id === identity.attachmentId
           && (!identity.attachmentRevision || attachment.revision === identity.attachmentRevision))) continue;
@@ -332,12 +435,34 @@ function attachmentRevisions(document: ResearchCorpusDocument): Array<ReturnType
   return [...groups.values()];
 }
 export function pinPublishedResearchDocument(document: ResearchCorpusDocument): ResearchCorpusDocument {
-  const store = documentaryStore();
-  const published = store.publishedDocument(document);
-  if (published) return published;
-  // No partially built first revision may leak before the all-attachment switch.
-  const preparing = store.db.prepare('SELECT 1 FROM documentary_requests WHERE document_id=? OR source_id=?').get(document.id, document.id);
-  return preparing ? { ...document, indexedSource: { revision: document.revision, attachmentId: document.attachmentId, attachments: document.attachments, indexKeys: [] } } : document;
+  return pinPublishedResearchDocuments([document])[0];
+}
+/** The latest request naming each document, as its id or as its source, from one statement.
+ *  Picked as `ORDER BY updated_at DESC LIMIT 1` per document picked it. */
+function latestRequests(documentIds: string[]): Map<string, { state: string; error: string | null; revision: string }> {
+  const wanted = new Set(documentIds);
+  const ids = JSON.stringify([...wanted]);
+  const latest = new Map<string, { state: string; error: string | null; revision: string; updated_at: number }>();
+  for (const row of documentaryStore().db.prepare(`SELECT document_id,source_id,state,error,revision,updated_at FROM documentary_requests
+      WHERE document_id IN (SELECT value FROM json_each(?)) OR source_id IN (SELECT value FROM json_each(?))`).all(ids, ids) as Array<{ document_id: string; source_id: string | null; state: string; error: string | null; revision: string; updated_at: number }>) {
+    for (const id of new Set([row.document_id, row.source_id])) {
+      if (id === null || !wanted.has(id)) continue;
+      const prior = latest.get(id);
+      if (!prior || row.updated_at > prior.updated_at) latest.set(id, row);
+    }
+  }
+  return latest;
+}
+/** `pinPublishedResearchDocument` for a whole inventory: two statements instead of up to two per
+ *  source, every time a scope is resolved. */
+export function pinPublishedResearchDocuments(documents: ResearchCorpusDocument[], requests = latestRequests(documents.map(document => document.id))): ResearchCorpusDocument[] {
+  const published = documentaryStore().publishedDocuments(documents);
+  return documents.map(document => {
+    const pinned = published.get(document.id);
+    if (pinned) return pinned;
+    // No partially built first revision may leak before the all-attachment switch.
+    return requests.has(document.id) ? { ...document, indexedSource: { revision: document.revision, attachmentId: document.attachmentId, attachments: document.attachments, indexKeys: [] } } : document;
+  });
 }
 
 export function getResearchPreparationInventory(): ResearchPreparationInventory {
@@ -352,23 +477,34 @@ export function getResearchPreparationInventory(): ResearchPreparationInventory 
       embeddingSpaces.set(id, { id, provider: embedding.provider, model: embedding.model, dimensions: embedding.dimensions, metric: embedding.metric });
     }
   }
-  return { enabled: new DocumentaryCampaigns(store.db).policy(getActiveVault().id).futureAdditions, embeddingSpaces: [...embeddingSpaces.values()], documents: researchCorpusInventory().documents.map(current => {
-    const document = pinPublishedResearchDocument(current);
+  const inventory = researchCorpusInventory().documents;
+  const requests = latestRequests(inventory.map(document => document.id));
+  const pinned = pinPublishedResearchDocuments(inventory, requests);
+  const lookups = documentaryLookups(pinned);
+  const groupsOf = pinned.map(document => attachmentRevisions(document, lookups));
+  const counts = store.chunkCounts(groupsOf.flat(2));
+  const chunkCount = (row: { index_key: string }) => counts.get(row.index_key) ?? 0;
+  const wantedParameters = selectedEmbedding && JSON.stringify(embeddingIdentityParameters(selectedEmbedding));
+  const paused = store.preference('paused');
+  return { enabled: new DocumentaryCampaigns(store.db).policy(getActiveVault().id).futureAdditions,
+    embeddingsExpected: !!selectedEmbedding && embeddingConfigurationUsable(selectedEmbedding),
+    embeddingSpaces: [...embeddingSpaces.values()], documents: inventory.map((current, index) => {
+    const document = pinned[index];
     const stale = document.indexedSource && document.indexedSource.revision !== document.revision;
-    const groups = attachmentRevisions(document);
+    const groups = groupsOf[index];
     const revisions = groups.flatMap(group => group.find(row => row.lexical_ready && !row.embedding_ready) ?? group.find(row => row.lexical_ready) ?? []);
     const revision = revisions[0];
-    const latest = store.db.prepare('SELECT state,error,revision FROM documentary_requests WHERE document_id=? OR source_id=? ORDER BY updated_at DESC LIMIT 1').get(document.id, document.id) as { state: string; error: string | null; revision: string } | undefined;
+    const latest = requests.get(document.id);
     // A request for bytes that have since been replaced says nothing about the current file.
     const request = latest && latest.revision === current.revision ? latest : undefined;
-    const passages = revisions.reduce((sum, row) => sum + chunkCount(store, row), 0);
+    const passages = revisions.reduce((sum, row) => sum + chunkCount(row), 0);
     const compatibleVectors = groups.flatMap(group => group.find(row => {
       const identity = JSON.parse(row.identity_json) as DocumentaryIndexIdentity;
       return row.embedding_ready && selectedEmbedding && identity.embedding?.provider === selectedEmbedding.provider
         && identity.embedding.model === selectedEmbedding.modelId
-        && JSON.stringify(identity.embedding.parameters) === JSON.stringify(embeddingIdentityParameters(selectedEmbedding));
+        && JSON.stringify(identity.embedding.parameters) === wantedParameters;
     }) ?? []);
-    const embedded = compatibleVectors.reduce((sum, row) => sum + chunkCount(store, row), 0);
+    const embedded = compatibleVectors.reduce((sum, row) => sum + chunkCount(row), 0);
     const incompatible = groups.some(group => group.some(row => row.embedding_ready)) && compatibleVectors.length === 0;
     const coverage = revision ? (JSON.parse(revision.identity_json) as DocumentaryIndexIdentity).coverage ?? document.coverage : document.coverage;
     // An error on a request that is still queued or running is a retry in progress,
@@ -378,7 +514,7 @@ export function getResearchPreparationInventory(): ResearchPreparationInventory 
     const textPublished = !!revision && !stale;
     return { ...document, preparation: { documentId: document.id, revision: document.revision, text: coverage === 'abstract' ? 'abstract' : passages ? 'available' : 'missing',
       lexical: revision ? stale ? 'stale' : 'ready' : 'missing', embeddings: embedded === passages && passages > 0 ? stale ? 'stale' : 'ready' : embedded > 0 ? 'partial' : incompatible ? 'stale' : request?.error ? retrying ? request.state as 'queued' | 'running' : 'failed' : 'missing',
-      status: request?.state === 'blocked' ? 'blocked' : request?.state === 'cancelled' ? 'cancelled' : store.preference('paused') ? 'paused' : revision ? 'ready' : request?.state === 'running' ? 'running' : request?.state === 'queued' ? 'queued' : request?.error ? 'failed' : 'catalogued',
+      status: request?.state === 'blocked' ? 'blocked' : request?.state === 'cancelled' ? 'cancelled' : paused ? 'paused' : revision ? 'ready' : request?.state === 'running' ? 'running' : request?.state === 'queued' ? 'queued' : request?.error ? 'failed' : 'catalogued',
       reason: request?.error?.startsWith('documentary_ocr_') ? 'ocr_required' : request?.error === 'documentary_embeddings_unavailable' ? 'no_model' : request?.error && (textPublished || request.error.includes('embedding')) ? 'provider_failed' : request?.error ? 'extraction_failed' : null, error: request?.error ?? null, passages, embedded,
       unpreparedAttachmentIds: unpreparedResearchAttachmentIds(document, revisions.map(row => JSON.parse(row.identity_json) as DocumentaryIndexIdentity)) } };
   }) };
@@ -418,7 +554,7 @@ let retryTimer: ReturnType<typeof setTimeout> | null = null;
 export function embeddingConfigurationUsable(config: Pick<EmbeddingExecutionConfig, 'provider'>): boolean {
   return ['ollama', 'lmstudio', 'nodus'].includes(config.provider) || !!getSettings().providerKeys[config.provider];
 }
-export async function prepareResearchDocuments(documentIds: string[], mode: 'embeddings' | 'text' = 'embeddings'): Promise<void> {
+export async function prepareResearchDocuments(documentIds: string[], mode: 'embeddings' | 'text' = 'embeddings', reason: EmbeddingRunReason = 'manual'): Promise<void> {
   // Callers rely on the queue being written synchronously; only a running maintenance defers it.
   if (maintenance) await maintenance;
   const store = documentaryStore();
@@ -427,7 +563,7 @@ export async function prepareResearchDocuments(documentIds: string[], mode: 'emb
   const wanted = new Set(documentIds);
   const documents = inventory.documents.filter(document => wanted.has(document.id));
   if (documents.length !== wanted.size) throw new Error('research_source_not_authorized');
-  new DocumentaryCampaigns(store.db).create(getActiveVault().id, getActiveVault().name, documents, configuration);
+  new DocumentaryCampaigns(store.db).create(getActiveVault().id, getActiveVault().name, documents, configuration, reason);
   for (const document of documents) {
     for (const row of store.db.prepare("SELECT id FROM documentary_jobs WHERE document_id=? AND state IN ('failed','cancelled')").all(document.id) as { id: string }[]) store.retry(row.id);
     const prefix = `embedding:${document.id}:`;
@@ -482,7 +618,7 @@ async function drainOwnedDocumentaryRequests(): Promise<void> {
     });
   } finally {
     draining = false;
-    if (stopping) { store.close(); shared = null; drainClosed?.(); drainClosed = null; }
+    if (stopping) { drainClosed?.(); drainClosed = null; }
     else {
       const delay = requests.nextDelay(preparationOwners());
       if (delay !== null && !store.preference('paused')) {
@@ -541,6 +677,9 @@ async function drainPreparationLane(): Promise<void> {
         if (current.revision !== document.revision) throw new Error('research_source_revision_changed');
       };
       checkLease();
+      const audit = new DocumentaryCampaigns(store.db);
+      audit.note(request.document_id, 'pending');
+      if (request.attempts > 1) audit.retried(request.document_id);
       // OCR is deferred for documentary preparation, including already queued
       // v2 jobs. Detect scanned pages, preserve the last publication and skip.
       const extractionOptions = DOCUMENTARY_EXTRACTION_OPTIONS;
@@ -637,22 +776,28 @@ async function drainPreparationLane(): Promise<void> {
       // Publish every lexical attachment before any optional vector request.
       const total = prepared.reduce((sum, result) => sum + result.chunks.length, 0);
       store.db.prepare("UPDATE documentary_requests SET stage=?,total_passages=?,completed_passages=0,unknown_requests=0 WHERE document_id=? AND lease_token=?").run(configuration.embedding ? 'embeddings' : 'lexical', total, request.document_id, request.lease_token);
-      let completed = 0, unknown = 0;
+      let completed = 0, unknown = 0, computed = false;
       for (const result of prepared) {
         checkLease();
         if (configuration.embedding && !embeddingConfigurationUsable(configuration.embedding)) throw new Error('documentary_embeddings_unavailable');
-        if (configuration.embedding) await prepareDocumentaryEmbeddings(result.indexKey, result.chunks, controller.signal, configuration.embedding, final => checkLease(!!final), (count, uncertain) => {
+        if (configuration.embedding) {
+        const embedded = await prepareDocumentaryEmbeddings(result.indexKey, result.chunks, controller.signal, configuration.embedding, final => checkLease(!!final), (count, uncertain) => {
           store.db.prepare('UPDATE documentary_requests SET completed_passages=?,unknown_requests=?,updated_at=? WHERE document_id=? AND lease_token=?').run(completed + count, unknown + uncertain, Date.now(), request.document_id, request.lease_token);
           notifyPreparationProgress();
-        });
+        }, count => audit.note(request.document_id, 'pending', count));
+        computed ||= !embedded.reused;
+        }
         completed += result.chunks.length;
         unknown = (store.db.prepare('SELECT unknown_requests FROM documentary_requests WHERE document_id=?').get(request.document_id) as { unknown_requests: number }).unknown_requests;
       }
       checkLease();
+      audit.note(request.document_id, configuration.embedding ? computed ? 'computed' : 'reused' : 'excluded');
       requests.finish(request, null);
       store.db.prepare("UPDATE documentary_requests SET stage='complete' WHERE document_id=?").run(request.document_id);
       }));
     } catch (error) {
+      if (!controller.signal.aborted && !stopping) new DocumentaryCampaigns(store.db).note(request.document_id,
+        error instanceof Error && /^research_(source|vault)_/.test(error.message) ? 'excluded' : 'failed');
       const superseded = error instanceof Error && error.message === 'research_source_revision_changed';
       if (error instanceof Error && /^research_(source|vault)_/.test(error.message) && !superseded && request.source_id) {
         new DocumentaryCampaigns(store.db).blockOwner(request.document_id, request.vault_id);
@@ -702,15 +847,18 @@ async function reconcileOwnedResearchDocuments(): Promise<void> {
         for (const id of selected) if (inventory.documents.some(document => document.id === id)) ids.add(id);
       }
       snapshots.push({ vaultId: vault.id, ids });
+      const db = getDb();
+      db.prepare('DELETE FROM embedding_index_documentary_refs WHERE document_id NOT IN (SELECT value FROM json_each(?))').run(JSON.stringify([...ids]));
     }));
   }
   store.db.transaction(() => {
     const previous = store.db.prepare('SELECT vault_id,document_id FROM documentary_source_owners').all() as Array<{ vault_id: string; document_id: string }>;
-    store.db.prepare('DELETE FROM documentary_source_owners').run();
-    for (const snapshot of snapshots) for (const id of snapshot.ids) store.db.prepare('INSERT INTO documentary_source_owners VALUES(?,?)').run(snapshot.vaultId, id);
+    for (const snapshot of snapshots) for (const id of snapshot.ids) store.db.prepare('INSERT OR IGNORE INTO documentary_source_owners VALUES(?,?)').run(snapshot.vaultId, id);
     const removed = new Set<string>();
     for (const old of previous) {
       if (snapshots.some(snapshot => snapshot.vaultId === old.vault_id && snapshot.ids.has(old.document_id))) continue;
+      store.db.prepare('DELETE FROM documentary_source_owners WHERE vault_id=? AND document_id=?').run(old.vault_id, old.document_id);
+      store.db.prepare('DELETE FROM documentary_embedding_index_owners WHERE vault_id=? AND index_key IN (SELECT index_key FROM documentary_revisions WHERE document_id=?)').run(old.vault_id, old.document_id);
       store.db.prepare("UPDATE documentary_campaign_members SET state='cancelled' WHERE document_id=? AND campaign_id IN (SELECT id FROM documentary_campaigns WHERE vault_id=?)").run(old.document_id, old.vault_id);
       const policies = new DocumentaryCampaigns(store.db);
       const policy = policies.policy(old.vault_id);
@@ -727,33 +875,52 @@ async function reconcileOwnedResearchDocuments(): Promise<void> {
 
 let unsubscribe: (() => void) | null = null;
 let autoTimer: ReturnType<typeof setTimeout> | null = null;
-export function notifyResearchCorpusChanged(): void {
+export function notifyResearchCorpusChanged(sourceChanged = true): void {
+  if (sourceChanged && !stopping) {
+    // Mutations invalidate verification immediately, before the debounced discovery
+    // pass. A periodic poll does not dirty an otherwise up-to-date saved index.
+    const store = documentaryStore();
+    for (const vault of listVaults().filter(vault => vault.type === 'academic')) store.db.prepare('INSERT INTO documentary_embedding_source_versions VALUES(?,1) ON CONFLICT(vault_id) DO UPDATE SET revision=revision+1').run(vault.id);
+  }
   if (autoTimer) clearTimeout(autoTimer);
   autoTimer = withoutOwningVault(() => withoutDatabaseContext(() => setTimeout(() => {
     autoTimer = null;
+    const done = startPerf('documentary-corpus-poll', {}, { sourceChanged });
     void withDocumentaryWrites(async () => {
       await initialization;
       const repo = new DocumentaryCampaigns(documentaryStore().db);
+      const reconcile = startPerf('documentary-corpus-reconcile');
       await reconcileResearchDocumentOwnership();
+      reconcile();
       for (const vault of listVaults().filter(vault => vault.type === 'academic')) {
         if (!repo.policy(vault.id).futureAdditions) continue;
-        await withOwningVault(vault.id, () => withVaultDatabase(vault.id, async () => {
-          const policy = repo.policy(vault.id);
-          if (!policy.futureAdditions) return;
-          const inventory = researchCorpusInventory().documents.filter(document => document.workId && !document.noteId && !document.conversationAttachment);
-          const documents = inventory.filter(document => !policy.known.includes(document.id)
-            || (policy.authorized[document.id] !== undefined && policy.authorized[document.id] !== document.revision));
-          if (documents.length) await prepareResearchDocuments(documents.map(document => document.id));
-          const updated = repo.policy(vault.id);
-          repo.savePolicy({ ...updated, known: inventory.map(document => document.id) });
-        })).catch(() => { /* Retry discovery after configuration/import recovery; keep other vaults moving. */ });
+        const vaultDone = startPerf('documentary-corpus-vault', { nodusId: vault.id });
+        let documents = 0;
+        try {
+          await withOwningVault(vault.id, () => withVaultDatabase(vault.id, async () => {
+            const policy = repo.policy(vault.id);
+            if (!policy.futureAdditions) return;
+            const inventory = researchCorpusInventory().documents.filter(document => document.workId && !document.noteId && !document.conversationAttachment);
+            documents = inventory.length;
+            // A Set, not `known.includes`: that was one linear scan per library document, on a timer —
+            // 12% of the main thread's busy time in a nine-turn trace (2026-10-09).
+            const known = new Set(policy.known);
+            const added = inventory.filter(document => !known.has(document.id));
+            const changed = inventory.filter(document => known.has(document.id) && policy.authorized[document.id] !== undefined && policy.authorized[document.id] !== document.revision);
+            if (added.length) await prepareResearchDocuments(added.map(document => document.id), 'embeddings', 'new_content');
+            if (changed.length) await prepareResearchDocuments(changed.map(document => document.id), 'embeddings', 'content_changed');
+            const updated = repo.policy(vault.id);
+            repo.savePolicy({ ...updated, known: inventory.map(document => document.id) });
+          })).catch(() => { /* Retry discovery after configuration/import recovery; keep other vaults moving. */ });
+        } finally { vaultDone({ documents }); }
       }
-    }).catch(() => undefined);
+    }).catch(() => undefined).finally(done);
   }, 1000)));
   autoTimer.unref();
 }
 let initialization: Promise<void> | null = null;
 export function initializeDocumentaryPreparation(): Promise<void> {
+  if (stopping && !draining && !documentaryWriters) { stopping = false; initialization = null; initialized = false; }
   return initialization ??= initializeOwnedDocumentaryPreparation();
 }
 async function initializeOwnedDocumentaryPreparation(): Promise<void> {
@@ -776,7 +943,10 @@ async function initializeOwnedDocumentaryPreparation(): Promise<void> {
     }));
   }
   // Also catches sources added by long-running importers after their initial event.
-  corpusPoll = withoutOwningVault(() => withoutDatabaseContext(() => setInterval(notifyResearchCorpusChanged, 30000)));
+  // This fallback reconciles ownership and scans the corpus synchronously (measured 216 ms
+  // on a 15-document vault), so it is deliberately slow: every normal import already emits
+  // its event, and a 30 s timer made the main loop stall that often during narration.
+  corpusPoll = withoutOwningVault(() => withoutDatabaseContext(() => setInterval(() => notifyResearchCorpusChanged(false), 5 * 60_000)));
   corpusPoll.unref();
   const global = onGlobalLibraryChanged(notifyResearchCorpusChanged);
   const authored = onResearchCorpusChanged(notifyResearchCorpusChanged);
@@ -790,29 +960,110 @@ async function initializeOwnedDocumentaryPreparation(): Promise<void> {
     }
   }
   // Resume explicitly queued work after a restart, including a crashed stage.
-  if (fs.existsSync(path.join(app.getPath('userData'), 'documentary/store.sqlite'))) void drainDocumentaryRequests().catch(() => undefined);
+  if (fs.existsSync(path.join(app.getPath('userData'), 'documentary/store.sqlite'))) {
+    repo.recovered();
+    void drainDocumentaryRequests().catch(() => undefined);
+  }
   // Store maintenance never overlaps the start-up writes above.
   initialized = true;
   if (shared) convertLegacyVectorsInBackground();
 }
 
-export async function retrieveSharedDocumentaryEvidence(scope: ResolvedResearchScope, query: string, settings: RetrievalSettings, vector: number[] | null, signal?: AbortSignal, read?: ResearchDocumentRead): Promise<{ evidence: ResearchEvidence[]; traversal: { partial: boolean; rounds: number; candidates: number; evidenceTokens: number; visited: string[] } }> {
-  const inventory = researchCorpusInventory();
+/** The documentary retrieval process, shared by every search and kept between them: it holds the
+ *  read-only store open and its vectors cached (see documentaryRetrievalWorker.ts). Stopped after
+ *  a few idle minutes, on a search that never answers, and at shutdown; the next search starts it. */
+interface RetrievalWorker {
+  process: BackgroundProcess;
+  pending: Map<number, { message: (message: any) => void; fail: (error: Error) => void }>;
+  idle?: ReturnType<typeof setTimeout>;
+}
+let retrievalWorker: RetrievalWorker | null = null;
+let retrievalRequests = 0;
+const RETRIEVAL_WORKER_IDLE_MS = 5 * 60_000;
+function documentaryRetrievalWorker(): RetrievalWorker {
+  if (retrievalWorker) {
+    if (retrievalWorker.idle) clearTimeout(retrievalWorker.idle);
+    retrievalWorker.idle = undefined;
+    retrievalWorker.process.setIdle(false);
+    return retrievalWorker;
+  }
+  const packagedWorker = path.join(__dirname, 'documentaryRetrievalWorker.js');
+  const worker: RetrievalWorker = { process: backgroundProcess(fs.existsSync(packagedWorker) ? packagedWorker : path.join(app.getAppPath(), 'dist-electron/documentaryRetrievalWorker.js'), 'Nodus documentary retrieval'), pending: new Map() };
+  const failAll = (error: Error) => {
+    if (retrievalWorker === worker) retrievalWorker = null;
+    if (worker.idle) clearTimeout(worker.idle);
+    for (const request of [...worker.pending.values()]) request.fail(error);
+    worker.pending.clear();
+  };
+  worker.process.on('message', (message: { id?: number }) => { if (typeof message?.id === 'number') worker.pending.get(message.id)?.message(message); });
+  worker.process.once('error', error => failAll(error instanceof Error ? error : new Error(String(error))));
+  worker.process.once('exit', (code: number | null) => {
+    if (worker.pending.size) console.warn(`[documentary] retrieval worker exited with code ${code} before replying`);
+    failAll(new Error('documentary_retrieval_worker_stopped'));
+  });
+  retrievalWorker = worker;
+  return worker;
+}
+/** After a search settles: an idle process no longer holds the app (or a test) open, and is
+ *  stopped once it has been idle for a while. */
+function settleRetrievalWorker(worker: RetrievalWorker): void {
+  if (worker.pending.size || retrievalWorker !== worker) return;
+  worker.process.setIdle(true);
+  if (worker.idle) clearTimeout(worker.idle);
+  worker.idle = setTimeout(() => stopDocumentaryRetrievalWorker(worker), RETRIEVAL_WORKER_IDLE_MS);
+  worker.idle.unref?.();
+}
+function stopDocumentaryRetrievalWorker(worker: RetrievalWorker | null = retrievalWorker): void {
+  if (!worker) return;
+  if (retrievalWorker === worker) retrievalWorker = null;
+  if (worker.idle) clearTimeout(worker.idle);
+  void worker.process.terminate().catch(() => undefined);
+}
+
+export async function retrieveSharedDocumentaryEvidence(...args: Parameters<typeof retrieveDocumentaryEvidenceInContext>): ReturnType<typeof retrieveDocumentaryEvidenceInContext> {
+  const context = activeEmbeddingIndex(getDb());
+  const operation = beginEmbeddingOperation({ scope: getDb().name, indexId: context?.indexId }, args[4]);
+  try { return await retrieveDocumentaryEvidenceInContext(args[0], args[1], args[2], args[3], operation.signal, args[5], args[6], args[7]); }
+  finally { operation.release(); }
+}
+
+async function retrieveDocumentaryEvidenceInContext(scope: ResolvedResearchScope, query: string, settings: RetrievalSettings, vector: number[] | null, signal?: AbortSignal, read?: ResearchDocumentRead,
+  // A run passes its own, so one search does not build the whole inventory twice more.
+  currentDocuments: () => ReturnType<typeof researchCorpusInventory>['documents'] = () => researchCorpusInventory().documents, lexicalQueries?: string[]): Promise<{ evidence: ResearchEvidence[]; traversal: { partial: boolean; rounds: number; candidates: number; evidenceTokens: number; visited: string[] }; diagnostics?: { durationMs: number; workerRssBytes: number; reranking: RerankResult['state'] | 'stale'; rerankingMs: number } }> {
+  const searchStarted = performance.now();
   const config = currentEmbeddingConfig();
+  const context = activeEmbeddingIndex(getDb());
+  const permittedVectorKeys = embeddingIndexHead(getDb()) ? new Set(context
+    ? (getDb().prepare('SELECT index_key FROM embedding_index_documentary_refs WHERE index_id=? AND generation=?')
+      .all(context.indexId, context.generation) as Array<{ index_key: string }>).map(row => row.index_key) : []) : null;
   let parameters: ReturnType<typeof embeddingIdentityParameters> | null = null;
   try { parameters = embeddingIdentityParameters(effectiveEmbeddingConfig()); } catch { /* Lexical retrieval remains available without an endpoint. */ }
   const vectorKeys: string[] = [];
   const indexedDocuments = new Set<string>();
   const incompleteAttachments = new Set<string>();
+  // Per document of the scope, this ran a linear find over the inventory and parsed each revision's
+  // identity up to three times, serialising the same embedding parameters once per row: ~11% of the
+  // main thread's busy time in a nine-turn trace (2026-10-09). An index, one parse per row, and one
+  // serialisation of the constant compare exactly the same things.
+  const inventoryById = documentsById(currentDocuments());
+  const parsedIdentities = new Map<object, DocumentaryIndexIdentity>();
+  const identityOf = (row: { identity_json: string }): DocumentaryIndexIdentity => {
+    let identity = parsedIdentities.get(row);
+    if (!identity) { identity = JSON.parse(row.identity_json) as DocumentaryIndexIdentity; parsedIdentities.set(row, identity); }
+    return identity;
+  };
+  const wantedParameters = JSON.stringify(parameters);
+  const lookups = documentaryLookups(scope.documents);
   const keys = scope.documents.flatMap(document => {
-    assertResearchDocumentPermission(scope, document.id, inventory.documents.find(item => item.id === document.id));
-    const groups = attachmentRevisions(document);
-    const identities = groups.flatMap(group => group.filter(row => row.lexical_ready).map(row => JSON.parse(row.identity_json) as DocumentaryIndexIdentity));
+    assertResearchDocumentPermission(scope, document.id, inventoryById.get(document.id));
+    const groups = attachmentRevisions(document, lookups);
+    const identities = groups.flatMap(group => group.filter(row => row.lexical_ready).map(identityOf));
     if (unpreparedResearchAttachmentIds(document, identities).length) incompleteAttachments.add(document.id);
     return groups.flatMap(revisions => {
     const semantic = revisions.find(row => {
-      const identity: DocumentaryIndexIdentity = JSON.parse(row.identity_json);
-      return row.embedding_ready && identity.embedding?.model === config.model && identity.embedding?.provider === config.provider && identity.embedding?.dimensions === vector?.length && JSON.stringify(identity.embedding.parameters) === JSON.stringify(parameters);
+      if (permittedVectorKeys && !permittedVectorKeys.has(row.index_key)) return false;
+      const identity = identityOf(row);
+      return row.embedding_ready && identity.embedding?.model === config.model && identity.embedding?.provider === config.provider && identity.embedding?.dimensions === vector?.length && JSON.stringify(identity.embedding.parameters) === wantedParameters;
     });
     if (semantic) vectorKeys.push(semantic.index_key);
     const revision = revisions.find(row => row.lexical_ready && !row.embedding_ready) ?? revisions.find(row => row.lexical_ready);
@@ -820,52 +1071,90 @@ export async function retrieveSharedDocumentaryEvidence(scope: ResolvedResearchS
       return revision ? [revision.index_key] : [];
     });
   });
-  const space = researchFingerprint({ ...config, dimensions: vector?.length ?? 0, metric: 'cosine', parameters });
+  const space = researchFingerprint({ ...config, indexId: context?.indexId, generation: context?.generation, dimensions: vector?.length ?? 0, metric: 'cosine', parameters });
   const threshold = settings.threshold.mode === 'manual' && settings.threshold.embeddingSpace === space ? settings.threshold.value : -1;
   signal?.throwIfAborted();
   if (!keys.length && !vectorKeys.length) return { evidence: [], traversal: { partial: scope.documents.length > 0, rounds: 1, candidates: 0, evidenceTokens: 0, visited: [] } };
-  const packagedWorker = path.join(__dirname, 'documentaryRetrievalWorker.js');
-  const worker = backgroundProcess(fs.existsSync(packagedWorker) ? packagedWorker : path.join(app.getAppPath(), 'dist-electron/documentaryRetrievalWorker.js'), 'Nodus documentary retrieval');
   const finishSearch = startResearchActivity('nodus', read?.kind === 'search' ? 'search' : read?.kind === 'pages' ? 'pages' : read?.kind === 'context' ? 'expand' : read?.kind === 'references' ? 'references' : 'search', scope.documents.length === 1 ? scope.documents[0].title : query);
   const activities = new Map<string, ReturnType<typeof startResearchActivity>>();
-  const result = await new Promise<{ passages: ReturnType<DocumentaryStore['lexicalSearch']>; traversal: { partial: boolean; rounds: number; candidates: number; evidenceTokens: number; visited: string[] } }>((resolve, reject) => {
+  const wantsRerank = !read && (settings.reranking ?? getSettings().researchReranking) === 'local';
+  let reranking: RerankResult = { state: wantsRerank ? 'unavailable' : 'off', candidates: 0, durationMs: 0 };
+  let applied = false;
+  const result = await new Promise<{ passages: ReturnType<DocumentaryStore['lexicalSearch']>; workerRssBytes?: number; rerankingApplied?: boolean; traversal: { partial: boolean; rounds: number; candidates: number; evidenceTokens: number; visited: string[] } }>((resolve, reject) => {
     let settled = false;
+    const rerankLifetime = new AbortController();
+    const rerankSignal = signal ? AbortSignal.any([signal, rerankLifetime.signal]) : rerankLifetime.signal;
+    const retrievalStarted = Date.now();
+    // Diagnostic, off unless asked for: the query text itself, so a trace can tell a repeated
+    // question from a rephrased one. It is the user's own words, so it is never logged by default.
+    const traceQuery = process.env.NODUS_TRACE_QUERIES === '1' ? ` · query ${JSON.stringify(query.slice(0, 240))}` : '';
+    const worker = documentaryRetrievalWorker();
+    const id = ++retrievalRequests;
+    const input = { id, filename: documentaryStore().db.name, query, lexicalQueries, lexicalKeys: keys, vectorKeys, vector, settings, threshold, read, activity: researchActivityEnabled() };
     const finish = (error: Error | null, value?: { passages: ReturnType<DocumentaryStore['lexicalSearch']>; traversal: { partial: boolean; rounds: number; candidates: number; evidenceTokens: number; visited: string[] } }) => {
       if (settled) return;
       settled = true;
+      rerankLifetime.abort();
+      console.info(`${new Date().toISOString()} [documentary] retrieval ${read?.kind ?? 'search'} ${((Date.now() - retrievalStarted) / 1000).toFixed(1)}s · ${keys.length} lexical / ${vectorKeys.length} vector keys · ${value?.passages.length ?? 0} passages${error ? ` · ${error.message}` : ''}${traceQuery}`);
       clearTimeout(deadline);
       finishSearch(error ? 'failed' : 'completed', value?.passages.length);
       for (const finishActivity of activities.values()) finishActivity(error ? 'failed' : 'completed');
       activities.clear();
       signal?.removeEventListener('abort', abort);
-      void worker.terminate().finally(() => { if (error) reject(error); else resolve(value!); });
+      worker.pending.delete(id);
+      settleRetrievalWorker(worker);
+      if (error) reject(error); else resolve(value!);
     };
+    // A cancelled search leaves the shared process to finish it and discards the answer; a search
+    // that never answers stops the process, which the next search starts again.
     const abort = () => finish(new Error('documentary_retrieval_cancelled'));
-    const deadline = setTimeout(() => finish(new Error('documentary_retrieval_timeout')), 30000);
+    const deadline = setTimeout(() => { finish(new Error('documentary_retrieval_timeout')); stopDocumentaryRetrievalWorker(worker); }, 30000);
     signal?.addEventListener('abort', abort, { once: true });
-    worker.on('message', message => {
-      if (settled) return;
-      if (message.type === 'activity') {
-        if (message.status === 'active') activities.set(message.key, startResearchActivity(message.operation === 'expand' ? 'context' : 'nodus', message.operation));
-        else { activities.get(message.key)?.('completed', message.count); activities.delete(message.key); }
-        return;
-      }
-      finish(message.error ? new Error(message.error) : null, message);
+    worker.pending.set(id, {
+      message: message => {
+        if (message.type === 'activity') {
+          if (message.status === 'active') activities.set(message.key, startResearchActivity(message.operation === 'expand' ? 'context' : 'nodus', message.operation));
+          else { activities.get(message.key)?.('completed', message.count); activities.delete(message.key); }
+          return;
+        }
+        if (!message.error && message.rerankCandidates && !applied) {
+          applied = true;
+          void rerankDocumentaryCandidates(query, message.rerankCandidates, rerank, rerankSignal).then(next => {
+            if (settled) return;
+            reranking = next;
+            if (next.order) worker.process.postMessage({ ...input, rerankOrder: next.order });
+            else finish(null, message);
+          }).catch(error => finish(error instanceof Error ? error : new Error(String(error))));
+          return;
+        }
+        recordEmbeddingTrace({ type: 'documentary-retrieval', query, profile: config,
+          contract: parameters?.contract ? JSON.parse(String(parameters.contract)) : null, scopeId: scope.id, vectorKeys,
+          retrieval: message.retrievalTrace ?? null, limitations: { incompleteAttachments: [...incompleteAttachments], lexicalOnly: !vector || !vectorKeys.length },
+        });
+        finish(message.error ? new Error(message.error) : null, message);
+      },
+      fail: error => finish(error),
     });
-    worker.once('error', error => finish(error));
-    worker.once('exit', () => { if (!settled) finish(new Error('documentary_retrieval_worker_stopped')); });
-    worker.postMessage({ filename: documentaryStore().db.name, query, lexicalKeys: keys, vectorKeys, vector, settings, threshold, read, activity: researchActivityEnabled() });
+    worker.process.postMessage({ ...input, includeRerankCandidates: wantsRerank && rerankerAvailable() });
   });
-  const latest = researchCorpusInventory().documents;
-  for (const document of scope.documents) assertResearchDocumentPermission(scope, document.id, latest.find(item => item.id === document.id));
+  const latest = documentsById(currentDocuments());
+  if (context) indexRow(getDb(), context.indexId);
+  for (const document of scope.documents) assertResearchDocumentPermission(scope, document.id, latest.get(document.id));
+  // Indexed once: a linear search per scope document (and per passage) is quadratic in the library.
+  // The job's identity alone, read once per key: `getJob` also reads its payload, which can hold
+  // the whole extracted text, once per passage.
+  const scopeById = documentsById(scope.documents);
+  const identities = documentaryStore().jobIdentities(result.passages.map(passage => passage.index_key));
   const evidence = result.passages.map(passage => {
-    const document = scope.documents.find(document => document.id === passage.document_id)!;
-    const identity = JSON.parse(documentaryStore().getJob(passage.index_key)!.identity_json) as DocumentaryIndexIdentity;
+    const document = scopeById.get(passage.document_id)!;
+    const identity = identities.get(passage.index_key)!;
     const coverage = identity.coverage ?? document.coverage;
     return { id: passage.id, documentId: document.id, workId: document.workId, attachmentId: identity.attachmentId, attachmentRevision: identity.attachmentRevision,
       revision: identity.revision, text: passage.text, locator: JSON.parse(passage.locator_json),
       provenance: document.authoredKind ?? (coverage === 'abstract' ? 'abstract' as const : 'source' as const),
       limitations: [...(incompleteAttachments.has(document.id) ? ['attachments_partially_prepared'] : []), ...(identity.revision !== document.revision ? ['previous_indexed_revision'] : []), ...(document.authoredKind ? [document.authoredKind, 'not_primary_evidence'] : coverage === 'abstract' ? ['abstract_only'] : []), ...(document.sourceWarning ? [document.sourceWarning] : []), ...(read?.kind === 'references' ? ['reference_candidates_require_source_review'] : [])] };
   });
-  return { evidence, traversal: { ...result.traversal, partial: result.traversal.partial || incompleteAttachments.size > 0 || indexedDocuments.size < scope.documents.length || scope.documents.some(document => document.indexedSource && document.indexedSource.revision !== document.revision) } };
+  return { evidence, diagnostics: { durationMs: performance.now() - searchStarted, workerRssBytes: result.workerRssBytes ?? 0,
+    reranking: result.rerankingApplied === false ? 'stale' : reranking.state, rerankingMs: reranking.durationMs },
+    traversal: { ...result.traversal, partial: result.traversal.partial || incompleteAttachments.size > 0 || indexedDocuments.size < scope.documents.length || scope.documents.some(document => document.indexedSource && document.indexedSource.revision !== document.revision) } };
 }

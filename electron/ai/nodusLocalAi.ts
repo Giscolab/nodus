@@ -1,4 +1,6 @@
+import { assertNodusLocalModelAvailable, nodusLocalModelUnavailableReason } from '@shared/embeddingGemma2Availability';
 import { app } from 'electron';
+import { fetchModelResource, modelResourceError } from '../network/modelResource';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -29,6 +31,8 @@ import {
   type NodusLocalRuntimeDevice,
 } from '@shared/localAiRuntime';
 import type { ModelInfo } from '@shared/types';
+import { isEmbeddingGemma2, type EmbeddingRole } from '@shared/embeddingGemma2';
+import { embedEmbeddingGemma2, closeEmbeddingGemma2Worker, embeddingGemma2Busy } from './embeddingGemma2Host';
 
 export { LLAMA_CPP_VERSION };
 
@@ -85,8 +89,10 @@ function modelsDirectory(): string {
 }
 
 function modelDirectory(modelId: string): string {
-  return path.join(modelsDirectory(), modelId);
+  return path.join(modelsDirectory(), getNodusLocalModel(modelId)?.assetFamily ?? modelId);
 }
+
+function downloadKey(modelId: string): string { return getNodusLocalModel(modelId)?.assetFamily ?? modelId; }
 
 function runtimeDirectory(): string {
   return path.join(rootDirectory(), 'runtime', LLAMA_CPP_VERSION);
@@ -188,7 +194,7 @@ function nvidiaSmiPath(): string | null {
  * Vulkan build, so the diagnostics can answer "was CUDA detected?" without ever
  * claiming CUDA is being used. Best-effort and cached; never fatal.
  */
-async function probeNvidia(): Promise<{ detected: boolean; driver: string | null } | null> {
+export async function probeNvidia(): Promise<{ detected: boolean; driver: string | null } | null> {
   const executable = nvidiaSmiPath();
   if (!executable) return null;
   try {
@@ -309,7 +315,7 @@ async function findFile(directory: string, wanted: string): Promise<string | nul
   return null;
 }
 
-async function llamaServerPath(): Promise<string | null> {
+export async function llamaServerPath(): Promise<string | null> {
   return findFile(runtimeDirectory(), process.platform === 'win32' ? 'llama-server.exe' : 'llama-server');
 }
 
@@ -324,10 +330,12 @@ async function modelStatus(model: NodusLocalModelDefinition) {
       ? Math.min(stat.size, asset.bytes)
       : partial?.isFile() ? Math.min(partial.size, asset.bytes) : 0;
     if (!stat?.isFile() || stat.size !== asset.bytes) downloaded = false;
+    else if (model.assetFamily && (!asset.sha256 || await sha256Path(path.join(directory, asset.file)) !== asset.sha256)) downloaded = false;
   }
-  const active = activeDownloads.get(model.id);
+  const active = activeDownloads.get(downloadKey(model.id));
   return {
     id: model.id,
+    unavailableReason: nodusLocalModelUnavailableReason(model.id, process.platform, process.arch),
     downloaded,
     downloadedBytes,
     totalBytes: nodusLocalModelBytes(model),
@@ -520,14 +528,30 @@ function throwIfDownloadCancelled(signal?: AbortSignal): void {
   if (signal?.aborted) throw downloadCancelledError();
 }
 
+export { downloadFile as downloadVerifiedNodusAsset };
 async function downloadFile(
   url: string,
   target: string,
   expectedBytes: number | undefined,
   expectedSha256: string | undefined,
   onBytes: (bytes: number) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /** Extra request headers, e.g. a user's Hugging Face token for a gated repository. */
+  extraHeaders?: Record<string, string>
 ): Promise<void> {
+  const qaProxy = process.env.NODUS_LOCAL_AI_QA_ASSET_PROXY;
+  if (qaProxy) {
+    const root = process.env.NODUS_ISOLATED_ROOT;
+    if (!root || !path.isAbsolute(root)) throw new Error('El proxy de recursos exige un perfil aislado.');
+    const canonical = fs.realpathSync(root);
+    const marker = JSON.parse(fs.readFileSync(path.join(canonical, 'isolation.json'), 'utf8'));
+    const base = new URL(qaProxy);
+    if (marker.root !== canonical || marker.format !== 'nodus.isolated-research-profile/1'
+      || !app.getPath('userData').startsWith(canonical + path.sep)
+      || base.protocol !== 'http:' || base.hostname !== '127.0.0.1' || Number(base.port) < 1024
+      || base.username || base.password || base.search || base.hash || !/^\/[a-f0-9-]{36}$/.test(base.pathname)) throw new Error('Proxy de recursos QA inválido.');
+    url = `${base.href}/asset?url=${encodeURIComponent(url)}`;
+  }
   throwIfDownloadCancelled(signal);
   await fsp.mkdir(path.dirname(target), { recursive: true });
   const completed = await fsp.stat(target).catch(() => null);
@@ -540,16 +564,17 @@ async function downloadFile(
   }
   const partial = `${target}.download`;
   let resumedBytes = (await fsp.stat(partial).catch(() => null))?.size ?? 0;
+  if (resumedBytes === 0) await fsp.rm(partial, { force: true });
   if (expectedBytes && resumedBytes > expectedBytes) {
     await fsp.rm(partial, { force: true });
     resumedBytes = 0;
   }
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await fetchModelResource(url, {
       redirect: 'follow',
       signal,
-      headers: resumedBytes > 0 ? { Range: `bytes=${resumedBytes}-` } : undefined,
+      headers: { ...(extraHeaders ?? {}), ...(resumedBytes > 0 ? { Range: `bytes=${resumedBytes}-` } : {}) },
     });
   } catch (error) {
     if (signal?.aborted) throw downloadCancelledError();
@@ -564,13 +589,15 @@ async function downloadFile(
     await fsp.rm(partial, { force: true });
     throw new Error('La verificación SHA-256 del archivo reanudado ha fallado.');
   }
-  if (!response.ok || !response.body) throw new Error(`Descarga HTTP ${response.status}: ${url}`);
+  if (!response.ok || !response.body) throw new Error(`Descarga HTTP ${response.status}: ${new URL(url).hostname}`);
   const resumed = resumedBytes > 0 && response.status === 206;
   if (!resumed && resumedBytes > 0) {
     await fsp.rm(partial, { force: true });
     resumedBytes = 0;
   }
-  const file = fs.createWriteStream(partial, { flags: resumed ? 'a' : 'wx' });
+  // Await every disk write before cancellation can close the file. Destroying a
+  // WriteStream with an outstanding write can emit an unhandled ERR_STREAM_DESTROYED.
+  const file = await fsp.open(partial, resumed ? 'a' : 'wx');
   const hash = createHash('sha256');
   let received = resumedBytes;
   try {
@@ -580,21 +607,24 @@ async function downloadFile(
     }
     const reader = response.body.getReader();
     for (;;) {
-      const { done, value } = await reader.read();
+      const { done, value } = await reader.read().catch(cause => {
+        if (signal?.aborted) throw downloadCancelledError();
+        throw modelResourceError(url, cause);
+      });
       if (done) break;
       const chunk = Buffer.from(value);
       received += chunk.length;
       hash.update(chunk);
-      if (!file.write(chunk)) await new Promise<void>((resolve) => file.once('drain', resolve));
+      await file.writeFile(chunk);
       onBytes(chunk.length);
     }
-    await new Promise<void>((resolve, reject) => file.end((error?: Error | null) => error ? reject(error) : resolve()));
   } catch (error) {
-    file.destroy();
     // Preserve a bounded partial file. A later request resumes it with HTTP Range;
     // checksum verification still guards against a corrupt server response.
     if (signal?.aborted) throw downloadCancelledError();
     throw error;
+  } finally {
+    await file.close();
   }
   throwIfDownloadCancelled(signal);
   if (expectedBytes && received !== expectedBytes) {
@@ -860,7 +890,9 @@ export async function downloadNodusLocalModel(
 ): Promise<NodusLocalAiStatus> {
   const model = getNodusLocalModel(modelId);
   if (!model) throw new Error(`Modelo local no soportado: ${modelId}`);
-  const running = activeDownloads.get(modelId);
+  assertNodusLocalModelAvailable(modelId, process.platform, process.arch);
+  const family = downloadKey(modelId);
+  const running = activeDownloads.get(family);
   if (running) return followDownload(running, onProgress);
   const job: ActiveLocalAiDownload = {
     progress: 0,
@@ -868,7 +900,7 @@ export async function downloadNodusLocalModel(
     listeners: new Set(),
     controller: new AbortController(),
   };
-  activeDownloads.set(modelId, job);
+  activeDownloads.set(family, job);
   job.promise = (async () => {
     // The runtime is a dependency of every llama.cpp model: install it first, and
     // let the installer decide whether the installed build still fits this machine
@@ -880,7 +912,7 @@ export async function downloadNodusLocalModel(
     }
     return downloadModelAssets(model, (fraction) => reportDownloadProgress(job, fraction), job.controller.signal);
   })().finally(() => {
-    if (activeDownloads.get(modelId) === job) activeDownloads.delete(modelId);
+    if (activeDownloads.get(family) === job) activeDownloads.delete(family);
   }).then(() => getNodusLocalAiStatus());
   return followDownload(job, onProgress);
 }
@@ -907,12 +939,18 @@ export async function cancelNodusLocalDownloads(): Promise<NodusLocalAiStatus> {
 export async function deleteNodusLocalModel(modelId: string): Promise<NodusLocalAiStatus> {
   const model = getNodusLocalModel(modelId);
   if (!model) throw new Error(`Modelo local no soportado: ${modelId}`);
-  if (activeDownloads.has(modelId)) throw new Error('Espera a que termine la descarga antes de eliminar el modelo.');
-  if (activeServer?.modelId === modelId && activeServer.leases > 0) {
+  if (activeDownloads.has(downloadKey(modelId))) throw new Error('Espera a que termine la descarga antes de eliminar el modelo.');
+  if (isEmbeddingGemma2(modelId)) {
+    if (embeddingGemma2Busy()) throw new Error('EmbeddingGemma tiene solicitudes en curso.');
+    closeEmbeddingGemma2Worker();
+  }
+  // Every profile of the family loads these files: a sibling profile may be the one running.
+  const serving = activeServer && downloadKey(activeServer.modelId) === downloadKey(modelId) ? activeServer : null;
+  if (serving && serving.leases > 0) {
     throw new Error('El modelo tiene solicitudes en curso. Espera a que terminen antes de eliminarlo.');
   }
-  if (activeServer?.modelId === modelId) stopNodusLocalServer();
-  embeddingPipelines.delete(modelId);
+  if (serving) stopNodusLocalServer();
+  embeddingPipelines.delete(downloadKey(modelId));
   for (const asset of model.assets) verifiedAssetCache.delete(path.join(modelDirectory(modelId), asset.file));
   await fsp.rm(modelDirectory(modelId), { recursive: true, force: true });
   return getNodusLocalAiStatus();
@@ -931,7 +969,7 @@ export function listNodusLocalChatModels(): ModelInfo[] {
 }
 
 export function listNodusLocalEmbeddingModels(): ModelInfo[] {
-  return NODUS_LOCAL_MODELS.filter((model) => model.kind === 'embedding').map((model) => ({
+  return NODUS_LOCAL_MODELS.filter((model) => model.kind === 'embedding' && !nodusLocalModelUnavailableReason(model.id, process.platform, process.arch)).map((model) => ({
     id: model.id,
     name: model.label,
     sizeBytes: nodusLocalModelBytes(model),
@@ -942,7 +980,12 @@ export function listNodusLocalEmbeddingModels(): ModelInfo[] {
   }));
 }
 
-async function freePort(): Promise<number> {
+export async function freePort(): Promise<number> {
+  if (process.env.NODUS_LOCAL_AI_QA_PORT) {
+    const port = Number(process.env.NODUS_LOCAL_AI_QA_PORT);
+    if (!process.env.NODUS_ISOLATED_ROOT || !Number.isInteger(port) || port < 1024 || port > 65535 || port === 23119) throw new Error('Puerto de runtime QA inválido.');
+    return port;
+  }
   return new Promise((resolve, reject) => {
     const server = net.createServer();
     server.unref();
@@ -1404,7 +1447,7 @@ async function ensureNodusLocalServerUnlocked(
     args.push(
       '--batch-size', String(contextPerSlot),
       '--ubatch-size', String(contextPerSlot),
-      '--embedding', '--pooling', 'mean',
+      '--embedding', '--pooling', model.pooling ?? 'mean',
     );
   }
   const installed = await installedRuntimeBackend();
@@ -1515,6 +1558,11 @@ export async function withNodusLocalServerLease<T>(
         });
         acquired.server.stopWhenIdle = true;
       }
+      // llama.cpp answers «Compute error.» once a backend graph has failed, for example a
+      // Metal command buffer refused under GPU memory pressure. That process keeps failing
+      // every later request, however small, while a fresh one recovers: retire it once its
+      // in-flight requests finish so the next attempt (batch bisection retries) starts clean.
+      if (/Compute error/i.test(error instanceof Error ? error.message : String(error))) acquired.server.stopWhenIdle = true;
       throw error;
     } finally {
       await serializeLifecycle(async () => {
@@ -1530,7 +1578,8 @@ export async function withNodusLocalServerLease<T>(
 }
 
 async function transformersPipeline(model: NodusLocalModelDefinition): Promise<any> {
-  let pending = embeddingPipelines.get(model.id);
+  // Pooling is applied per call, so the profiles of one download share the loaded weights.
+  let pending = embeddingPipelines.get(downloadKey(model.id));
   if (!pending) {
     pending = (async () => {
       const status = await modelStatus(model);
@@ -1545,16 +1594,21 @@ async function transformersPipeline(model: NodusLocalModelDefinition): Promise<a
         local_files_only: true,
       } as any);
     })();
-    embeddingPipelines.set(model.id, pending);
+    embeddingPipelines.set(downloadKey(model.id), pending);
   }
   return pending;
 }
 
-export async function embedWithNodusLocal(modelId: string, input: string | string[], signal?: AbortSignal): Promise<number[][]> {
+export async function embedWithNodusLocal(modelId: string, input: string | string[], signal?: AbortSignal, options: { role?: EmbeddingRole; title?: string; titles?: (string | undefined)[] } = {}): Promise<number[][]> {
   signal?.throwIfAborted();
   const model = getNodusLocalModel(modelId);
   if (!model || model.kind !== 'embedding') throw new Error(`Modelo de embeddings local no soportado: ${modelId}`);
+  assertNodusLocalModelAvailable(modelId, process.platform, process.arch);
   const texts = Array.isArray(input) ? input : [input];
+  if (isEmbeddingGemma2(modelId)) {
+    if (!await verifyNodusLocalModel(modelId)) throw new Error(`Descarga y verifica «${model.label}» desde Ajustes → Modelos IA.`);
+    return embedEmbeddingGemma2(modelId, modelDirectory(modelId), texts, options, signal);
+  }
   if (model.runtime === 'llama_cpp') {
     return withNodusLocalServerLease(modelId, 'embedding', async (baseUrl) => {
       const response = await fetch(`${baseUrl}/embeddings`, {
@@ -1571,8 +1625,25 @@ export async function embedWithNodusLocal(modelId: string, input: string | strin
     });
   }
   const extractor = await transformersPipeline(model);
-  const output = await extractor(texts, { pooling: 'mean', normalize: true });
-  const values = output.tolist() as number[][];
+  // A large padded CPU batch can exceed Electron's native allocator limit and
+  // terminate the application before JavaScript can report the failure. Bound
+  // dispatch without changing historical text, pooling or normalization.
+  const pooling = model.pooling ?? 'mean';
+  const values: number[][] = [];
+  const tokenLengths = texts.map(text => extractor.tokenizer(text, { truncation: true, return_tensor: false }).input_ids.length as number);
+  for (let offset = 0; offset < texts.length;) {
+    signal?.throwIfAborted();
+    let end = offset + 1, maximum = tokenLengths[offset];
+    while (end < texts.length && end - offset < 8) {
+      const nextMaximum = Math.max(maximum, tokenLengths[end]);
+      if (nextMaximum * (end - offset + 1) > 2048) break;
+      maximum = nextMaximum; end++;
+    }
+    const output = await extractor(texts.slice(offset, end), { pooling, normalize: true });
+    values.push(...output.tolist() as number[][]);
+    offset = end;
+  }
+  signal?.throwIfAborted();
   return values;
 }
 
@@ -1580,4 +1651,4 @@ export async function embedWithNodusLocal(modelId: string, input: string | strin
 // Electron mock. The real Electron app always exposes EventEmitter methods, but
 // guarding registration keeps the local-model module import-safe in workers and
 // test harnesses that do not own the application lifecycle.
-if (typeof app.once === 'function') app.once('before-quit', stopNodusLocalServer);
+if (typeof app.once === 'function') app.once('before-quit', () => { stopNodusLocalServer(); closeEmbeddingGemma2Worker(); });

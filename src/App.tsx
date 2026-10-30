@@ -1,11 +1,26 @@
+import { useLearningOverlayBusy } from './learning/useLearningOverlayBusy';
+import { AcademicLearningContext } from './learning/AcademicLearningContext';
+import { useAcademicLearningController } from './learning/useAcademicLearning';
+import { AcademicLearningCoach, AcademicLearningDialogs,LearningWorkspaceBar } from './learning/AcademicLearningSurface';
+import { lessonForProfile } from '@shared/academicLearning';
+import { learningText } from '@shared/academicLearningCopy';
+import { requestLearningPrompt } from './learning/learningPrompt';
+import { createPortal } from 'react-dom';
 import { SHOW_FOCUS_PAGE_EVENT, openFocusLayout, openFocusTimer, toggleFocusTimer, useStudyFocusActions, useStudyFocusLayout, useStudyFocusReduced } from './components/focus/StudyFocusContext';
+import { useEditorialShellFocus } from './components/workspace/editorialFocus';
+import { parseEditorReference } from '@shared/editorReferences';
 import { FocusExitDialog, FocusLayoutDialog, type FocusSectionOption } from './components/focus/FocusDialogs';
-import { focusLayoutVisible } from '@shared/studyFocus';
+import { focusDefaultSectionVisible, focusLayoutVisible } from '@shared/studyFocus';
 import { FocusCompletionNotice, FocusHeader } from './components/focus/FocusHeader';
 import { FocusRail, type FocusRailItem } from './components/focus/FocusRail';
+import { AcademicInterfaceContext } from './components/AcademicInterfaceContext';
+import { AcademicInterfacePicker } from './components/AcademicInterface';
+import { academicInitialView, academicNavigation, academicNavigationGroups, academicProfileLabel, academicProfilePatch } from './academicInterfaceProfiles';
+import { headerActionVisible, type HeaderActionId } from '@shared/headerActions';
+import type { AcademicInterfaceProfile } from '@shared/types';
 import { ResearchPreparationWelcome } from './components/ResearchPreparationWelcome';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { AppSettings, CorpusHealthBucketId, DatabaseSummary, NodiNotification, RecoveryStatus, ServerInboxEntry, SyncLogEntry, VaultSummary } from '@shared/types';
+import type { AppSettings, CorpusHealthBucketId, DatabaseSummary, NodiNotification, RecoveryStatus, ServerInboxEntry, SyncLogEntry, VaultSummary, ZoteroSyncStatus } from '@shared/types';
 import type { AnnouncementRefreshResult } from '@shared/announcements';
 import type { CsvImportPlanData } from './views/DatabasesView';
 import type { NotionImportReport } from '@shared/notionImport';
@@ -18,6 +33,8 @@ import { unreadServerInboxGroupCount } from './serverInboxGrouping';
 import { NotificationsPanel, useAnnouncements } from './components/NotificationsPanel';
 import { BrowserMediaPopover, useBrowserMedia } from './components/browser/BrowserMedia';
 import { DriftMiniPlayer } from './components/drift/DriftMiniPlayer';
+import { NarrationMiniPlayer } from './components/narration/NarrationMiniPlayer';
+import { useAudioPlayer } from './components/AudioPlayer';
 import { useDrift } from './components/drift/DriftProvider';
 import { DatabasesSidebarExplore } from './components/DatabasesSidebarExplore';
 import { StudySidebar, type StudyNavigationTarget } from './components/StudySidebar';
@@ -29,7 +46,7 @@ import { ProsopographySidebar } from './components/ProsopographySidebar';
 import { TestimonySidebar } from './components/TestimonySidebar';
 import type { DossierTab } from './components/testimonies/InterviewDossier';
 import type { TestimonyDeepLink } from '@shared/testimonyDeepLinks';
-import { FeedbackHost } from './components/feedback';
+import { FeedbackHost, toast } from './components/feedback';
 import { PrivacyRequestHost } from './privacyNotices';
 import { BrowserConnectorPairingRequestHost } from './components/BrowserConnectorPairingRequestHost';
 import { Tour } from './views/Tour';
@@ -44,21 +61,16 @@ import { ProsopographyTour } from './views/ProsopographyTour';
 import { WorldbuildingTour } from './views/WorldbuildingTour';
 import { FIRST_VAULT_VERSION } from './views/FirstVaultSetup';
 import { hasPendingWhatsNew, WhatsNewModal } from './components/WhatsNewModal';
-import { PdfPresenterTutorialAnnouncement } from './components/PdfPresenterTutorialAnnouncement';
-import { TutorialVideosUpdateTour } from './components/TutorialVideosGuide';
-import { PlatformHighlightsUpdateTour } from './components/PlatformHighlightsGuide';
-import { ToolkitBetaUpdateTour } from './components/ToolkitBetaGuide';
 import { useUpdateProgress } from './useUpdateProgress';
 import { pendingUpdateVersion, updateInstallBusy } from './updateStatus';
 import { UpdateReadyNotice } from './components/UpdateReadyNotice';
 import { AiModelRequiredModal } from './components/AiModelRequiredModal';
-import { MobileTeaserGuide } from './components/MobileTeaserGuide';
-import { recoveryHealthAdvice, recoveryHealthHeadline } from './recoveryHealth';
+import { recoveryHealthAdvice, recoveryHealthHeadline, recoverySetupRequest } from './recoveryHealth';
 import { NodiMascot } from './components/nodi/NodiMascot';
 import { NodiStyleModal } from './components/NodiStyleModal';
 import { Icon } from './components/ui';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
-import { t, tx, setActiveLang } from './i18n';
+import { t, tx, errorText, setActiveLang } from './i18n';
 import { resolveStartupGate } from './app/StartupGate';
 import { VIEW_REGISTRY } from './app/viewRegistry';
 import type { ViewContext } from './app/ViewContext';
@@ -75,7 +87,7 @@ import type {
   StudyMaterialNavigationTarget,
   View,
 } from './navigation';
-import { researchChatView, dedicatedVaultNavIds, groupedNav, navItemLabel, orderedNav, NAV_ITEMS, NAV_GROUPS } from './navigation';
+import { researchChatView, dedicatedVaultNavIds, groupedNav, navItemLabel, orderedNav, orderSidebarItems, pinnedToolkitSidebarItems, NAV_ITEMS, NAV_GROUPS } from './navigation';
 import type { ResearchConversationNavigationTarget } from './researchNoteProvenance';
 import type { ToolkitPage } from './navigation';
 import { OPEN_LIBRARY_DOCUMENT_EVENT, type OpenLibraryDocumentDetail } from './evidenceJump';
@@ -91,8 +103,9 @@ import nodusLogoTeal from './assets/nodus-logo-teal.svg';
 import nodusLogoOrange from './assets/nodus-logo-orange.svg';
 import nodusLogoViolet from './assets/nodus-logo-violet.svg';
 import nodusLogoCyan from './assets/nodus-logo-cyan.svg';
+import { NodusHeaderLogo } from './components/NodusHeaderLogo';
 import { buildDockIconDataUrl, dockColorForVaultType } from './dockIcon';
-import { APP_THEME_DEFINITIONS_STORAGE_KEY, APP_THEME_STORAGE_KEY, applyAppTheme as applyRuntimeAppTheme, applyThemeMode } from './theme/themeBoot';
+import { APP_THEME_DEFINITIONS_STORAGE_KEY, APP_THEME_STORAGE_KEY, applyAppTheme as applyRuntimeAppTheme, applyThemeMode, applyVaultAccent } from './theme/themeBoot';
 import { APP_THEME_IDS } from '@shared/appThemes';
 import { useBrowserNativeOverlayGuard } from './browserOverlay';
 
@@ -143,6 +156,9 @@ function HeaderAction({
   queueTrigger = false,
   focusKeep = false,
   pressed,
+  visible = true,
+  actionId,
+  responsive = false,
 }: {
   icon: string;
   label: string;
@@ -165,11 +181,16 @@ function HeaderAction({
   focusKeep?: boolean;
   /** For a toggle: whether it is on. */
   pressed?: boolean;
+  visible?: boolean;
+  actionId?: HeaderActionId;
+  responsive?: boolean;
 }) {
   const titleText = kbd ? `${title ?? label} · ${kbd}` : title ?? label;
   return (
     <button
       data-tour={dataTour}
+      data-header-action={actionId}
+      hidden={!visible}
       data-vault-trigger={vaultTrigger ? '' : undefined}
       data-inbox-trigger={inboxTrigger ? '' : undefined}
       data-notifications-trigger={notificationsTrigger ? '' : undefined}
@@ -181,7 +202,7 @@ function HeaderAction({
       disabled={disabled}
       title={titleText}
       aria-label={label}
-      className={`header-action btn justify-center px-2.5 py-0 leading-none btn-ghost h-9 min-h-9 min-w-9 ${tone}`}
+      className={`header-action btn justify-center px-2.5 py-0 leading-none btn-ghost h-9 min-h-9 min-w-9 ${responsive ? 'header-responsive-action' : ''} ${tone}`}
     >
       <Icon name={icon} className={spinning ? 'animate-spin' : ''} />
       {showLabel && (
@@ -201,6 +222,20 @@ export function App() {
   // In focus mode the header keeps only what the student chose; elsewhere nothing changes.
   const focusKeeps = (id: string) => focusLayoutVisible(focusLayout.layout, id);
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [interfacePickerOpen, setInterfacePickerOpen] = useState(false);
+  const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
+  const [headerVisibilityBusy, setHeaderVisibilityBusy] = useState(false);
+  const [headerVisibilityError, setHeaderVisibilityError] = useState('');
+  const headerMoreRef = useRef<HTMLDivElement>(null);
+  const [headerLeftEl, setHeaderLeftEl] = useState<HTMLDivElement | null>(null);
+  const [interfaceTrigger, setInterfaceTrigger] = useState<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!headerMoreOpen) return;
+    const dismiss = (e: PointerEvent) => { if (!headerMoreRef.current?.contains(e.target as Node) && !(e.target as Element).closest('.academic-header-more-panel, [role="dialog"], dialog')) setHeaderMoreOpen(false); };
+    const escape = (e: KeyboardEvent) => { if (e.key === 'Escape') { setHeaderMoreOpen(false); headerMoreRef.current?.querySelector('button')?.focus(); } };
+    document.addEventListener('pointerdown', dismiss); document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', escape); };
+  }, [headerMoreOpen]);
   const [vaults, setVaults] = useState<VaultSummary[]>([]);
   const [activeVault, setActiveVault] = useState<VaultSummary | null>(null);
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(null);
@@ -208,24 +243,8 @@ export function App() {
   const [whatsNewSettled, setWhatsNewSettled] = useState(() => !hasPendingWhatsNew());
   const [manualWhatsNewOpen, setManualWhatsNewOpen] = useState(false);
   const [aiModelRequiredOpen, setAiModelRequiredOpen] = useState(false);
-  // The mobile app does not exist in this build, so there is no tutorial chapter that
-  // could have covered it: every 3.2.4 user gets the teaser once, new install or not.
-  const [mobileTeaserSettled, setMobileTeaserSettled] = useState(false);
-  // Existing users receive the current MCP/Server/Zotero/Toolkit overview directly
-  // after release notes. Fresh installs already saw the same three chapters in v5.
-  const [platformHighlightsSettled, setPlatformHighlightsSettled] = useState(false);
-  // The 2.4.0 toolkit/model guide queues directly behind release notes. Its own
-  // versioned guard settles immediately for new installs and for users who saw it.
-  const [toolkitBetaTourSettled, setToolkitBetaTourSettled] = useState(false);
-  // The PDF Presenter video announcement queues immediately after release notes.
-  const [pdfPresenterTutorialSettled, setPdfPresenterTutorialSettled] = useState(false);
-  // Users who completed the essential guide before the video tutorials existed were
-  // never asked "video or text", so the catalogue is announced to them once, here.
-  const [tutorialVideosSettled, setTutorialVideosSettled] = useState(false);
   // Startup progress is non-blocking; later checks stay silent until ready to install.
   const [updateProgress, setUpdateProgress, showStartupProgress] = useUpdateProgress({ checkOnStartup: true });
-  const startupGuidesSettled = whatsNewSettled && pdfPresenterTutorialSettled && mobileTeaserSettled
-    && platformHighlightsSettled && toolkitBetaTourSettled && tutorialVideosSettled;
   const [deferredUpdate, setDeferredUpdate] = useState<string | null>(null);
   const readyVersion = pendingUpdateVersion(updateProgress);
   const updateNoticeKey = readyVersion ? `${readyVersion}${updateProgress?.errorCode ?? ''}` : null;
@@ -254,9 +273,10 @@ export function App() {
     // Escritura and Proyectos were consolidated into one workspace. Keep their
     // historical ids as input aliases only so old deep links and notifications do
     // not resurrect removed sections in the shell.
-    const canonicalNext: View = next === 'writing' || next === 'projects'
+    const requestedNext = next === 'home' && normalizeVaultType(activeVault?.type) === 'academic' && settings?.academicInterfaceProfile === 'simple' ? 'researchChat' : next;
+    const canonicalNext: View = requestedNext === 'writing' || requestedNext === 'projects'
       ? (normalizeVaultType(activeVault?.type) === 'academic' ? 'workspace' : 'notes')
-      : next;
+      : requestedNext;
     const cur = viewRef.current;
     // Leaving Browser: hide the native WebContentsView BEFORE mounting the next
     // section. The previous `invoke` left one frame where Settings header was
@@ -269,7 +289,7 @@ export function App() {
       return;
     }
     setViewRaw(canonicalNext);
-  }, [activeVault?.type]);
+  }, [activeVault?.type, settings?.academicInterfaceProfile]);
   useBrowserNativeOverlayGuard(view === 'browser');
   useEffect(() => window.nodus.onAiModelRequired(() => setAiModelRequiredOpen(true)), []);
   // Página activa dentro de Herramientas. Vive aquí (y no en ToolkitView) porque
@@ -277,8 +297,10 @@ export function App() {
   // sección y volver no pierde el sitio aunque la vista se desmonte.
   const [toolkitPage, setToolkitPage] = useState<ToolkitPage>('home');
   const [navCollapsed, setNavCollapsed] = useState(() => localStorage.getItem('nodus.navCollapsed') === '1');
+  const editorialFocus = useEditorialShellFocus();
   const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const stored = Number(localStorage.getItem('nodus.sidebarWidth'));
+    const savedWidth = localStorage.getItem('nodus.sidebarWidth');
+    const stored = savedWidth === null ? NaN : Number(savedWidth);
     return Number.isFinite(stored)
       ? Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, stored))
       : SIDEBAR_DEFAULT_WIDTH;
@@ -344,10 +366,11 @@ export function App() {
   const [headerActionsEl, setHeaderActionsEl] = useState<HTMLElement | null>(null);
   const [vaultBadgeEl, setVaultBadgeEl] = useState<HTMLElement | null>(null);
   const [vaultBadgePlacement, setVaultBadgePlacement] = useState<HeaderBadgePlacement | null>(null);
-  const toggleVaults = useCallback(
-    (el: HTMLElement) => setVaultAnchor((cur) => (cur === el ? null : el)),
-    []
-  );
+  const toggleVaults = useCallback((el: HTMLElement) => {
+    if(activeVault?.learningWorkspace)return;
+    setInterfacePickerOpen(false); setHeaderMoreOpen(false);
+    setVaultAnchor(cur => cur === el ? null : el);
+  }, [activeVault?.learningWorkspace]);
   const toggleInbox = useCallback(
     (el: HTMLElement) => setInboxAnchor((cur) => (cur === el ? null : el)),
     []
@@ -467,6 +490,25 @@ export function App() {
   useEffect(() => { if (view !== 'studyChat') setStudyChatTarget(null); }, [view]);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<SyncLogEntry | null>(null);
+  useEffect(() => {
+    let disposed = false;
+    let receivedEvent = false;
+    setSyncing(false);
+    setLastSync(null);
+    const apply = (status: ZoteroSyncStatus, refresh: boolean) => {
+      if (disposed || status.vaultId !== activeVault?.id) return;
+      setSyncing(status.running);
+      setLastSync(status.lastSync);
+      if (refresh && !status.running) notifyDataChanged();
+    };
+    const off = window.nodus.onZoteroSyncStatus(status => {
+      if (status.vaultId !== activeVault?.id) return;
+      receivedEvent = true;
+      apply(status, true);
+    });
+    void window.nodus.getZoteroSyncStatus().then(status => { if (!receivedEvent) apply(status, false); }).catch(() => undefined);
+    return () => { disposed = true; off(); };
+  }, [activeVault?.id]);
   const [loadError, setLoadError] = useState<string | null>(null);
   // null while unknown; true when the DB holds any real or demo content.
   const [hasData, setHasData] = useState<boolean | null>(null);
@@ -475,6 +517,7 @@ export function App() {
   const beginSidebarResize = (event: React.PointerEvent<HTMLButtonElement>) => {
     event.currentTarget.focus();
     event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
     const startX = event.clientX;
     const startWidth = sidebarWidth;
     document.body.classList.add('is-resizing-sidebar');
@@ -556,11 +599,11 @@ export function App() {
       ? NAV_ITEMS.filter((item) => item.id !== 'home' && item.id !== 'settings' && !dedicatedIds.includes(item.id)).map((item) => item.id)
       : [];
     return groupedNav(
-      settings?.sidebarOrder ?? [],
-      ['library', ...activeSidebarHidden, ...disallowed, ...outsideDedicatedWorkspace],
+      settings?.academicInterfaceProfile === 'advanced' && normalizeVaultType(activeVault?.type) === 'academic' ? [] : settings?.sidebarOrder ?? [],
+      ['library', ...(settings?.academicInterfaceProfile === 'advanced' && normalizeVaultType(activeVault?.type) === 'academic' ? ['notes'] : activeSidebarHidden), ...disallowed, ...outsideDedicatedWorkspace],
       settings?.toolkitPinnedPages ?? [],
     );
-  }, [settings?.sidebarOrder, settings?.toolkitPinnedPages, activeSidebarHidden, activeVault?.type]);
+  }, [settings?.sidebarOrder, settings?.academicInterfaceProfile, settings?.toolkitPinnedPages, activeSidebarHidden, activeVault?.type]);
 
   // If the active vault type doesn't allow the current view (e.g. switching from a
   // primary-source vault to an academic one while on Personas), fall back to Home.
@@ -641,6 +684,8 @@ export function App() {
     }
   }), []);
 
+  // Floating UI shares the active vault's canonical accent with the app shell.
+  useEffect(() => applyVaultAccent(activeVault?.type), [activeVault?.type]);
   // Genealogy vaults wear a golden accent + logo instead of the indigo default.
   const isGenealogy = activeVault?.type === 'genealogy';
   useEffect(() => {
@@ -677,6 +722,40 @@ export function App() {
   // 'academic' es también el tipo al que resuelve cualquier bóveda anterior a los tipos,
   // así que se pregunta por lo que NO es en vez de por lo que es.
   const isAcademic = normalizeVaultType(activeVault?.type) === 'academic' && !isPreviewVault;
+  const profile = isAcademic ? settings?.academicInterfaceProfile : undefined;
+  const academicItems = useMemo(() => isAcademic && settings ? academicNavigation(settings) : null, [isAcademic, settings]);
+  const academicGroups = useMemo(() => isAcademic && settings ? academicNavigationGroups(settings) : [], [isAcademic, settings]);
+  const headerVisible = (id: HeaderActionId) => headerActionVisible(id, settings?.headerActionVisibility, profile);
+  const toggleHeaderVisibility = async (id: HeaderActionId) => {
+    setHeaderVisibilityBusy(true); setHeaderVisibilityError('');
+    try {
+      const latest = await window.nodus.getSettings();
+      const updated = await window.nodus.updateSettings({ headerActionVisibility: { ...latest.headerActionVisibility, [id]: !headerActionVisible(id, latest.headerActionVisibility, profile) } });
+      setSettings(updated);
+    } catch (cause) { setHeaderVisibilityError(errorText(cause)); }
+    finally { setHeaderVisibilityBusy(false); }
+  };
+  const openInterfaceSettings = () => { localStorage.setItem('nodus.settingsTarget', 'sidebar'); window.dispatchEvent(new Event('nodus:settings-target')); setView('settings'); };
+  const openInterfacePreferences = (target: 'appearance' | 'nodi') => {
+    setInterfacePickerOpen(false);
+    localStorage.setItem('nodus.settingsTarget', target);
+    window.dispatchEvent(new Event('nodus:settings-target')); setView('settings');
+  };
+  const chooseInterface = async (next: AcademicInterfaceProfile) => {
+    if (!settings) return;
+    const updated = await window.nodus.updateSettings(academicProfilePatch(settings, next));
+    setSettings(updated); setInterfacePickerOpen(false);
+    if (next === 'custom') { learning.pause(); openInterfaceSettings(); }
+    else if (!academicNavigation(updated).some(item => item.id === view) && !['toolkit', 'workspace', 'browser', 'radar', 'compass', 'studyFocus'].includes(view)) setView(academicInitialView(next));
+  };
+  useEffect(() => { setInterfacePickerOpen(false); setHeaderMoreOpen(false); }, [activeVault?.id]);
+  const profileEntryVault = useRef<string | null>(null);
+  useEffect(() => {
+    if (!settings?.onboardingComplete || !activeVault) return;
+    if (profileEntryVault.current === activeVault.id) return;
+    profileEntryVault.current = activeVault.id;
+    if (isAcademic && settings.academicInterfaceProfile && viewRef.current === 'home') setView(academicInitialView(settings.academicInterfaceProfile));
+  }, [activeVault?.id, settings?.onboardingComplete, isAcademic, setView, settings?.academicInterfaceProfile]);
   useEffect(() => {
     document.documentElement.classList.toggle('prosopography', isProsopography);
   }, [isProsopography]);
@@ -729,6 +808,7 @@ export function App() {
     root.classList.toggle('accessible-font', settings.accessibleFont);
     root.classList.toggle('high-contrast', settings.highContrast);
     root.classList.toggle('reduce-motion', settings.reduceMotion);
+    root.classList.toggle('read-along-underline', settings.narrationHighlightStyle === 'underline');
     root.classList.toggle('reading-focus', Boolean(isEstudio && settings.readingFocusMode));
   }, [settings, isEstudio]);
 
@@ -794,9 +874,7 @@ export function App() {
   const dbSearchItem = NAV_ITEMS.find((n) => n.id === 'dbSearch')!;
   const [paletteOpen, setPaletteOpen] = useState(false);
 
-  // Focus mode swaps the sidebar for the focus rail. It offers the same sections in
-  // the same saved order (plus Biblioteca), so the mode clears the screen without
-  // taking a single study tool away.
+  // Focus mode offers the active vault's sections in their saved order.
   const openStudySection = useCallback((target: View) => {
     setStudyTarget(null);
     if (target !== 'studyLibrary') setStudyMaterialTarget(null);
@@ -804,25 +882,37 @@ export function App() {
     setStudyGraphTarget(null);
     setView(target);
   }, [setView]);
-  // Every section a Study vault has, in the saved order and whatever the sidebar hides:
-  // the focus mode keeps its own choice of what to show (see FocusLayoutDialog).
-  const focusSections = useMemo<Array<FocusSectionOption & { item: (typeof NAV_ITEMS)[number] }>>(() => {
-    if (!isEstudio) return [];
-    const dedicated = dedicatedVaultNavIds(activeVault?.type) ?? [];
-    return orderedNav(settings?.sidebarOrder ?? [])
-      .filter((n) => n.id === 'library' || (dedicated.includes(n.id) && isViewAllowedForVaultType(n.id, activeVault?.type)))
-      .map((n) => ({ key: n.id, label: t(navItemLabel(n, activeVault?.type)), icon: n.icon, item: n }));
-  }, [isEstudio, activeVault?.type, settings?.sidebarOrder, settings?.uiLanguage]);
+  // Focus keeps a separate choice of visible sections for each vault.
+  const focusSections = useMemo<Array<FocusSectionOption & { item?: SidebarNavItem; databaseId?: string; open?: () => void }>>(() => {
+    const dedicated = dedicatedVaultNavIds(activeVault?.type);
+    const items: SidebarNavItem[] = [...orderedNav(settings?.sidebarOrder ?? []), ...pinnedToolkitSidebarItems(settings?.toolkitPinnedPages)];
+    const sections: Array<FocusSectionOption & { item?: SidebarNavItem; databaseId?: string; open?: () => void }> = orderSidebarItems(items, settings?.sidebarOrder ?? [])
+      .filter(n => 'toolkitPage' in n || n.id === 'library' || ((!dedicated || dedicated.includes(n.id)) && isViewAllowedForVaultType(n.id, activeVault?.type)))
+      .map(n => ({ key: n.id, label: 'toolkitPage' in n ? t(n.label) : t(navItemLabel(n, activeVault?.type)), icon: n.icon, item: n,
+        defaultVisible: focusDefaultSectionVisible(activeVault?.type, n.id) }));
+    if (isDatabases) {
+      sections.push({ key: 'database:new', label: t('Nueva base de datos'), icon: 'plus', defaultVisible: true, open: () => void createDatabase() });
+      sections.push(...databases.map(database => ({ key: `database:${database.id}`, label: database.name, icon: 'table', databaseId: database.id, defaultVisible: true })));
+    }
+    return sections;
+  }, [isDatabases, databases, activeVault?.type, settings?.sidebarOrder, settings?.toolkitPinnedPages, settings?.uiLanguage, createDatabase]);
   const focusRailItems = useMemo<FocusRailItem[]>(() => {
-    if (!isEstudio || !focusReduced) return [];
+    if (!focusReduced) return [];
     return focusSections
-      .filter((section) => focusLayoutVisible(focusLayout.layout, `nav:${section.key}`))
-      .map(({ key, label, icon, item }): FocusRailItem => ({
+      .filter(section => focusLayoutVisible(focusLayout.layout, `nav:${section.key}`, section.defaultVisible))
+      .map(({ key, label, icon, item, databaseId, open }): FocusRailItem => ({
         key, label, icon,
-        active: view === item.id && (item.id !== 'toolkit' || toolkitPage === 'home'),
-        open: () => { if (item.id === 'toolkit') setToolkitPage('home'); openStudySection(item.id); },
+        active: databaseId ? view === 'databases' && activeDatabaseId === databaseId : item && ('toolkitPage' in item ? view === 'toolkit' && toolkitPage === item.toolkitPage : view === item.id && (item.id !== 'toolkit' || toolkitPage === 'home')) || false,
+        open: () => {
+          if (open) { open(); return; }
+          if (databaseId) { setActiveDatabaseId(databaseId); setView('databases'); return; }
+          if (!item) return;
+          if ('toolkitPage' in item) { setToolkitPage(item.toolkitPage); setView('toolkit'); return; }
+          if (item.id === 'toolkit') setToolkitPage('home');
+          openStudySection(item.id);
+        },
       }));
-  }, [isEstudio, focusReduced, focusSections, focusLayout, view, toolkitPage, openStudySection]);
+  }, [focusReduced, focusSections, focusLayout, view, toolkitPage, openStudySection, activeDatabaseId, setView]);
   // Leaving the mode lands on the Concentración page, where the paused block is.
   useEffect(() => {
     const show = () => openStudySection('studyFocus');
@@ -875,7 +965,7 @@ export function App() {
   // restarts would look brand new and have their vault renamed under them.
   useEffect(() => {
     if (!settings || newInstallRef.current !== null) return;
-    const fresh = settings.basicsTutorialVersion === 0;
+    const fresh = settings.basicsTutorialVersion === 0 && settings.firstVaultVersion === 0 || Boolean(settings.academicLearningProgress && !settings.academicLearningProgress.welcomeComplete && !settings.onboardingComplete);
     newInstallRef.current = fresh;
     setNewInstall(fresh);
     if (!fresh && settings.firstVaultVersion === 0) {
@@ -887,6 +977,7 @@ export function App() {
   // Settings may also change outside this React tree (notably from the floating
   // Nodi window). Keep visibility, theme and every settings-backed control in sync.
   useEffect(() => window.nodus?.onSettingsChanged(() => { void reloadSettings(); }), [reloadSettings]);
+  useEffect(() => window.nodus?.onActiveEmbeddingIndexChanged(() => { void reloadSettings(); }), [reloadSettings]);
   // A vault switch changes which settings apply, and the palette is per vault by
   // default. The switcher reloads them itself, but it is not the only caller — the
   // Server inbox and vault creation both switch directly — so re-read here as well
@@ -920,12 +1011,13 @@ export function App() {
     if (!window.nodus) return [];
     const next = await window.nodus.listVaults();
     setVaults(next);
-    setActiveVault(next.find((vault) => vault.active) ?? null);
+    setActiveVault(await window.nodus.getActiveVault());
     return next;
   }, []);
 
   useEffect(() => {
     void reloadVaults();
+    return window.nodus?.onVaultChanged(() => { void reloadVaults(); });
   }, [reloadVaults]);
 
   const reloadRecoveryStatus = useCallback(async () => {
@@ -938,7 +1030,7 @@ export function App() {
   useEffect(() => {
     if (!settings || settings.basicsTutorialVersion === 0) return;
     void reloadRecoveryStatus();
-  }, [reloadRecoveryStatus, settings?.basicsTutorialVersion, settings?.recoverySetupVersion, vaults.length]);
+  }, [reloadRecoveryStatus, settings?.basicsTutorialVersion, settings?.recoverySetupVersion, settings?.uiLanguage, vaults.length]);
 
   const refreshHasData = useCallback(async () => {
     if (!window.nodus) return;
@@ -1136,7 +1228,7 @@ export function App() {
       const badge = vaultBadgeEl
         ? placeHeaderBadge({
             headerWidth: headerEl.clientWidth,
-            logoWidth: headerLogoEl.offsetWidth,
+            logoWidth: headerLeftEl?.offsetWidth ?? headerLogoEl.offsetWidth,
             actionsWidth: headerActionsEl.offsetWidth,
             badgeWidth: vaultBadgeEl.offsetWidth,
           })
@@ -1151,9 +1243,9 @@ export function App() {
     };
     measure();
     const observer = new ResizeObserver(measure);
-    for (const box of [headerEl, headerLogoEl, headerActionsEl, vaultBadgeEl]) if (box) observer.observe(box);
+    for (const box of [headerEl, headerLogoEl, headerLeftEl, headerActionsEl, vaultBadgeEl]) if (box) observer.observe(box);
     return () => observer.disconnect();
-  }, [headerEl, headerLogoEl, headerActionsEl, vaultBadgeEl]);
+  }, [headerEl, headerLogoEl, headerLeftEl, headerActionsEl, vaultBadgeEl]);
 
   // Global command palette: ⌘K / Ctrl+K toggles it from anywhere.
   useEffect(() => {
@@ -1168,13 +1260,12 @@ export function App() {
   }, []);
 
   const onSync = async () => {
-    setSyncing(true);
+    const requestedVaultId = activeVault?.id;
     try {
-      const result = await window.nodus.syncNow({ catalogOnly: true });
-      setLastSync(result);
-      notifyDataChanged();
-    } finally {
-      setSyncing(false);
+      await window.nodus.syncNow({ catalogOnly: true });
+    } catch (cause) {
+      const current = await window.nodus.getActiveVault().catch(() => null);
+      if (current?.id === requestedVaultId) toast(errorText(cause));
     }
   };
 
@@ -1278,6 +1369,25 @@ export function App() {
     return () => window.removeEventListener('nodus:open-research-note', open);
   }, [openNoteFromSearch]);
 
+  useEffect(() => {
+    const open = (event: Event) => {
+      const detail = (event as CustomEvent<{ href?: unknown; label?: unknown }>).detail;
+      if (typeof detail?.href !== 'string') return;
+      const reference = parseEditorReference(detail.href);
+      if (!reference) return;
+      const { kind, id } = reference;
+      if (kind === 'idea') openIdea(id);
+      else if (kind === 'passage') {void window.nodus.getPassage(id).then(passage=>{if(passage)void import('./evidenceJump').then(({openEvidenceAtPage})=>openEvidenceAtPage(passage.nodus_id,{location:passage.page_label,sourceRef:passage.source_ref,pageNumber:passage.page_number}));});}
+      else if (kind === 'work') navigate('graph', { workId: id });
+      else if (kind === 'author') openAuthor(id, typeof detail.label === 'string' ? detail.label : '');
+      else if (kind === 'note') openNoteFromSearch(id);
+      else if (kind === 'studyDocument') { setStudyTarget({ kind: 'document', id }); setView('studyCourses'); }
+      else if (kind === 'studyMaterial') { setStudyMaterialTarget({ id }); setView('studyLibrary'); }
+    };
+    window.addEventListener('nodus:open-editor-reference', open);
+    return () => window.removeEventListener('nodus:open-editor-reference', open);
+  }, [navigate, openIdea, openAuthor, openNoteFromSearch, setView]);
+
   const openResearchConversation = useCallback((target: Omit<ResearchConversationNavigationTarget, 'nonce'>) => {
     setResearchConversationTarget({ ...target, nonce: Date.now() });
     setView(target.surface === 'database'
@@ -1341,13 +1451,16 @@ export function App() {
       run: () => setView(n.id),
     }));
     const actions: Command[] = [
+      ...(isAcademic ? [
+        { id: 'act:interface', label: t('Cambiar interfaz'), section: t('Acciones'), icon: 'layers', run: () => setInterfacePickerOpen(true) },
+      ] : []),
       // The last resort for the vault panel: the badge that opens it is placed by
       // measurement and can, in a window narrow enough, have nowhere to go.
       { id: 'act:vaults', label: t('Bóvedas'), section: t('Acciones'), icon: 'archive', keywords: 'vaults bovedas boveda cambiar crear renombrar duplicar eliminar', run: () => { const badge = document.querySelector<HTMLElement>('[data-testid="header-vault-badge"]'); if (badge) toggleVaults(badge); } },
       { id: 'act:assistant', label: 'Research chat', section: t('Acciones'), icon: 'chat', keywords: 'assistant chat', run: () => openAssistant() },
       { id: 'act:skills', label: t('Mis skills'), section: t('Acciones'), icon: 'sparkles', keywords: 'skills habilidades biblioteca instalar activar', run: () => setSkillsTab('library') },
       { id: 'act:marketplace', label: 'Marketplace', section: t('Acciones'), icon: 'basket', keywords: 'marketplace tienda skills plugins instalar descargar catalogo catálogo', run: () => setSkillsTab('marketplace') },
-      { id: 'act:presenter', label: 'PDF Presenter', section: t('Acciones'), icon: 'presentation', keywords: 'presentar diapositivas slides pdf presenter proyector herramientas toolkit', run: () => { setToolkitPage('presenter'); setView('toolkit'); } },
+      { id: 'act:presenter', label: 'Nodus Presenter', section: t('Acciones'), icon: 'presentation', keywords: 'presentar diapositivas slides pdf presenter proyector herramientas toolkit', run: () => { setToolkitPage('presenter'); setView('toolkit'); } },
       { id: 'act:feedback', label: t('Sugerir función o reportar error'), section: t('Acciones'), icon: 'gitPr', keywords: 'feedback github pr bug feature sugerencia error', run: () => setFeedbackOpen(true) },
       { id: 'act:roadmap', label: t('Roadmap'), section: t('Acciones'), icon: 'route', keywords: 'roadmap hoja ruta futuro próximos pasos', run: () => setRoadmapOpen(true) },
       { id: 'act:theme', label: isDark ? t('Usar tema claro') : t('Usar tema oscuro'), section: t('Acciones'), icon: 'palette', keywords: 'tema theme claro oscuro', run: () => void toggleTheme() },
@@ -1358,7 +1471,7 @@ export function App() {
         void window.nodus.updateSettings({ appTheme: next }).then(reloadSettings);
       } },
     ];
-    if (isEstudio && focusActions) {
+    if (focusActions) {
       actions.unshift(
         { id: 'act:focus-mode', label: focusReduced ? t('Salir del modo concentración') : t('Entrar en modo concentración'), section: t('Acciones'), icon: 'focus', keywords: 'concentración concentracion focus pomodoro distracciones estudio', run: () => { if (focusReduced) void focusActions.exitFocusMode(); else focusActions.setReduced(true); } },
         { id: 'act:focus-layout', label: t('Personalizar el modo concentración'), section: t('Acciones'), icon: 'eye', keywords: 'concentración concentracion focus personalizar visibles ocultar secciones', run: openFocusLayout },
@@ -1375,11 +1488,37 @@ export function App() {
       );
     }
     return [...navCommands, ...actions];
-  }, [settings?.uiLanguage, settings?.reduceMotion, settings?.readingFocusMode, focusReduced, focusActions, activeVault?.type, isPrimarySources, isGenealogy, isDatabases, isEstudio, isDocencia, isWorldbuilding, isProsopography, isTestimonios, isDark, onSync, openAssistant, reloadSettings, toggleVaults]);
+  }, [settings?.uiLanguage, settings?.reduceMotion, settings?.readingFocusMode, focusReduced, focusActions, activeVault?.type, isAcademic, isPrimarySources, isGenealogy, isDatabases, isEstudio, isDocencia, isWorldbuilding, isProsopography, isTestimonios, isDark, onSync, openAssistant, reloadSettings, toggleVaults]);
 
   // The startup sequence, as an ordered list of guards rather than a run of early
   // returns. It also sets this render's authoritative language, which is why it is
   // called before anything below reads `settings`.
+  const learningOverlayBusy = useLearningOverlayBusy(settings?.academicPracticeSession && !settings.academicPracticeSession.paused ? settings.academicPracticeSession.lessonId : undefined);
+  const learningSuspended = !settings?.onboardingComplete || !recoveryStatus || (!activeVault?.learningWorkspace && Boolean(recoveryStatus.needsSetup) && (!settings?.academicLearningProgress?.invitationsEligible || Boolean(settings.academicLearningProgress.realSetupStarted))) || paletteOpen || collectionsOpen || feedbackOpen || manualWhatsNewOpen;
+  const learningBlocked = learningOverlayBusy || learningSuspended || interfacePickerOpen;
+  const learning = useAcademicLearningController({ settings, vault: activeVault, enabled: isAcademic, blocked: learningBlocked, progress: queueActivity.preparation, queue: queueActivity.queue, workWaiting:view==='deepResearch'&&queueActivity.research.some(job=>job.vaultId===activeVault?.id&&['queued','running'].includes(job.status))||view==='dictionary'&&queueActivity.dictionary.some(job=>!['done','degraded','failed'].includes(job.phase)),extractionVersion: JSON.stringify(queueActivity.extraction.map(job=>[job.id,job.status])), view, onSettings: setSettings, navigate: setView });
+  useEffect(() => {
+    const open = () => { setVaultAnchor(null); setInterfacePickerOpen(true); };
+    window.addEventListener('nodus:interface-tab', open);
+    return () => window.removeEventListener('nodus:interface-tab', open);
+  }, []);
+  useEffect(() => {
+    // The listen balloon's links open Settings on the narration panel: the voice library for
+    // «Grabar o subir una voz…», the model list when a gated model has to be downloaded there.
+    const open = (event: Event) => {
+      const models = (event as CustomEvent<string>).detail === 'models';
+      localStorage.setItem('nodus.settingsTarget', models ? 'narration-models' : 'narration');
+      setView('settings');
+      window.dispatchEvent(new Event('nodus:settings-target'));
+    };
+    window.addEventListener('nodus:open-narration-settings', open);
+    return () => window.removeEventListener('nodus:open-narration-settings', open);
+  }, []);
+  useEffect(() => {
+    if (!isAcademic || !settings?.academicLearningProgress?.invitationsEligible) return;
+    setWhatsNewSettled(true);
+  }, [isAcademic, settings?.academicLearningProgress?.invitationsEligible]);
+
   const startupGate = resolveStartupGate({
     loadError,
     settings,
@@ -1489,10 +1628,14 @@ export function App() {
   };
 
   return (
+    <AcademicInterfaceContext.Provider value={isAcademic ? profile ?? null : null}><AcademicLearningContext.Provider value={learning.context}>
     <div
       className="h-full flex flex-col"
       style={{ '--vault-accent': dockColorForVaultType(activeVault?.type) } as React.CSSProperties}
       data-testid="app-shell"
+      data-editorial-focus={editorialFocus.active ? 'true' : undefined}
+      data-vault-type={activeVault?.type}
+      data-academic-profile={isAcademic ? profile ?? 'legacy' : undefined}
       data-focus-reduced={focusReduced}
       data-interface-scale={settings.interfaceScale}
       data-high-contrast={settings.highContrast ? 'true' : 'false'}
@@ -1506,7 +1649,16 @@ export function App() {
         ref={setHeaderEl}
         className="app-titlebar relative flex h-11 items-center border-b border-neutral-800"
         data-platform={IS_MAC ? 'macos' : 'other'}
+        data-selector-open={interfacePickerOpen || Boolean(vaultAnchor) ? 'true' : undefined}
+        onPointerDownCapture={event => {
+          const target = event.target as Element;
+          // Portalled selector contents are React children of the header too.
+          if (!event.currentTarget.contains(target)) return;
+          if (!target.closest('[data-testid="academic-interface-trigger"]')) setInterfacePickerOpen(false);
+          if (!target.closest('[data-vault-trigger]')) setVaultAnchor(null);
+        }}
       >
+        <div ref={setHeaderLeftEl} className="flex shrink-0 items-center" data-testid="header-left-rail">
         <button
           ref={setHeaderLogoEl}
           data-testid="sidebar-header-toggle"
@@ -1517,11 +1669,10 @@ export function App() {
           aria-label={navCollapsed ? t('Mostrar el menú lateral') : t('Ocultar el menú lateral (más espacio para el grafo)')}
         >
           <span data-testid="sidebar-header-brand" className="flex items-center justify-center gap-2" style={{ transform: sidebarCompact && IS_MAC ? 'translateY(0.5625rem)' : undefined }}>
-            <img
+            <NodusHeaderLogo
               data-testid="nodus-logo"
               data-vault-logo={isPrimarySources ? 'primary_sources' : isGenealogy ? 'genealogy' : isDatabases ? 'databases' : isEstudio ? 'estudio' : isDocencia ? 'docencia' : isWorldbuilding ? 'worldbuilding' : isTestimonios ? 'testimonios' : isProsopography ? 'prosopography' : 'academic'}
               src={isGenealogy ? nodusLogoGold : isDatabases ? nodusLogoCrimson : isEstudio ? nodusLogoTeal : isDocencia ? nodusLogoOrange : isWorldbuilding ? nodusLogoViolet : isTestimonios ? nodusLogoCyan : nodusLogo}
-              alt=""
               className={sidebarCompact && IS_MAC
                 ? 'h-[18px] w-[18px]'
                 : sidebarCompact || (IS_MAC && sidebarWidth < MACOS_FULL_SIDEBAR_BRAND_MIN_WIDTH)
@@ -1538,6 +1689,12 @@ export function App() {
             />
           )}
         </button>
+
+        {isAcademic && <button ref={setInterfaceTrigger} className="academic-interface-trigger" data-testid="academic-interface-trigger" aria-haspopup="dialog" aria-expanded={interfacePickerOpen} aria-label={`${t('Cambiar interfaz')}: ${t(academicProfileLabel(profile))}`} title={`${t('Cambiar interfaz')}: ${t(academicProfileLabel(profile))}`} onClick={() => { setVaultAnchor(null); setHeaderMoreOpen(false); setInterfacePickerOpen(current => !current); }}>
+          <Icon name="monitor" size={14} /><span className="academic-interface-name"><span className="academic-interface-prefix">{t('Interfaz')} · </span>{t(academicProfileLabel(profile))}</span><Icon name="chevronDown" size={12} className={`transition-transform ${interfacePickerOpen ? 'rotate-180' : ''}`} />
+        </button>}
+        {isAcademic && <FocusHeader onProgress={() => setView('studyFocus')} />}
+        </div>
 
         {/* Vault mode, centred, in the vault's accent colour (gold in genealogy /
             crimson in databases via the accent-utility remaps). Clicking it opens
@@ -1559,22 +1716,22 @@ export function App() {
               visibility: vaultBadgePlacement?.fits ? 'visible' : 'hidden',
             }}
             className="header-vault-badge absolute top-1/2 inline-flex -translate-y-1/2 items-center gap-1.5 rounded-full border border-indigo-700/60 bg-indigo-950/30 px-3 py-0.5 text-xs font-semibold uppercase tracking-wide text-indigo-200 transition-colors hover:border-indigo-500 hover:bg-indigo-900/40"
-            title={t('Bóveda activa')}
-            onClick={(e) => toggleVaults(e.currentTarget)}
+            title={activeVault.learningWorkspace?learningText('workspace',settings.uiLanguage):t('Bóveda activa')}
+            onClick={(e) => {if(!activeVault.learningWorkspace)toggleVaults(e.currentTarget);}}
           >
             <Icon name={vaultTypeIcon(activeVault.type)} size={13} />
             {/* The badge is now the only permanent way into the vault panel, so it is
                 shown at every width — the LABEL is what gives way on a narrow window,
                 not the button. Dropping the word leaves an icon-and-chevron chip that
                 fits in a band where the full badge would not. */}
-            <span className="hidden xl:inline">{vaultTypeLabel(activeVault.type)}</span>
-            <Icon name="chevronDown" size={12} className={`transition-transform ${vaultAnchor ? 'rotate-180' : ''}`} />
+            <span className="hidden xl:inline">{activeVault.learningWorkspace?learningText('workspace',settings.uiLanguage):vaultTypeLabel(activeVault.type)}</span>
+            {!activeVault.learningWorkspace&&<Icon name="chevronDown" size={12} className={`transition-transform ${vaultAnchor ? 'rotate-180' : ''}`} />}
           </button>
         )}
 
         {/* The focus counter takes the left half of the header (between the logo and the
             centred badge), centred in it; the right rail only ever has the focus icon. */}
-        {isEstudio && <FocusHeader onProgress={() => setView('studyFocus')} />}
+        {!isAcademic && <FocusHeader onProgress={() => setView('studyFocus')} />}
         <div className="flex-1" />
         {/* Right-side action rail: icon-only by default, with native title labels so
             the header stays a stable row of icons. */}
@@ -1582,6 +1739,7 @@ export function App() {
           {/* No Bóvedas button: the centred badge is the way in, and it is now shown at
               every width for exactly that reason (see the badge above). */}
           <HeaderAction
+            actionId="commands" visible={headerVisible('commands')}
             icon="search"
             label={t('Comandos')}
             title={t('Paleta de comandos')}
@@ -1590,13 +1748,13 @@ export function App() {
             onClick={() => setPaletteOpen(true)}
             focusKeep={focusKeeps('header:commands')}
           />
-          <HeaderAction
+          <HeaderAction actionId="researchChat" visible={headerVisible('researchChat')} responsive
             icon="chat"
             label="Research chat"
             title={((isEstudio || isDocencia ? settings.studyModel : null) ?? settings.chatModel ?? settings.synthesisModel) ? 'Research chat' : t('Configura un modelo de IA')}
             onClick={() => openAssistant()}
           />
-          <HeaderAction
+          <HeaderAction actionId="toolkit" visible={headerVisible('toolkit')} responsive
             dataTour="toolkit"
             icon="tools"
             label={t('Herramientas')}
@@ -1607,7 +1765,7 @@ export function App() {
               activation popover, so installing one meant opening a conversation first.
               It sits next to the Toolkit because it answers the same question — what
               this application can do — for capabilities rather than for tools. */}
-          <HeaderAction
+          <HeaderAction actionId="skills" visible={headerVisible('skills')} responsive
             dataTour="skills"
             icon="basket"
             label={t('Skills')}
@@ -1647,7 +1805,7 @@ export function App() {
             setToolkitPage('drift');
             setView('toolkit');
           }} />
-          <HeaderAction
+          <HeaderAction actionId="feedback" visible={headerVisible('feedback')} responsive
             icon="gitPr"
             label={t('Sugerir / Reportar')}
             title={t('Enviar una propuesta o reporte a GitHub')}
@@ -1657,17 +1815,16 @@ export function App() {
               condición es ahora la misma: fuentes primarias no sincroniza con Zotero y
               antes mostraba este botón por una asimetría entre el comentario y el código. */}
           {!isPrimarySources && !isGenealogy && !isDatabases && !isEstudio && !isDocencia && !isWorldbuilding && !isProsopography && !isTestimonios && (
-            <HeaderAction
+            <HeaderAction actionId="sync" visible={headerVisible('sync') || syncing} responsive={!syncing}
               dataTour="sync"
               icon="refresh"
               label={syncing ? t('Actualizando…') : t('Actualizar (sincronizar Zotero)')}
               spinning={syncing}
-              showLabel={syncing}
               disabled={syncing}
               onClick={onSync}
             />
           )}
-          <HeaderAction
+          <HeaderAction actionId="theme" visible={headerVisible('theme')}
             icon={isDark ? 'sun' : 'moon'}
             label={isDark ? t('Usar tema claro') : t('Usar tema oscuro')}
             title={isDark ? t('Cambiar a modo claro') : t('Cambiar a modo oscuro')}
@@ -1675,10 +1832,10 @@ export function App() {
             dataTour="theme-toggle"
             focusKeep={focusKeeps('header:theme')}
           />
-          {isEstudio && focusActions && (
+          {focusActions && (
             // The same panel as the timer chip: the mode toggle and its settings live inside.
-            <span className="focus-quick" data-testid="focus-quick-access" data-focus-timer-trigger="">
-              <HeaderAction
+            <span className="focus-quick" data-testid="focus-quick-access" data-focus-timer-trigger="" hidden={!headerVisible('focus')}>
+              <HeaderAction actionId="focus" visible={headerVisible('focus')} responsive
                 icon="focus"
                 label={t('Modo concentración')}
                 pressed={focusReduced}
@@ -1688,18 +1845,11 @@ export function App() {
               />
             </span>
           )}
-          {readyVersion && <HeaderAction
-            icon="download"
-            label={updateProgress?.status === 'backing-up' ? t('Protegiendo tus datos') : updateInstallBusy(updateProgress) ? t('Instalando actualización') : t('Actualización lista')}
-            title={t('Actualización lista')}
-            showLabel
-            onClick={() => setDeferredUpdate(null)}
-            focusKeep
-          />}
           {/* Queue and task progress, moved here from the bottom strip: same dropdown
               treatment as the notification centre, with a live-work badge. */}
-          <span className="relative inline-flex">
+          <span className="relative inline-flex" hidden={!headerVisible('queue') && !queueLive && !queueActivity.attention}>
             <HeaderAction
+              actionId="queue" visible={headerVisible('queue') || queueLive > 0 || queueActivity.attention}
               dataTour="queue"
               icon="clock"
               label={t('Cola y tareas')}
@@ -1714,8 +1864,9 @@ export function App() {
           </span>
           {/* The notification centre, reachable whether or not Nodi is enabled — turning
               the mascot off used to take the only way to read these with it. */}
-          <span className="relative inline-flex">
+          <span className="relative inline-flex" hidden={!headerVisible('notifications') && !unreadNotifications}>
             <HeaderAction
+              actionId="notifications" visible={headerVisible('notifications') || unreadNotifications > 0}
               dataTour="notifications"
               icon="bell"
               label={t('Notificaciones')}
@@ -1727,7 +1878,34 @@ export function App() {
               <span className="header-action-badge">{unreadNotifications > 9 ? '9+' : unreadNotifications}</span>
             )}
           </span>
+          <div ref={headerMoreRef} className="academic-header-more" data-modal-layer="">
+            <HeaderAction icon="moreVertical" label={t('Más')} pressed={headerMoreOpen} focusKeep onClick={() => setHeaderMoreOpen(open => !open)} />
+            {headerMoreOpen && createPortal(<div className="academic-header-more-panel" data-testid="header-more-panel" data-browser-native-overlay="true" aria-label={t('Más')} style={{ position: 'fixed', top: (headerMoreRef.current?.getBoundingClientRect().bottom ?? 44) + 6, right: Math.max(8, window.innerWidth - (headerMoreRef.current?.getBoundingClientRect().right ?? window.innerWidth)) }}>
+              <p className="px-2 py-1 text-xs text-neutral-500">{t('Botones de la cabecera')}</p>
+              {[
+                { id: 'commands', label: t('Comandos'), icon: 'search', run: () => setPaletteOpen(true) },
+                { id: 'researchChat', label: 'Research chat', icon: 'chat', run: () => openAssistant() },
+                { id: 'toolkit', label: 'Nodus Tools', icon: 'tools', run: () => { setToolkitPage('home'); setView('toolkit'); } },
+                { id: 'skills', label: t('Skills y Marketplace'), icon: 'basket', run: () => setSkillsTab('library') },
+                { id: 'sync', label: t('Actualizar (sincronizar Zotero)'), icon: 'refresh', run: () => void onSync(), disabled: syncing, available: isAcademic },
+                { id: 'feedback', label: t('Sugerir / Reportar'), icon: 'gitPr', run: () => setFeedbackOpen(true) },
+                { id: 'theme', label: isDark ? t('Usar tema claro') : t('Usar tema oscuro'), icon: isDark ? 'sun' : 'moon', run: () => void toggleTheme() },
+                { id: 'focus', label: t('Modo concentración'), icon: 'focus', run: toggleFocusTimer, available: Boolean(focusActions) },
+                { id: 'queue', label: t('Cola y tareas'), icon: 'clock', run: () => { const anchor = headerMoreRef.current?.querySelector('button'); if (anchor) toggleQueue(anchor); } },
+                { id: 'notifications', label: t('Notificaciones'), icon: 'bell', run: () => { const anchor = headerMoreRef.current?.querySelector('button'); if (anchor) toggleNotifications(anchor); } },
+                { id: 'settings', label: t('Ajustes'), icon: 'settings', run: () => setView('settings') },
+              ].filter(action => action.available !== false).map(action => <div key={action.id} className="header-more-row" data-header-menu-action={action.id}>
+                <button className="header-more-run" disabled={action.disabled} onClick={() => { setHeaderMoreOpen(false); action.run(); }}><Icon name={action.icon} size={15} /><span>{action.label}</span></button>
+                <button className="header-more-visibility" data-testid={`header-visibility-${action.id}`} disabled={headerVisibilityBusy} aria-pressed={headerVisible(action.id as HeaderActionId)}
+                  aria-label={tx(headerVisible(action.id as HeaderActionId) ? 'Ocultar {action} de la cabecera' : 'Mostrar {action} en la cabecera', { action: action.label })}
+                  title={headerVisible(action.id as HeaderActionId) ? t('Ocultar de la cabecera') : t('Mostrar en la cabecera')}
+                  onClick={() => void toggleHeaderVisibility(action.id as HeaderActionId)}><Icon name={headerVisible(action.id as HeaderActionId) ? 'eye' : 'eyeOff'} size={15} /></button>
+              </div>)}
+              {headerVisibilityError && <p className="px-2 py-1 text-xs text-red-500" role="alert">{headerVisibilityError}</p>}
+            </div>, document.querySelector('[data-testid="app-shell"]') ?? document.body)}
+          </div>
           <HeaderAction
+            actionId="settings" visible={headerVisible('settings')}
             icon="settings"
             label={t('Ajustes')}
             title={t('Ajustes de la bóveda actual')}
@@ -1791,11 +1969,11 @@ export function App() {
       </header>
 
       {isEstudio && <FocusCompletionNotice />}
-      {updateProgress && (showStartupProgress || (updateNoticeKey && deferredUpdate !== updateNoticeKey)) && <UpdateReadyNotice
+      {!(isAcademic && settings.academicLearningProgress?.invitationsEligible && !settings.academicLearningProgress.lessons['first-answer']?.practiceCompleted) && updateProgress && (updateInstallBusy(updateProgress) || showStartupProgress || (updateNoticeKey && deferredUpdate !== updateNoticeKey)) && <UpdateReadyNotice
         update={updateProgress}
         onUpdate={setUpdateProgress}
         onLater={() => setDeferredUpdate(updateNoticeKey)}
-        onRecovery={() => { void window.nodus.updateSettings({ recoverySetupVersion: 0 }).then(setSettings); }}
+        onRecovery={() => { void window.nodus.updateSettings(recoverySetupRequest(settings)).then(setSettings); }}
       />}
 
       {settings.demoMode && (
@@ -1815,7 +1993,7 @@ export function App() {
       <div className="flex-1 flex min-h-0">
         {/* Sidebar (collapsible via the Nodus logo). Home is pinned first,
             Settings last; the rest render grouped (Explorar · Analizar · Escribir). */}
-        {isEstudio && focusReduced && (
+        {focusReduced && (
           <FocusRail
             items={focusRailItems}
             onOpenSubject={openFocusSubject}
@@ -1824,7 +2002,7 @@ export function App() {
             onOpenLibrary={openFocusLibrary}
           />
         )}
-        {!navCollapsed && !(isEstudio && focusReduced) && (
+        {(editorialFocus.active ? editorialFocus.navigationOpen : !navCollapsed && !focusReduced) && (
           <nav
             data-testid="resizable-sidebar"
             data-sidebar-compact={sidebarCompact ? 'true' : 'false'}
@@ -1899,6 +2077,11 @@ export function App() {
                   </div>
                 );
               };
+              if (isAcademic && academicItems) return <>
+                {academicItems.filter(item => item.id === 'home' || item.id === 'library').map(item => navButton(item))}
+                {academicGroups.map(group => renderGroup(group))}
+                <div className="mt-2 flex flex-col gap-1">{navButton(settingsItem)}</div>
+              </>;
               if (isWorldbuilding) {
                 return (
                   <>
@@ -2086,7 +2269,7 @@ export function App() {
               trace of a broken schedule was a grey line inside a collapsed Settings
               section, so a user could go months believing they were protected. Only
               genuinely blocking states appear here, and only once per session. */}
-          {!isPreviewVault && recoveryStatus?.health.level === 'critical' && !recoveryStatus.needsSetup && !backupWarningDismissed && (
+          {!activeVault?.learningWorkspace && !isPreviewVault && recoveryStatus?.health.level === 'critical' && !recoveryStatus.needsSetup && !backupWarningDismissed && (
             <div data-testid="backup-health-banner" className="backup-health-banner">
               <Icon name="alert" size={16} className="shrink-0" />
               <span className="min-w-0 flex-1">
@@ -2108,6 +2291,10 @@ export function App() {
               </button>
             </div>
           )}
+          {isAcademic && <LearningWorkspaceBar controller={learning} settings={settings}/>}
+          {isAcademic && <AcademicLearningCoach controller={learning} settings={settings} blocked={learningSuspended || learningOverlayBusy} navigate={setView} openIdea={openIdea} openGraph={id => navigate('graph', { preset: 'overview', nodeId: id })} prepareQuestion={documentId => {
+            requestLearningPrompt({ vaultId: activeVault!.id, sessionId: learning.session!.id, documentId, prompt: learningText('suggestedQuestion', settings.uiLanguage) }); setView('researchChat');
+          }} />}
           <div className="min-h-0 flex-1 overflow-hidden">
           <Suspense fallback={<div className="grid h-full place-items-center text-sm text-neutral-500"><span className="flex items-center gap-2"><Icon name="sync" className="animate-spin" /> {t('Cargando...')}</span></div>}>
           {/* Per-view crash isolation: a render error in one section shows a
@@ -2123,15 +2310,17 @@ export function App() {
       </div>
 
       {isAcademic && activeVault && settings.onboardingComplete && <ResearchPreparationWelcome key={activeVault.id} vaultId={activeVault.id}
-        allowAutomatic={queueLive === 0 && settings.basicsTutorialVersion > 0 && settings.tourComplete && ['home', 'library'].includes(view) && !queueAnchor && !paletteOpen && !collectionsOpen && !feedbackOpen && !roadmapOpen}
+        allowAutomatic={false}
         onConfigure={() => setView('settings')} />}
+      {isAcademic && <AcademicInterfacePicker open={interfacePickerOpen} anchorEl={interfaceTrigger} settings={settings} onUpdate={async patch => { await window.nodus.updateSettings(patch); await reloadSettings(); }} onSettings={openInterfacePreferences} profile={profile} onSelect={chooseInterface} onClose={() => setInterfacePickerOpen(false)} onGuide={() => { setInterfacePickerOpen(false); learning.open(lessonForProfile(profile), 'invite'); }} />}
+      {isAcademic && <AcademicLearningDialogs controller={learning} settings={settings} blocked={learningBlocked} onActivateIntermediate={() => chooseInterface('intermediate')} onSettings={setSettings}/>}
       <FeedbackHost />
       <PrivacyRequestHost />
       <BrowserConnectorPairingRequestHost />
 
       {paletteOpen && <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} />}
-      {isEstudio && <FocusLayoutDialog sections={focusSections} />}
-      {isEstudio && <FocusExitDialog />}
+      <FocusLayoutDialog sections={focusSections} />
+      <FocusExitDialog />
 
       <Suspense fallback={null}>
       {collectionsOpen && (
@@ -2150,10 +2339,11 @@ export function App() {
       {feedbackOpen && <FeedbackModal onClose={() => setFeedbackOpen(false)} />}
       {roadmapOpen && <RoadmapModal onClose={() => setRoadmapOpen(false)} />}
 
-      {!isPreviewVault && settings.onboardingComplete && settings.basicsTutorialVersion > 0 && !settings.tourComplete && !isPrimarySources && !isGenealogy && !isDatabases && !isEstudio && !isDocencia && !isWorldbuilding && !isProsopography && !isTestimonios && (
+      {!isPreviewVault && settings.onboardingComplete && settings.basicsTutorialVersion > 0 && !settings.tourComplete && localStorage.getItem(`nodus.academicTourReplay:${activeVault?.id}`) === '1' && !isAcademic && !isPrimarySources && !isGenealogy && !isDatabases && !isEstudio && !isDocencia && !isWorldbuilding && !isProsopography && !isTestimonios && (
         <Tour
           onNavigate={setView}
           onClose={async () => {
+            localStorage.removeItem(`nodus.academicTourReplay:${activeVault?.id}`);
             await window.nodus.updateSettings({ tourComplete: true });
             void reloadSettings();
           }}
@@ -2261,7 +2451,7 @@ export function App() {
       )}
       </Suspense>
 
-      {!isPreviewVault && settings.onboardingComplete && settings.basicsTutorialVersion > 0 && settings.tourComplete && !settings.advancedTourComplete && (
+      {!isPreviewVault && settings.onboardingComplete && settings.basicsTutorialVersion > 0 && settings.tourComplete && !settings.advancedTourComplete && !isAcademic && (
         <AdvancedTour
           onNavigate={setView}
           onClose={async () => {
@@ -2271,7 +2461,7 @@ export function App() {
         />
       )}
 
-      {!isPreviewVault && settings.onboardingComplete &&
+      {!activeVault?.learningWorkspace && !isPreviewVault && settings.onboardingComplete && !settings.academicLearningProgress?.invitationsEligible &&
         settings.basicsTutorialVersion > 0 &&
         !recoveryStatus?.needsSetup &&
         (isPrimarySources || isGenealogy || isDatabases || isTestimonios || isEstudio || isDocencia || settings.tourComplete) &&
@@ -2301,7 +2491,7 @@ export function App() {
         />
       )}
 
-      {!isPreviewVault && recoveryStatus?.needsSetup && recoveryStatus.previousInstallation && !whatsNewSettled && (
+      {!activeVault?.learningWorkspace && !settings.academicLearningProgress?.invitationsEligible && !isPreviewVault && recoveryStatus?.needsSetup && recoveryStatus.previousInstallation && !whatsNewSettled && (
         <WhatsNewModal
           settings={settings}
           activeVaultType={activeVault?.type ?? null}
@@ -2320,58 +2510,21 @@ export function App() {
         />
       )}
 
-      {whatsNewSettled && !pdfPresenterTutorialSettled && !manualWhatsNewOpen && (
-        <PdfPresenterTutorialAnnouncement
-          language={settings.uiLanguage}
-          onSettled={() => setPdfPresenterTutorialSettled(true)}
-        />
-      )}
-
-      {whatsNewSettled && pdfPresenterTutorialSettled && !mobileTeaserSettled && !manualWhatsNewOpen && (
-        <MobileTeaserGuide
-          uiLanguage={settings.uiLanguage}
-          onSettled={() => setMobileTeaserSettled(true)}
-        />
-      )}
-
-      {whatsNewSettled && pdfPresenterTutorialSettled && mobileTeaserSettled && !platformHighlightsSettled && !manualWhatsNewOpen && (
-        <PlatformHighlightsUpdateTour
-          uiLanguage={settings.uiLanguage}
-          previousTutorialVersion={settings.basicsTutorialVersion}
-          onSettled={() => setPlatformHighlightsSettled(true)}
-        />
-      )}
-
-      {whatsNewSettled && pdfPresenterTutorialSettled && mobileTeaserSettled && platformHighlightsSettled && !toolkitBetaTourSettled && !manualWhatsNewOpen && (
-        <ToolkitBetaUpdateTour
-          uiLanguage={settings.uiLanguage}
-          previousTutorialVersion={settings.basicsTutorialVersion}
-          onSettled={() => setToolkitBetaTourSettled(true)}
-        />
-      )}
-
-      {whatsNewSettled && pdfPresenterTutorialSettled && mobileTeaserSettled && platformHighlightsSettled && toolkitBetaTourSettled && !tutorialVideosSettled && !manualWhatsNewOpen && (
-        <TutorialVideosUpdateTour
-          uiLanguage={settings.uiLanguage}
-          previousTutorialVersion={settings.basicsTutorialVersion}
-          onSettled={() => setTutorialVideosSettled(true)}
-        />
-      )}
-
       {/* Users who already saw the cinematic tutorial were never offered the choice of
-          Nodi, so it is made here instead — once, after the startup guides. New users
+          Nodi, so it is made here instead — once, after release notes. New users
           pick inside the tutorial and reach this already chosen. */}
-      {startupGuidesSettled && !manualWhatsNewOpen && !isPreviewVault &&
+      {whatsNewSettled && !manualWhatsNewOpen && !isPreviewVault &&
         settings.onboardingComplete &&
         settings.basicsTutorialVersion > 0 &&
         !recoveryStatus?.needsSetup &&
         settings.mascotEnabled &&
-        !settings.mascotStyleChosen && (
+        !settings.mascotStyleChosen && !settings.academicLearningProgress?.invitationsEligible && (
           <NodiStyleModal onChosen={async () => { await reloadSettings(); }} />
         )}
 
-      {!focusReduced && !manualWhatsNewOpen && startupGuidesSettled && <NodiMascot settings={settings} />}
+      {!focusReduced && !manualWhatsNewOpen && whatsNewSettled && <NodiMascot settings={settings} />}
     </div>
+    </AcademicLearningContext.Provider></AcademicInterfaceContext.Provider>
   );
 }
 
@@ -2391,18 +2544,23 @@ export function App() {
 function BrowserMediaHeaderAction({ onOpenTab, onOpenDrift, focusKeep = true }: { onOpenTab: (tabId: string) => void; onOpenDrift: () => void; focusKeep?: boolean }) {
   const states = useBrowserMedia();
   const drift = useDrift();
+  const narration = useAudioPlayer();
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const hasBrowser = states.length > 0;
   const hasDrift = drift.selection.length > 0;
-  if (!hasBrowser && !hasDrift) return null;
+  const narrationGenerating = narration.generation != null && ['queued', 'loading', 'generating'].includes(narration.generation.state);
+  const hasNarration = narration.visible || narrationGenerating;
+  if (!hasBrowser && !hasDrift && !hasNarration) return null;
   const browserPlaying = states.some((state) => state.playing);
-  const title = browserPlaying && drift.playing ? t('Reproduciéndose en Nodus Browser y Nodus Drift')
+  const title = narration.isPlaying ? t('Narración en curso')
+    : narrationGenerating ? t('Generando la narración')
+    : browserPlaying && drift.playing ? t('Reproduciéndose en Nodus Browser y Nodus Drift')
     : browserPlaying ? t('Reproduciéndose en Nodus Browser')
       : drift.playing ? t('Reproduciéndose en Nodus Drift')
         : hasBrowser && hasDrift ? t('Medios en pausa en Nodus Browser y Nodus Drift')
           : hasBrowser ? t('Medios en pausa en Nodus Browser')
-            : t('Nodus Drift en pausa');
-  const sources = states.length + (hasDrift ? 1 : 0);
+            : hasDrift ? t('Nodus Drift en pausa') : t('Narración en pausa');
+  const sources = states.length + (hasDrift ? 1 : 0) + (hasNarration ? 1 : 0);
   return (
     <span data-testid="browser-media-header-action" className="relative inline-flex">
       <HeaderAction
@@ -2415,7 +2573,7 @@ function BrowserMediaHeaderAction({ onOpenTab, onOpenDrift, focusKeep = true }: 
           setAnchor((current) => (current ? null : button));
         }}
       />
-      {sources > 1 && <span className="header-action-badge">{sources}</span>}
+      {(sources > 1 || narration.isPlaying) && <span className="header-action-badge" data-testid="media-playback-badge">{sources}</span>}
       <BrowserMediaPopover
         anchorEl={anchor}
         onClose={() => setAnchor(null)}
@@ -2426,6 +2584,7 @@ function BrowserMediaHeaderAction({ onOpenTab, onOpenDrift, focusKeep = true }: 
           onTab: drift.setMediaTab,
           panel: <DriftMiniPlayer onOpenDrift={() => { setAnchor(null); onOpenDrift(); }} />,
         }}
+        narration={{ active: hasNarration, panel: <NarrationMiniPlayer /> }}
       />
     </span>
   );

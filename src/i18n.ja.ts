@@ -1,21 +1,35 @@
+import { RESEARCH_QUEUE_TRANSLATIONS } from './i18n.researchQueue';
+import { EMBEDDING_INDEX_TRANSLATIONS } from './i18n.embeddingIndexes';
+import { RESEARCH_HARNESS_TRANSLATIONS } from './i18n.researchHarness';
+import { EMBEDDING_GEMMA2_TRANSLATIONS } from './i18n.embeddingGemma2';
+import { SIGN_TRANSLATIONS } from './i18n.sign';
+import { CHAT_ORGANIZATION_HELP_TRANSLATIONS } from './i18n.chatOrganizationHelp';
+import { RESEARCH_CHAT_SELECTION_TRANSLATIONS } from './i18n.researchChatSelection';
+import { ACADEMIC_INTERFACE_TRANSLATIONS } from './i18n.academicInterface';
+import { BACKUPS_TRANSLATIONS } from './i18n.backups';
+import { SCRIPTOR_AI_TRANSLATIONS } from './i18n.scriptorAi';
 import { RESEARCH_CHAT_HISTORY_TRANSLATIONS } from './i18n.researchChatHistory';
 import { RESEARCH_ACTIVITY_TRANSLATIONS } from './i18n.researchActivity';
 import { RESEARCH_NOTEBOOK_TRANSLATIONS } from './i18n.researchNotebooks';
 import { CALENDAR_SYNC_TRANSLATIONS } from './i18n.calendarSync';
+import { AGENT_RUNTIME_TRANSLATIONS } from './i18n.agentRuntimes';
 import { ACADEMIC_MANUAL_TRANSLATIONS } from './i18n.academicManual';
 import { STUDY_SOURCE_TRANSLATIONS } from './i18n.studySources';
 import { COMPLETE_GUIDE_TRANSLATIONS } from './i18n.completeGuide';
 import { STUDY_FOCUS_TRANSLATIONS } from './i18n.studyFocus';
 import { STUDY_NOTE_LINKS_TRANSLATIONS } from './i18n.studyNoteLinks';
+import { BOOKMARK_SORT_TRANSLATIONS } from './i18n.bookmarkSort';
 import { CONCILIUM_TRANSLATIONS } from './i18n.concilium';
 import { DRIFT_TRANSLATIONS } from './i18n.drift';
 import { RESEARCH_ATTACHMENT_TRANSLATIONS } from './i18n.researchAttachments';
+import { RESEARCH_VERIFICATION_TRANSLATIONS } from './i18n.researchVerification';
 import { VAULT_FILE_DROP_TRANSLATIONS } from './i18n.vaultFileDrop';
 import { DOCUMENT_SKILLS_TRANSLATIONS } from './i18n.documentSkills';
 import { RESEARCH_PROMPT_TRANSLATIONS } from './i18n.researchPrompts';
 import { RESEARCH_SOURCE_TRANSLATIONS } from './i18n.researchSources';
 import { RESEARCH_REASONING_TRANSLATIONS } from './i18n.researchReasoning';
 import { CHAT_SKILLS_TRANSLATIONS } from './i18n.chatSkills';
+import { NARRATION_TRANSLATIONS } from './i18n.narration';
 import { CAPABILITIES_TRANSLATIONS } from './i18n.capabilities';
 import { STELLAR_GRAPH_TRANSLATIONS } from './i18n.stellarGraph';
 import { PROTECT_TRANSLATIONS } from './i18n.protect';
@@ -66,11 +80,15 @@ import { SOURCE_CITATION_TRANSLATIONS } from './i18n.sourceCitation';
 import { DEEP_RESEARCH_APPROACH_TRANSLATIONS } from './i18n.deepResearchApproaches';
 import { DICTIONARY_TRANSLATIONS } from './i18n.dictionary';
 import { DEEP_RESEARCH_VERSION_TRANSLATIONS } from './i18n.deepResearchVersions';
+import { GALLERY_FILTER_TRANSLATIONS } from './i18n.galleryFilters';
 import { DOCUMENT_UNDERSTANDING_TRANSLATIONS } from './i18n.documentUnderstanding';
 import { STALE_MODEL_TRANSLATIONS } from './i18n.staleModels';
+import { SCHEME_DECLUTTER_TRANSLATIONS } from './i18n.schemeDeclutter';
+import { CHEMISTRY_STOCK_TRANSLATIONS } from './i18n.chemistryStock';
 import { DEEP_RESEARCH_QUALITY_TRANSLATIONS } from './i18n.deepResearchQuality';
 import { TEXT_PROVENANCE_TRANSLATIONS } from './i18n.textProvenance';
 import { MODEL_SETTINGS_TRANSLATIONS } from './i18n.modelSettings';
+import { SETTINGS_LAYOUT_TRANSLATIONS } from './i18n.settingsLayout';
 import { ADAPTIVE_CONCURRENCY_TRANSLATIONS } from './i18n.adaptiveConcurrency';
 import { DATABASE_DEEP_RESEARCH_TRANSLATIONS } from './i18n.databaseDeepResearch';
 import { ACADEMIC_TOUR_TRANSLATIONS } from './i18n.academicTour';
@@ -82,9 +100,12 @@ import { ACADEMIC_TOUR_TRANSLATIONS } from './i18n.academicTour';
  * translator's review debt and should be treated as a first pass.
  */
 export const JA: Record<string, string> = {
+  ...EMBEDDING_INDEX_TRANSLATIONS["ja"],
+  ...BACKUPS_TRANSLATIONS.ja,
   // First, so every entry below wins: the server's English-only keys.
   ...SERVER_ENGLISH_FALLBACKS.ja,
   ...CALENDAR_SYNC_TRANSLATIONS["ja"],
+  ...AGENT_RUNTIME_TRANSLATIONS["ja"],
   ...ACADEMIC_MANUAL_TRANSLATIONS["ja"],
   // Nodus Tools catalogue
   "Navega por la web y guarda fuentes para tu investigación.": "ウェブを閲覧し、研究のための資料を保存します。",
@@ -96,13 +117,16 @@ export const JA: Record<string, string> = {
   ...RESEARCH_ACTIVITY_TRANSLATIONS.ja,
   ...RESEARCH_CHAT_HISTORY_TRANSLATIONS.ja,
   ...RESEARCH_ATTACHMENT_TRANSLATIONS.ja,
+  ...RESEARCH_VERIFICATION_TRANSLATIONS['ja'],
   ...VAULT_FILE_DROP_TRANSLATIONS['ja'],
   ...DOCUMENT_SKILLS_TRANSLATIONS.ja,
   ...RESEARCH_PROMPT_TRANSLATIONS.ja,
   ...RESEARCH_SOURCE_TRANSLATIONS.ja,
+  ...RESEARCH_HARNESS_TRANSLATIONS["ja"],
   ...RESEARCH_REASONING_TRANSLATIONS.ja,
   ...RESEARCH_NOTEBOOK_TRANSLATIONS["ja"],
   ...CHAT_SKILLS_TRANSLATIONS.ja,
+  ...NARRATION_TRANSLATIONS['ja'],
   ...CAPABILITIES_TRANSLATIONS.ja,
   ...STELLAR_GRAPH_TRANSLATIONS.ja,
   ...PROTECT_TRANSLATIONS.ja,
@@ -121,6 +145,8 @@ export const JA: Record<string, string> = {
   ...COMPLETE_GUIDE_TRANSLATIONS["ja"],
   ...STUDY_FOCUS_TRANSLATIONS["ja"],
   ...STUDY_NOTE_LINKS_TRANSLATIONS["ja"],
+  ...BOOKMARK_SORT_TRANSLATIONS["ja"],
+  ...SCRIPTOR_AI_TRANSLATIONS["ja"],
   ...STUDY_IMPROVE_TRANSLATIONS.ja,
   ...WORKSPACE_TRANSLATIONS.ja,
   ...WORLDBUILDING_TRANSLATIONS.ja,
@@ -157,11 +183,16 @@ export const JA: Record<string, string> = {
   ...DEEP_RESEARCH_APPROACH_TRANSLATIONS.ja,
   ...DICTIONARY_TRANSLATIONS.ja,
   ...DEEP_RESEARCH_VERSION_TRANSLATIONS.ja,
+  ...GALLERY_FILTER_TRANSLATIONS.ja,
   ...DOCUMENT_UNDERSTANDING_TRANSLATIONS.ja,
   ...STALE_MODEL_TRANSLATIONS.ja,
+  ...SCHEME_DECLUTTER_TRANSLATIONS.ja,
+  ...CHEMISTRY_STOCK_TRANSLATIONS.ja,
   ...DEEP_RESEARCH_QUALITY_TRANSLATIONS.ja,
   ...TEXT_PROVENANCE_TRANSLATIONS.ja,
   ...MODEL_SETTINGS_TRANSLATIONS.ja,
+  ...SETTINGS_LAYOUT_TRANSLATIONS.ja,
+  ...EMBEDDING_GEMMA2_TRANSLATIONS['ja'],
   ...ADAPTIVE_CONCURRENCY_TRANSLATIONS.ja,
   ...DATABASE_DEEP_RESEARCH_TRANSLATIONS.ja,
   ...ACADEMIC_TOUR_TRANSLATIONS.ja,
@@ -793,7 +824,7 @@ export const JA: Record<string, string> = {
   "Resume las ideas esenciales y señala qué debería recordar.": "重要なアイデアを要約し、覚えておくべきことを指摘します。",
   "¿Qué contradicciones o puntos incompletos aparecen en el material?": "資料にはどのような矛盾やギャップが現れますか?",
   "Documento": "書類",
-  "En lectura": "読む",
+  "En lectura": "読書中",
   "Revisado": "レビュー済み",
   "Nuevo material": "新素材",
   "Causa": "原因",
@@ -1268,7 +1299,7 @@ export const JA: Record<string, string> = {
   "Nodus Compass": "Nodusコンパス",
   "Nodus Tools": "ノダスツール",
   "Herramientas prácticas y local-first para convertir archivos y procesar documentos, integradas en Nodus.": "Nodus に組み込まれた、ファイル変換とドキュメント処理のための便利なローカルファーストツール。",
-  "Nodus PDF Presenter": "Nodus PDF プレゼンター",
+  'Nodus Presenter': 'Nodus Presenter',
   "Presentar archivos PDF y presentaciones externas con vista del presentador, control remoto desde el móvil, notas del orador y herramientas de anotación en directo.": "プレゼンタービュー、モバイルリモートコントロール、スピーカーノート、ライブ注釈ツールを使用して、PDF および外部で作成されたプレゼンテーションを表示します。",
   "Nodus OCR Workspace": "Nodus OCR ワークスペース",
   "OCR asistido por IA para PDF escaneados e imágenes, con revisión página a página, limpieza de texto, reprocesamiento e integración directa con las bóvedas de Nodus.": "ページごとのレビュー、テキストのクリーンアップ、再処理、Nodus Vaultとの直接統合を備えた、スキャンされた PDF および画像用の AI 搭載 OCR。",
@@ -1952,7 +1983,7 @@ export const JA: Record<string, string> = {
   "Y hay mucho más": "さらにたくさんあります",
   "Esto es solo la mecánica básica. Nodus incluye también Autores (fichas y matriz de síntesis), un Laboratorio de hipótesis, Mapa de argumentos, Debates, Cobertura de tu pregunta, Ruta de lectura, un Taller de escritura con Deep Research y Proyectos de manuscrito con verificador de citas. ¿Quieres el recorrido completo de este flujo? Lánzalo desde Ajustes → Ayuda → Tutorial avanzado.": "これは単なる基本的な仕組みです。 Nodus には、著者 (書類および合成マトリックス)、仮説ラボ、議論マップ、討論、質問のカバレッジ、リーディングパス、深い調査によるライティングワークショップ、および引用検証者による原稿プロジェクトも含まれています。このフローの完全なウォークスルーを知りたいですか? 「設定」→「ヘルプ」→「詳細チュートリアル」から起動します。",
   "Conectar Zotero": "Zoteroに接続する",
-  "Lecturas": "読む",
+  "Lecturas": "読書",
   "Proveedor de IA": "AIプロバイダー",
   "Primer resultado": "最初の結果",
   "Introducción": "導入",
@@ -2117,7 +2148,7 @@ export const JA: Record<string, string> = {
   "huecos minados": "採掘されたギャップ",
   "Revisar": "レビュー",
   "contradicciones": "矛盾",
-  "por leer": "読む",
+  "por leer": "未読",
   "lista": "準備ができて",
   "pendiente": "保留中",
   "taller académico": "学術ワークショップ",
@@ -2406,15 +2437,15 @@ export const JA: Record<string, string> = {
   "Incluir leídas": "読み取りを含める",
   "Describe tu investigación, preguntas principales, objetivos o prioridades actuales...": "研究内容、主な質問、目標、現在の優先事項について説明してください...",
   "Mostradas": "示されている",
-  "Leídas": "読む",
-  "Por leer": "読むには",
+  "Leídas": "既読",
+  "Por leer": "未読",
   "Analizadas": "分析済み",
   "Pendientes": "保留中",
   "Sin plan calculado.": "計画は計算されていません。",
   "Recalculando ruta...": "パスを再計算しています...",
   "{n} fuera del bloque": "{n} ブロック外",
   "No hay obras que cumplan los filtros actuales.": "現在のフィルターに一致する作品はありません。",
-  "leída": "読む",
+  "leída": "既読",
   "ideas analizadas": "分析されたアイデア",
   "ideas pendientes": "保留中のアイデア",
   "temas analizados": "分析されたテーマ",
@@ -2721,8 +2752,8 @@ export const JA: Record<string, string> = {
   "Buscar dentro del documento": "このドキュメント内を検索する",
   "Preparando el índice de búsqueda…": "検索インデックスを構築しています…",
   "Este archivo no contiene una capa de texto que Nodus pueda buscar.": "このファイルには、Nodus が検索できるテキストレイヤーがありません。",
-  "Este PDF no contiene texto buscable. Abre el Markdown limpio para consultar el OCR.": "この PDF には検索可能なテキストがありません。クリーンな Markdown を開いて OCR テキストを確認します。",
-  "Las imágenes no contienen una capa textual. Usa el Markdown limpio para buscar el OCR.": "画像にはテキストレイヤーがありません。クリーンな Markdown を使用して OCR テキストを検索します。",
+  "Este PDF no contiene texto buscable. Abre el Markdown para consultar el OCR.": "この PDF には検索可能なテキストがありません。Markdown を開いて OCR テキストを確認します。",
+  "Las imágenes no contienen una capa textual. Usa el Markdown para buscar el OCR.": "画像にはテキストレイヤーがありません。Markdown を使用して OCR テキストを検索します。",
   "Coincidencia {current} de {total}": "{total} の {current} と一致します",
   "No se encontró ese texto": "一致するものが見つかりませんでした",
   "Ir a la coincidencia anterior": "前の試合に戻る",
@@ -2882,7 +2913,7 @@ export const JA: Record<string, string> = {
   "Toda la red de ideas y temas.": "アイデアとテーマのネットワーク全体。",
   "Refutaciones y tensiones explícitas o inferidas.": "反論と明示的または推測される緊張。",
   "Ideas abiertas, limitaciones y zonas por conectar.": "オープンなアイデア、制限、そしてつながる領域。",
-  "Lectura": "読む",
+  "Lectura": "読書",
   "Contexto de una obra o ruta de lectura.": "作品のコンテキストまたは読書パス。",
   "Nodos vinculados a obras sin tag de lectura.": "読み取りタグのない作品にリンクされているノード。",
   "Relaciones entre autores del corpus.": "コーパス作成者間の関係。",
@@ -3228,7 +3259,7 @@ export const JA: Record<string, string> = {
   "temas comunes": "共有テーマ",
   "Ideas del autor": "著者のアイデア",
   "Este autor aún no tiene ideas extraídas. Analiza sus obras.": "この作者はまだ抽出されたアイデアを持っていません。彼らの作品を分析してください。",
-  "Leído": "読む",
+  "Leído": "既読",
   "Construyendo la matriz…": "マトリックスの構築…",
   "Aún no hay suficientes autores y temas analizados para construir la matriz.": "マトリックスを構築するには、分析された著者とテーマがまだ十分ではありません。",
   "Filas = autores, columnas = temas. Cada celda muestra cuántas ideas aporta ese autor al tema; haz clic para ver las ideas y generar una postura.": "行 = 著者、列 = テーマ。各セルには、著者がテーマに貢献したアイデアの数が表示されます。クリックしてアイデアを確認し、スタンスを生成します。",
@@ -3297,7 +3328,7 @@ export const JA: Record<string, string> = {
   "Evaluando": "評価中",
   "Evaluando...": "評価中...",
   "Falta": "ない",
-  "Leída": "読む",
+  "Leída": "既読",
   "principales": "主要",
   "pasajes": "パッセージ",
   "Sin enlace Zotero": "Zotero へのリンクはありません",
@@ -5349,6 +5380,7 @@ export const JA: Record<string, string> = {
   "Cambiar modelo": "機種変更",
   "Si cambias de modelo de embeddings, los vectores anteriores no servirán con el nuevo modelo y tendrás que reindexar.": "埋め込みモデルを変更すると、既存のベクトルは新しいモデルで機能しなくなるため、インデックスを再作成する必要があります。",
   "Embeddings multilingües de alta calidad para corpus amplios.": "大規模なコーパス向けの高品質な多言語埋め込み。",
+  "Embeddings multilingües de Microsoft con instrucción de búsqueda. La mejor puntuación MTEB multilingüe de los modelos locales; reserva unos 6,5 GB de memoria de GPU, así que conviene un equipo con 16 GB o más.": "Microsoft の多言語埋め込み（検索用の指示付き）。ローカルモデルの中で多言語 MTEB スコアが最も高く、約 6.5 GB の GPU メモリを確保するため、16 GB 以上のメモリを搭載したコンピューターを推奨します。",
   "Embeddings multilingües con contexto largo y buen equilibrio entre precisión y memoria.": "精度とメモリ使用量のバランスが取れたロングコンテキストの多言語埋め込み。",
   "Opción ligera y rápida para equipos con menos memoria.": "メモリの少ないコンピュータ向けの軽量かつ高速なオプションです。",
   "Modelo visual muy ligero para conversación, resúmenes e ideas.": "会話、要約、アイデアのための非常に軽量なビジョンモデル。",
@@ -7601,7 +7633,7 @@ export const JA: Record<string, string> = {
   "Activar Global": "グローバルを有効にする",
   "Configura las copias de seguridad para activar Global.": "グローバルを有効にするようにバックアップを構成します。",
   "Biblioteca global activada.": "グローバルライブラリが有効になりました。",
-  "Global reúne originales y Markdown limpio para todos tus vaults.": "Global は、すべてのVaultにオリジナルとクリーンな Markdown をまとめて提供します。",
+  "Global reúne originales y Markdown para todos tus vaults.": "Global は、すべてのVaultにオリジナルとMarkdown をまとめて提供します。",
   "Este vault conserva colecciones, scans, resúmenes, embeddings y análisis existentes.": "このVaultには、既存のコレクション、スキャン、要約、埋め込み、分析が保存されます。",
   "Activa la Biblioteca global cuando quieras; este vault no cambiará.": "必要に応じていつでもグローバルライブラリを有効にします。このVaultは変更されません。",
   "Light": "ライト",
@@ -8231,4 +8263,53 @@ export const JA: Record<string, string> = {
   "Sent": "送信済み",
   ...CONCILIUM_TRANSLATIONS['ja'],
   ...DRIFT_TRANSLATIONS['ja'],
+  // PDF Presenter — editorial workspace
+  "Organiza tus diapositivas. Comparte tus ideas.": "スライドを整理し、アイデアを共有しましょう。",
+  "Buscar por número o notas…": "番号またはノートで検索…",
+
+  // PDF Presenter folder navigation.
+  "Editar carpeta": "フォルダーを編集",
+  "Carpeta principal": "親フォルダー",
+  "Biblioteca principal": "メインライブラリ",
+  "Color personalizado": "カスタムカラー",
+  "Ruta de carpetas": "フォルダーのパス",
+  "Opciones de la carpeta {name}": "フォルダー {name} のオプション",
+  "No se pudo eliminar la carpeta.": "フォルダーを削除できませんでした。",
+  "Se eliminará la carpeta «{name}» y sus subcarpetas ({n}).": "フォルダー「{name}」とそのサブフォルダー（{n} 個）を削除します。",
+  "¿Qué quieres hacer con sus {n} presentaciones?": "含まれる {n} 件のプレゼンテーションをどうしますか？",
+  "Conservar presentaciones": "プレゼンテーションを保持",
+  "Moverlas a la biblioteca principal, con sus notas y vídeos.": "ノートと動画を含めてメインライブラリに移動します。",
+  "Eliminar también las presentaciones": "プレゼンテーションも削除",
+  "Se eliminarán sus copias de la biblioteca. Los archivos originales se conservarán.": "ライブラリ内のコピーを削除します。元のファイルは保持されます。",
+  "Eliminar carpeta y presentaciones": "フォルダーとプレゼンテーションを削除",
+  "Ciencia": "科学",
+  "Arte": "アート",
+  "Favoritos": "お気に入り",
+  "Conexión móvil": "モバイル接続",
+  "Navegador web": "Webブラウザ",
+  "App iPhone–iPad": "iPhone–iPadアプリ",
+  "Escanea desde Nodus Presenter. Mantén Wi-Fi encendido en el Mac y el móvil; no necesitas el router de la sala.": "Nodus Presenterでスキャンしてください。Macとモバイル端末のWi-Fiをオンに保ってください。会場のルーターは不要です。",
+  "El enlace nativo no está disponible. Requiere macOS y permiso de red local.": "ネイティブ接続は利用できません。macOSとローカルネットワークの許可が必要です。",
+  "Escanea desde Nodus Presenter. Conecta el ordenador y el móvil a la misma red local.": "Nodus Presenter で読み取ってください。コンピューターとスマートフォンを同じローカルネットワークに接続してください。",
+  "El enlace de la app no está disponible. Comprueba la conexión de red e inicia de nuevo la presentación.": "アプリへの接続を利用できません。ネットワーク接続を確認し、プレゼンテーションを再開してください。",
+  // Live local dictation in Scriptor.
+  "No se pudo iniciar el micrófono.": "マイクを起動できませんでした。",
+  "Dictado pausado para terminar el audio pendiente. Reanuda cuando esté listo.": "処理待ちの音声を完了するため、音声入力を一時停止しました。完了後に再開してください。",
+  "Preparando dictado…": "音声入力を準備中…",
+  "Cancelar dictado": "音声入力をキャンセル",
+  "Dictado en directo · Local": "リアルタイム音声入力 · ローカル",
+  "Escuchando…": "聞き取り中…",
+  "El texto se inserta automáticamente en el cursor.": "テキストはカーソル位置に自動的に挿入されます。",
+  "Opciones de dictado": "音声入力の設定",
+  "Descarga un modelo local de transcripción en Ajustes → Modelos IA para dictar.": "音声入力を使うには、設定 → AIモデルからローカル文字起こしモデルをダウンロードしてください。",
+  "Audio pendiente": "処理待ちの音声",
+  "Modelo local": "ローカルモデル",
+  "Detener dictado": "音声入力を停止",
+  ...ACADEMIC_INTERFACE_TRANSLATIONS["ja"],
+  ...CHAT_ORGANIZATION_HELP_TRANSLATIONS["ja"],
+  ...RESEARCH_CHAT_SELECTION_TRANSLATIONS["ja"],
 };
+
+Object.assign(JA, SIGN_TRANSLATIONS['ja']);
+
+Object.assign(JA, RESEARCH_QUEUE_TRANSLATIONS['ja']);

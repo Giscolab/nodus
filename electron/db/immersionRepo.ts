@@ -11,10 +11,12 @@ import type {
   ModelRef,
 } from '@shared/types';
 import { getDb } from './database';
+import { deleteResearchRuns } from './researchRunsRepo';
 import { immersionAnnotationDocumentId } from '@shared/readerAnnotations';
 import { normalizeBareCitations } from '../ai/immersionCore';
 import { deleteDecorativeImageRow, getDecorativeImage } from './decorativeImagesRepo';
 import { deleteAnnotationsForWritingDraft } from './writingAnnotationsRepo';
+import { deleteEntityClips } from '../audio/audioService';
 
 interface SessionRow {
   id: string;
@@ -205,8 +207,10 @@ export function recordImmersionAnswer(id: string, record: ImmersionAnswerRecord)
 }
 
 export function deleteImmersionSession(id: string): void {
+  deleteResearchRuns({ artifactId: id });
   deleteDocumentVisuals(getActiveVault().id, { kind: 'immersion', id });
   deleteDecorativeImageRow('immersion', id);
+  deleteEntityClips('immersion', id);
   deleteAnnotationsForWritingDraft(immersionAnnotationDocumentId(id));
   getDb().prepare('DELETE FROM immersion_sessions WHERE id = ?').run(id);
 }

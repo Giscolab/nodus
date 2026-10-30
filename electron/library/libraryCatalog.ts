@@ -46,7 +46,23 @@ function ftsQuery(value: string): string {
     .map((term) => `"${term.replace(/"/g, '""')}"*`).join(' AND ');
 }
 
+/**
+ * Zotero keeps every ISBN of a book in one field, separated by spaces
+ * ("9780306406157 0306406152"), and older records were stored that way. Read such a
+ * value as the list it is: stripping the separators glued the numbers into one
+ * 23-digit string that matched nothing, so the same book imported again by ISBN
+ * became a duplicate. A single ISBN written with spaces between its groups still
+ * reads as one.
+ */
 function isbnForms(value: string): string[] {
+  const whole = singleIsbnForms(value);
+  if (whole.length !== 1 || /^(?:\d{9}[\dX]|\d{13})$/.test(whole[0])) return whole;
+  const tokens = value.split(/[\s,;]+/).map(singleIsbnForms)
+    .filter((forms) => forms.length && /^(?:\d{9}[\dX]|\d{13})$/.test(forms[0]));
+  return tokens.length > 1 ? [...new Set(tokens.flat())] : whole;
+}
+
+function singleIsbnForms(value: string): string[] {
   const clean = value.toUpperCase().replace(/[^0-9X]/g, '');
   if (/^\d{9}[\dX]$/.test(clean)) {
     const body = `978${clean.slice(0, 9)}`;
@@ -254,6 +270,7 @@ export class LibraryCatalog {
       CREATE INDEX IF NOT EXISTS library_items_pmid ON library_items (json_extract(metadata_json, '$.pmid')) WHERE deleted_at IS NULL;
       CREATE INDEX IF NOT EXISTS library_items_pmcid ON library_items (json_extract(metadata_json, '$.pmcid')) WHERE deleted_at IS NULL;
       CREATE INDEX IF NOT EXISTS library_items_arxiv ON library_items (json_extract(metadata_json, '$.arxiv')) WHERE deleted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS library_items_capture_request ON library_items (json_extract(metadata_json, '$.extra."Browser capture request"')) WHERE deleted_at IS NULL;
       CREATE TABLE IF NOT EXISTS library_collections (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -735,11 +752,13 @@ export class LibraryCatalog {
     if (row?.id) return row.id;
 
     // Older/imported records may retain DOI prefixes or arXiv URLs. Keep the
-    // indexed query above as the common path, and use a bounded compatibility
-    // scan only when it misses those legacy spellings.
+    // indexed query above as the common path, and use a compatibility scan only
+    // when it misses those legacy spellings. The scan covers every live record: a
+    // 5,000-row cap read the most recently updated rows first (the index SQLite
+    // picks), so in a large library every older record was invisible to it.
     const rows = this.handle.prepare(`
       SELECT id, doi, isbn_json, metadata_json FROM library_items
-      WHERE deleted_at IS NULL LIMIT 5000
+      WHERE deleted_at IS NULL
     `).all() as Array<{ id: string; doi: string | null; isbn_json: string; metadata_json: string }>;
     const incoming = new Map<LibraryMetadataIdentifierKind, Set<string>>();
     for (const key of ['doi', 'pmid', 'pmcid', 'arxiv'] as const) {
@@ -775,8 +794,8 @@ export class LibraryCatalog {
     if (!title) return null;
     const year = metadata.year == null ? null : Number(metadata.year);
     const rows = (year == null
-      ? this.handle.prepare('SELECT id, title, creators_json, year FROM library_items WHERE deleted_at IS NULL LIMIT 5000').all()
-      : this.handle.prepare('SELECT id, title, creators_json, year FROM library_items WHERE deleted_at IS NULL AND year=? LIMIT 5000').all(year)) as Array<{ id: string; title: string; creators_json: string; year: number | null }>;
+      ? this.handle.prepare('SELECT id, title, creators_json, year FROM library_items WHERE deleted_at IS NULL').all()
+      : this.handle.prepare('SELECT id, title, creators_json, year FROM library_items WHERE deleted_at IS NULL AND year=?').all(year)) as Array<{ id: string; title: string; creators_json: string; year: number | null }>;
     const creator = libraryCreatorDedupKey(metadata.creators);
     for (const row of rows) {
       if (normalizeLibraryDedupTitle(row.title) !== title) continue;
@@ -804,7 +823,6 @@ export class LibraryCatalog {
     const rows = this.handle.prepare(`
       SELECT id, metadata_json FROM library_items
       WHERE deleted_at IS NULL AND metadata_json LIKE '%"url"%'
-      LIMIT 5000
     `).all() as Array<{ id: string; metadata_json: string }>;
     for (const row of rows) {
       try {
@@ -816,12 +834,16 @@ export class LibraryCatalog {
   }
 
   /** Ordered, explainable duplicate lookup shared by imports and captures. */
-  findItemIdByMetadata(metadata: LibraryItemMetadata): { itemId: string; matchedBy: 'identifier' | 'bibliography' | 'url' } | null {
+  findItemIdByMetadata(metadata: LibraryItemMetadata, allowUrlMatch = true, captureRequestId?: string): { itemId: string; matchedBy: 'request' | 'identifier' | 'bibliography' | 'url' } | null {
+    if (captureRequestId) {
+      const row = this.handle.prepare("SELECT id FROM library_items WHERE deleted_at IS NULL AND json_extract(metadata_json, '$.extra.\"Browser capture request\"')=? LIMIT 1").get(captureRequestId) as { id: string } | undefined;
+      if (row) return { itemId: row.id, matchedBy: 'request' };
+    }
     const identifier = this.findItemIdByMetadataIdentifiers(metadata);
     if (identifier) return { itemId: identifier, matchedBy: 'identifier' };
     const bibliography = this.findItemIdByNormalizedBibliography(metadata);
     if (bibliography) return { itemId: bibliography, matchedBy: 'bibliography' };
-    const url = this.findItemIdByMetadataUrl(metadata);
+    const url = allowUrlMatch ? this.findItemIdByMetadataUrl(metadata) : null;
     return url ? { itemId: url, matchedBy: 'url' } : null;
   }
 

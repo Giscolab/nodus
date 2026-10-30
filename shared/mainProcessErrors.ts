@@ -1,4 +1,10 @@
+import { MODEL_NETWORK_ERROR_PATTERNS } from './modelNetworkErrors';
+import { BACKUPS_RUNTIME_ERRORS, BACKUPS_RUNTIME_ERROR_PATTERNS } from './backupsErrors';
 import type { AppLanguage } from './types';
+import { SCRIPTOR_RUNTIME_ERRORS, SCRIPTOR_RUNTIME_ERROR_PATTERNS } from './scriptorErrors';
+import { EMBEDDING_GEMMA2_ERRORS, EMBEDDING_GEMMA2_ERROR_PATTERNS } from './embeddingGemma2Errors';
+import { CLOUDFLARE_SYNC_ERRORS, CLOUDFLARE_SYNC_ERROR_PATTERNS } from './cloudflareSyncErrors';
+import { STT_RUNTIME_ERRORS, STT_RUNTIME_ERROR_PATTERNS } from './sttErrors';
 
 /**
  * Main-process error sentences that reached non-Spanish readers in Spanish.
@@ -30,6 +36,112 @@ export type MainErrorTranslations = Partial<Record<AppLanguage, string>> & { en:
 
 /** Messages whose text is fixed, matched exactly. */
 export const MAIN_PROCESS_ERRORS: Record<string, MainErrorTranslations> = {
+  "Espera a que finalice la preparación documental antes de restaurar la copia.": {"en": "Wait for documentary preparation to finish before restoring the backup.", "fr": "Attendez la fin de la préparation documentaire avant de restaurer la sauvegarde.", "de": "Warten Sie vor dem Wiederherstellen der Sicherung, bis die Dokumentvorbereitung abgeschlossen ist.", "pt": "Aguarde o fim da preparação documental antes de restaurar a cópia.", "it": "Attendi il completamento della preparazione documentaria prima di ripristinare il backup.", "tr": "Yedeği geri yüklemeden önce belge hazırlığının bitmesini bekleyin.", "zh-CN": "请等待文献准备完成后再恢复备份。", "pt-BR": "Aguarde o fim da preparação documental antes de restaurar a cópia."},
+  "Comparación de embeddings no válida.": {"en": "Invalid embedding comparison.", "fr": "Comparaison d’embeddings non valide.", "de": "Ungültiger Embedding-Vergleich.", "pt": "Comparação de embeddings inválida.", "it": "Confronto degli embedding non valido.", "tr": "Geçersiz gömme karşılaştırması.", "zh-CN": "嵌入比较无效。", "pt-BR": "Comparação de embeddings inválida."},
+  "La bóveda cambió antes de comparar los índices.": {"en": "The vault changed before comparing the indexes.", "fr": "Le coffre a changé avant la comparaison des index.", "de": "Der Tresor wurde vor dem Indexvergleich gewechselt.", "pt": "O cofre mudou antes da comparação dos índices.", "it": "La cassaforte è cambiata prima del confronto degli indici.", "tr": "Dizinler karşılaştırılmadan önce kasa değişti.", "zh-CN": "比较索引前保险库已更改。", "pt-BR": "O cofre mudou antes da comparação dos índices."},
+  "Selecciona índices con embeddings verificados para compararlos.": {"en": "Select indexes with verified embeddings to compare them.", "fr": "Sélectionnez des index avec des embeddings vérifiés pour les comparer.", "de": "Wählen Sie zum Vergleichen Indizes mit geprüften Embeddings.", "pt": "Selecione índices com embeddings verificados para os comparar.", "it": "Seleziona indici con embedding verificati per confrontarli.", "tr": "Karşılaştırmak için doğrulanmış gömmeleri olan dizinleri seçin.", "zh-CN": "请选择具有已验证嵌入的索引进行比较。", "pt-BR": "Selecione índices com embeddings verificados para os comparar."},
+  "El contenido o los vectores cambiaron durante la comparación. Repítela para obtener una instantánea coherente.": {"en": "Content or vectors changed during the comparison. Repeat it to obtain a consistent snapshot.", "fr": "Le contenu ou les vecteurs ont changé pendant la comparaison. Recommencez pour obtenir un instantané cohérent.", "de": "Inhalte oder Vektoren wurden während des Vergleichs geändert. Wiederholen Sie ihn für eine konsistente Momentaufnahme.", "pt": "O conteúdo ou os vetores mudaram durante a comparação. Repita-a para obter uma captura consistente.", "it": "Il contenuto o i vettori sono cambiati durante il confronto. Ripetilo per ottenere un’istantanea coerente.", "tr": "Karşılaştırma sırasında içerik veya vektörler değişti. Tutarlı bir anlık görüntü için karşılaştırmayı yineleyin.", "zh-CN": "比较期间内容或向量已更改。请重新比较以获得一致的快照。", "pt-BR": "O conteúdo ou os vetores mudaram durante a comparação. Repita-a para obter uma captura consistente."},
+  "Las fuentes cambiaron durante la comparación.": {"en": "Sources changed during the comparison.", "fr": "Les sources ont changé pendant la comparaison.", "de": "Die Quellen wurden während des Vergleichs geändert.", "pt": "As fontes mudaram durante a comparação.", "it": "Le fonti sono cambiate durante il confronto.", "tr": "Karşılaştırma sırasında kaynaklar değişti.", "zh-CN": "比较期间来源已更改。", "pt-BR": "As fontes mudaram durante a comparação."},
+  "La bóveda cambió. Vuelve a abrir la gestión de índices.": {"en": "The vault changed. Reopen index management.", "fr": "Le coffre a changé. Rouvrez la gestion des index.", "de": "Der Tresor wurde gewechselt. Öffnen Sie die Indexverwaltung erneut.", "pt": "O cofre mudou. Volte a abrir a gestão de índices.", "it": "La cassaforte è cambiata. Riapri la gestione degli indici.", "tr": "Kasa değişti. Dizin yönetimini yeniden açın.", "zh-CN": "保险库已更改。请重新打开索引管理。", "pt-BR": "O cofre mudou. Volte a abrir a gestão de índices."},
+  "La bóveda cambió durante la preparación del índice.": {"en": "The vault changed during index preparation.", "fr": "Le coffre a changé pendant la préparation de l’index.", "de": "Der Tresor wurde während der Indexvorbereitung gewechselt.", "pt": "O cofre mudou durante a preparação do índice.", "it": "La cassaforte è cambiata durante la preparazione dell’indice.", "tr": "Dizin hazırlanırken kasa değişti.", "zh-CN": "准备索引期间保险库已更改。", "pt-BR": "O cofre mudou durante a preparação do índice."},
+  "Selecciona un proveedor y un modelo de embeddings válidos.": {"en": "Select a valid embedding provider and model.", "fr": "Sélectionnez un fournisseur et un modèle d’embeddings valides.", "de": "Wählen Sie einen gültigen Embedding-Anbieter und ein gültiges Modell.", "pt": "Selecione um fornecedor e um modelo de embeddings válidos.", "it": "Seleziona un fornitore e un modello di embedding validi.", "tr": "Geçerli bir gömme sağlayıcısı ve modeli seçin.", "zh-CN": "请选择有效的嵌入提供商和模型。", "pt-BR": "Selecione um fornecedor e um modelo de embeddings válidos."},
+  "No se encontró la bóveda del índice.": {"en": "The index’s vault was not found.", "fr": "Le coffre de l’index est introuvable.", "de": "Der Tresor des Index wurde nicht gefunden.", "pt": "O cofre do índice não foi encontrado.", "it": "La cassaforte dell’indice non è stata trovata.", "tr": "Dizinin kasası bulunamadı.", "zh-CN": "未找到索引所属的保险库。", "pt-BR": "O cofre do índice não foi encontrado."},
+  "Reconstruye el índice heredado antes de activarlo.": {"en": "Rebuild the legacy index before activating it.", "fr": "Reconstruisez l’index hérité avant de l’activer.", "de": "Erstellen Sie den alten Index vor der Aktivierung neu.", "pt": "Reconstrua o índice antigo antes de o ativar.", "it": "Ricostruisci l’indice precedente prima di attivarlo.", "tr": "Eski dizini etkinleştirmeden önce yeniden oluşturun.", "zh-CN": "请先重建旧索引再激活。", "pt-BR": "Reconstrua o índice antigo antes de o ativar."},
+  "Actualiza los pendientes antes de activar este índice.": {"en": "Update pending items before activating this index.", "fr": "Mettez à jour les éléments en attente avant d’activer cet index.", "de": "Aktualisieren Sie ausstehende Elemente, bevor Sie diesen Index aktivieren.", "pt": "Atualize os itens pendentes antes de ativar este índice.", "it": "Aggiorna gli elementi in sospeso prima di attivare questo indice.", "tr": "Bu dizini etkinleştirmeden önce bekleyen öğeleri güncelleyin.", "zh-CN": "请先更新待处理项目再激活此索引。", "pt-BR": "Atualize os itens pendentes antes de ativar este índice."},
+  "Acción de preparación no válida.": {"en": "Invalid preparation action.", "fr": "Action de préparation non valide.", "de": "Ungültige Vorbereitungsaktion.", "pt": "Ação de preparação inválida.", "it": "Azione di preparazione non valida.", "tr": "Geçersiz hazırlık işlemi.", "zh-CN": "准备操作无效。", "pt-BR": "Ação de preparação inválida."},
+  "La bóveda cambió antes de eliminar el índice.": {"en": "The vault changed before deleting the index.", "fr": "Le coffre a changé avant la suppression de l’index.", "de": "Der Tresor wurde vor dem Löschen des Index gewechselt.", "pt": "O cofre mudou antes da eliminação do índice.", "it": "La cassaforte è cambiata prima dell’eliminazione dell’indice.", "tr": "Dizin silinmeden önce kasa değişti.", "zh-CN": "删除索引前保险库已更改。", "pt-BR": "O cofre mudou antes da eliminação do índice."},
+  "El proveedor de embeddings necesita un endpoint HTTP o HTTPS.": {"en": "The embedding provider requires an HTTP or HTTPS endpoint.", "fr": "Le fournisseur d’embeddings nécessite un point d’accès HTTP ou HTTPS.", "de": "Der Embedding-Anbieter benötigt einen HTTP- oder HTTPS-Endpunkt.", "pt": "O fornecedor de embeddings precisa de um endpoint HTTP ou HTTPS.", "it": "Il fornitore di embedding richiede un endpoint HTTP o HTTPS.", "tr": "Gömme sağlayıcısı bir HTTP veya HTTPS uç noktası gerektirir.", "zh-CN": "嵌入提供商需要 HTTP 或 HTTPS 端点。", "pt-BR": "O fornecedor de embeddings precisa de um endpoint HTTP ou HTTPS."},
+  "No hay un índice de embeddings activo.": {"en": "There is no active embedding index.", "fr": "Aucun index d’embeddings n’est actif.", "de": "Es gibt keinen aktiven Embedding-Index.", "pt": "Não há nenhum índice de embeddings ativo.", "it": "Non c’è alcun indice di embedding attivo.", "tr": "Etkin bir gömme dizini yok.", "zh-CN": "没有活动的嵌入索引。", "pt-BR": "Não há nenhum índice de embeddings ativo."},
+  "Reranker local desconocido.": {"en": "Unknown local reranker.", "fr": "Modèle de reclassement local inconnu.", "de": "Unbekannter lokaler Reranker.", "pt": "Modelo de reordenação local desconhecido.", "it": "Modello di riordinamento locale sconosciuto.", "tr": "Bilinmeyen yerel yeniden sıralama modeli.", "zh-CN": "未知的本地重排序模型。", "pt-BR": "Modelo de reordenação local desconhecido."},
+  "Acción del reranker no válida.": {"en": "Invalid reranker action.", "fr": "Action de reclassement non valide.", "de": "Ungültige Reranker-Aktion.", "pt": "Ação de reordenação inválida.", "it": "Azione di riordinamento non valida.", "tr": "Geçersiz yeniden sıralama işlemi.", "zh-CN": "重排序操作无效。", "pt-BR": "Ação de reordenação inválida."},
+  "No se encontró el índice de embeddings.": {"en": "The embedding index was not found.", "fr": "L’index d’embeddings est introuvable.", "de": "Der Embedding-Index wurde nicht gefunden.", "pt": "O índice de embeddings não foi encontrado.", "it": "L’indice di embedding non è stato trovato.", "tr": "Gömme dizini bulunamadı.", "zh-CN": "未找到嵌入索引。", "pt-BR": "O índice de embeddings não foi encontrado."},
+  "La bóveda cambió durante la operación de embeddings.": {"en": "The vault changed during the embedding operation.", "fr": "Le coffre a changé pendant l’opération d’embeddings.", "de": "Der Tresor wurde während des Embedding-Vorgangs gewechselt.", "pt": "O cofre mudou durante a operação de embeddings.", "it": "La cassaforte è cambiata durante l’operazione di embedding.", "tr": "Gömme işlemi sırasında kasa değişti.", "zh-CN": "嵌入操作期间保险库已更改。", "pt-BR": "O cofre mudou durante a operação de embeddings."},
+  "El modelo ha cambiado de revisión. Reconstruye su índice desde Ajustes.": {"en": "The model revision changed. Rebuild its index in Settings.", "fr": "La révision du modèle a changé. Reconstruisez son index dans les paramètres.", "de": "Die Modellrevision wurde geändert. Erstellen Sie den Index in den Einstellungen neu.", "pt": "A revisão do modelo mudou. Reconstrua o índice nas Definições.", "it": "La revisione del modello è cambiata. Ricostruisci il suo indice nelle impostazioni.", "tr": "Modelin revizyonu değişti. Ayarlar’dan dizinini yeniden oluşturun.", "zh-CN": "模型修订版本已更改。请在设置中重建其索引。", "pt-BR": "A revisão do modelo mudou. Reconstrua o índice nas Definições."},
+  "Prepara y activa el nuevo índice antes de cambiar el modelo de embeddings.": {"en": "Prepare and activate the new index before changing the embedding model.", "fr": "Préparez et activez le nouvel index avant de changer de modèle d’embeddings.", "de": "Bereiten Sie den neuen Index vor und aktivieren Sie ihn, bevor Sie das Embedding-Modell wechseln.", "pt": "Prepare e ative o novo índice antes de mudar o modelo de embeddings.", "it": "Prepara e attiva il nuovo indice prima di cambiare il modello di embedding.", "tr": "Gömme modelini değiştirmeden önce yeni dizini hazırlayıp etkinleştirin.", "zh-CN": "请先准备并激活新索引再更改嵌入模型。", "pt-BR": "Prepare e ative o novo índice antes de mudar o modelo de embeddings."},
+  "Ya hay una comparación en curso.": {"en": "A comparison is already in progress.", "fr": "Une comparaison est déjà en cours.", "de": "Es läuft bereits ein Vergleich.", "pt": "Já existe uma comparação em curso.", "it": "Un confronto è già in corso.", "tr": "Bir karşılaştırma zaten sürüyor.", "zh-CN": "已有比较正在进行。", "pt-BR": "Já existe uma comparação em curso."},
+  "Actualiza Nodus Server para publicar el índice activo de forma compatible. La publicación remota anterior se ha conservado.": {"en": "Update Nodus Server to publish the active index compatibly. The previous remote publication has been preserved.", "fr": "Mettez à jour Nodus Server pour publier l’index actif de manière compatible. La publication distante précédente a été conservée.", "de": "Aktualisieren Sie Nodus Server, um den aktiven Index kompatibel zu veröffentlichen. Die bisherige Remote-Veröffentlichung wurde beibehalten.", "pt": "Atualize o Nodus Server para publicar o índice ativo de forma compatível. A publicação remota anterior foi preservada.", "it": "Aggiorna Nodus Server per pubblicare l’indice attivo in modo compatibile. La pubblicazione remota precedente è stata conservata.", "tr": "Etkin dizini uyumlu biçimde yayımlamak için Nodus Server’ı güncelleyin. Önceki uzak yayın korundu.", "zh-CN": "请更新 Nodus Server 以兼容方式发布活动索引。之前的远程发布已保留。", "pt-BR": "Atualize o Nodus Server para publicar o índice ativo de forma compatível. A publicação remota anterior foi preservada."},
+  "El servidor devolvió una sesión de publicación no válida.": {"en": "The server returned an invalid publication session.", "fr": "Le serveur a renvoyé une session de publication non valide.", "de": "Der Server hat eine ungültige Veröffentlichungssitzung zurückgegeben.", "pt": "O servidor devolveu uma sessão de publicação inválida.", "it": "Il server ha restituito una sessione di pubblicazione non valida.", "tr": "Sunucu geçersiz bir yayın oturumu döndürdü.", "zh-CN": "服务器返回了无效的发布会话。", "pt-BR": "O servidor devolveu uma sessão de publicação inválida."},
+  "El perfil de entrada no es compatible con este modelo.": {"en": "The input profile is incompatible with this model.", "fr": "Le profil d’entrée est incompatible avec ce modèle.", "de": "Das Eingabeprofil ist mit diesem Modell nicht kompatibel.", "pt": "O perfil de entrada é incompatível com este modelo.", "it": "Il profilo di ingresso non è compatibile con questo modello.", "tr": "Giriş profili bu modelle uyumsuz.", "zh-CN": "输入配置与此模型不兼容。", "pt-BR": "O perfil de entrada é incompatível com este modelo."},
+  "Los prefijos no coinciden con el perfil seleccionado.": {"en": "The prefixes do not match the selected profile.", "fr": "Les préfixes ne correspondent pas au profil sélectionné.", "de": "Die Präfixe stimmen nicht mit dem gewählten Profil überein.", "pt": "Os prefixos não correspondem ao perfil selecionado.", "it": "I prefissi non corrispondono al profilo selezionato.", "tr": "Önekler seçilen profille eşleşmiyor.", "zh-CN": "前缀与所选配置不匹配。", "pt-BR": "Os prefixos não correspondem ao perfil selecionado."},
+  'Directorio ZIP64 dañado.': { en: 'The ZIP64 directory is damaged.', fr: 'Le répertoire ZIP64 est endommagé.', de: 'Das ZIP64-Verzeichnis ist beschädigt.', pt: 'O diretório ZIP64 está danificado.', 'pt-BR': 'O diretório ZIP64 está danificado.', it: 'La directory ZIP64 è danneggiata.', tr: 'ZIP64 dizini bozuk.' , "zh-CN": "ZIP64 目录已损坏。" ,
+  'zh-TW': "ZIP64 目錄已損壞。",
+  ko: "ZIP64 디렉터리가 손상되었습니다.",
+  ja: "ZIP64 ディレクトリが破損しています。", },
+  'Directorio ZIP64 inválido.': { en: 'The ZIP64 directory is invalid.', fr: 'Le répertoire ZIP64 n’est pas valide.', de: 'Das ZIP64-Verzeichnis ist ungültig.', pt: 'O diretório ZIP64 é inválido.', 'pt-BR': 'O diretório ZIP64 é inválido.', it: 'La directory ZIP64 non è valida.', tr: 'ZIP64 dizini geçersiz.' , "zh-CN": "ZIP64 目录无效。" ,
+  'zh-TW': "ZIP64 目錄無效。",
+  ko: "ZIP64 디렉터리가 잘못되었습니다.",
+  ja: "ZIP64 ディレクトリが無効です。", },
+  'Directorio ZIP64 no encontrado.': { en: 'The ZIP64 directory was not found.', fr: 'Le répertoire ZIP64 est introuvable.', de: 'Das ZIP64-Verzeichnis wurde nicht gefunden.', pt: 'O diretório ZIP64 não foi encontrado.', 'pt-BR': 'O diretório ZIP64 não foi encontrado.', it: 'La directory ZIP64 non è stata trovata.', tr: 'ZIP64 dizini bulunamadı.' , "zh-CN": "未找到 ZIP64 目录。" ,
+  'zh-TW': "找不到 ZIP64 目錄。",
+  ko: "ZIP64 디렉터리를 찾을 수 없습니다.",
+  ja: "ZIP64 ディレクトリが見つかりません。", },
+  'Entrada ZIP64 sin datos de tamaño.': { en: 'A ZIP64 entry has no size data.', fr: 'Une entrée ZIP64 n’a pas de données de taille.', de: 'Einem ZIP64-Eintrag fehlen die Größenangaben.', pt: 'Uma entrada ZIP64 não tem dados de tamanho.', 'pt-BR': 'Uma entrada ZIP64 não tem dados de tamanho.', it: 'Una voce ZIP64 non ha dati di dimensione.', tr: 'Bir ZIP64 girdisinde boyut verisi yok.' , "zh-CN": "ZIP64 条目缺少大小数据。" ,
+  'zh-TW': "ZIP64 項目缺少大小資料。",
+  ko: "ZIP64 항목에 크기 데이터가 없습니다.",
+  ja: "ZIP64 エントリにサイズ情報がありません。", },
+  'El vault está en uso por otra conexión y no se puede copiar antes de migrar. No se ha modificado nada; vuelve a abrirlo en unos segundos.': { en: 'The vault is in use by another connection and cannot be copied before migrating. Nothing was changed; open it again in a few seconds.', fr: 'Le coffre est utilisé par une autre connexion et ne peut pas être copié avant la migration. Rien n’a été modifié ; rouvrez-le dans quelques secondes.', de: 'Der Tresor wird von einer anderen Verbindung verwendet und kann vor der Migration nicht kopiert werden. Es wurde nichts geändert; öffnen Sie ihn in einigen Sekunden erneut.', pt: 'O cofre está a ser usado por outra ligação e não pode ser copiado antes de migrar. Nada foi alterado; volte a abri-lo dentro de alguns segundos.', 'pt-BR': 'O cofre está em uso por outra conexão e não pode ser copiado antes de migrar. Nada foi alterado; abra-o novamente em alguns segundos.', it: 'Il vault è in uso da un’altra connessione e non può essere copiato prima della migrazione. Non è stato modificato nulla; riaprilo tra qualche secondo.', tr: 'Kasa başka bir bağlantı tarafından kullanılıyor ve taşımadan önce kopyalanamıyor. Hiçbir şey değiştirilmedi; birkaç saniye sonra yeniden açın.' , "zh-CN": "该库正被另一个连接使用，迁移前无法复制。未做任何更改；请几秒钟后重新打开。" ,
+  'zh-TW': "該庫正被另一個連線使用，遷移前無法複製。未做任何變更；請幾秒鐘後重新開啟。",
+  ko: "볼트가 다른 연결에서 사용 중이어서 마이그레이션 전에 복사할 수 없습니다. 아무것도 변경되지 않았습니다. 몇 초 후 다시 여세요.",
+  ja: "ボールトは別の接続で使用中のため、移行前にコピーできません。何も変更されていません。数秒後にもう一度開いてください。", },
+  ...SCRIPTOR_RUNTIME_ERRORS,
+  ...EMBEDDING_GEMMA2_ERRORS,
+  'EmbeddingGemma: falta configuración del proceso aislado.': {
+    en: 'EmbeddingGemma: isolated process configuration is missing.', fr: 'EmbeddingGemma : la configuration du processus isolé est manquante.',
+    de: 'EmbeddingGemma: Die Konfiguration des isolierten Prozesses fehlt.', pt: 'EmbeddingGemma: falta a configuração do processo isolado.',
+    'pt-BR': 'EmbeddingGemma: falta a configuração do processo isolado.', it: 'EmbeddingGemma: manca la configurazione del processo isolato.',
+    tr: 'EmbeddingGemma: yalıtılmış süreç yapılandırması eksik.', 'zh-CN': 'EmbeddingGemma：缺少隔离进程配置。',
+    'zh-TW': 'EmbeddingGemma：缺少隔離程序設定。', ja: 'EmbeddingGemma: 分離プロセスの設定がありません。', ko: 'EmbeddingGemma: 격리된 프로세스 설정이 없습니다.',
+  },
+  'EmbeddingGemma: operación de proceso desconocida.': {
+    en: 'EmbeddingGemma: unknown process operation.', fr: 'EmbeddingGemma : opération de processus inconnue.',
+    de: 'EmbeddingGemma: Unbekannter Prozessvorgang.', pt: 'EmbeddingGemma: operação de processo desconhecida.',
+    'pt-BR': 'EmbeddingGemma: operação de processo desconhecida.', it: 'EmbeddingGemma: operazione di processo sconosciuta.',
+    tr: 'EmbeddingGemma: bilinmeyen süreç işlemi.', 'zh-CN': 'EmbeddingGemma：未知的进程操作。',
+    'zh-TW': 'EmbeddingGemma：未知的程序操作。', ja: 'EmbeddingGemma: 不明なプロセス操作です。', ko: 'EmbeddingGemma: 알 수 없는 프로세스 작업입니다.',
+  },
+  'EmbeddingGemma: solicitud de proceso inválida.': {
+    en: 'EmbeddingGemma: invalid process request.', fr: 'EmbeddingGemma : requête de processus non valide.',
+    de: 'EmbeddingGemma: Ungültige Prozessanfrage.', pt: 'EmbeddingGemma: pedido de processo inválido.',
+    'pt-BR': 'EmbeddingGemma: solicitação de processo inválida.', it: 'EmbeddingGemma: richiesta di processo non valida.',
+    tr: 'EmbeddingGemma: geçersiz süreç isteği.', 'zh-CN': 'EmbeddingGemma：无效的进程请求。',
+    'zh-TW': 'EmbeddingGemma：無效的程序請求。', ja: 'EmbeddingGemma: プロセス要求が無効です。', ko: 'EmbeddingGemma: 프로세스 요청이 잘못되었습니다.',
+  },
+  'EmbeddingGemma: configuración de proceso inválida.': {
+    en: 'EmbeddingGemma: invalid process configuration.', fr: 'EmbeddingGemma : configuration de processus non valide.',
+    de: 'EmbeddingGemma: Ungültige Prozesskonfiguration.', pt: 'EmbeddingGemma: configuração de processo inválida.',
+    'pt-BR': 'EmbeddingGemma: configuração de processo inválida.', it: 'EmbeddingGemma: configurazione di processo non valida.',
+    tr: 'EmbeddingGemma: geçersiz süreç yapılandırması.', 'zh-CN': 'EmbeddingGemma：无效的进程配置。',
+    'zh-TW': 'EmbeddingGemma：無效的程序設定。', ja: 'EmbeddingGemma: プロセス設定が無効です。', ko: 'EmbeddingGemma: 프로세스 구성이 잘못되었습니다.',
+  },
+  'No se pudo verificar la respuesta contra sus fuentes. Inténtalo de nuevo.': {
+    en: 'The answer could not be verified against its sources. Please try again.',
+    fr: 'La réponse n’a pas pu être vérifiée par rapport à ses sources. Réessayez.',
+    de: 'Die Antwort konnte nicht anhand ihrer Quellen überprüft werden. Bitte versuche es erneut.',
+    pt: 'Não foi possível verificar a resposta com as suas fontes. Tenta novamente.',
+    'pt-BR': 'Não foi possível verificar a resposta com suas fontes. Tente novamente.',
+    it: 'Non è stato possibile verificare la risposta rispetto alle sue fonti. Riprova.',
+    tr: 'Yanıt kaynaklarıyla doğrulanamadı. Lütfen yeniden deneyin.',
+    'zh-CN': '无法根据来源核实回答。请重试。',
+    'zh-TW': '無法根據來源核實回答。請重試。',
+    ja: '回答を出典に照らして検証できませんでした。もう一度お試しください。',
+    ko: '답변을 출처와 대조하여 검증하지 못했습니다. 다시 시도해 주세요.',
+  },
+  ...CLOUDFLARE_SYNC_ERRORS,
+  ...STT_RUNTIME_ERRORS,
+  ...BACKUPS_RUNTIME_ERRORS,
+  'La copia de Focus está dañada.': {
+    en: 'The Focus backup is corrupted.',
+    fr: 'La sauvegarde de Focus est endommagée.',
+    de: 'Die Focus-Sicherung ist beschädigt.',
+    pt: 'A cópia de segurança do Focus está danificada.',
+    'pt-BR': 'O backup do Focus está corrompido.',
+    it: 'Il backup di Focus è danneggiato.',
+    tr: 'Focus yedeği bozuk.',
+    'zh-CN': 'Focus 备份已损坏。',
+    'zh-TW': 'Focus 備份已損毀。',
+    ja: 'Focus のバックアップが破損しています。',
+    ko: 'Focus 백업이 손상되었습니다.',
+  },
   'El proveedor no devolvió un catálogo de modelos válido.': {
     en: 'The provider did not return a valid model catalogue.',
     fr: 'Le fournisseur n’a pas renvoyé de catalogue de modèles valide.',
@@ -842,6 +954,10 @@ export const MAIN_PROCESS_ERRORS: Record<string, MainErrorTranslations> = {
   'zh-TW': "GitHub Copilot 嘗試使用已停用的工具，Nodus 已中斷請求。",
   ko: "GitHub Copilot이 비활성화된 도구를 사용하려고 했습니다. Nodus가 요청을 중단했습니다.",
   ja: "GitHub Copilot が無効化されたツールを使用しようとしました。Nodusはリクエストを中止しました。", },
+  'No se pudo descargar el motor oficial. Comprueba la conexión y vuelve a intentarlo.': { en: "The official engine could not be downloaded. Check your connection and try again.", fr: "Impossible de télécharger le moteur officiel. Vérifiez la connexion et réessayez.", de: "Die offizielle Engine konnte nicht heruntergeladen werden. Prüfen Sie die Verbindung und versuchen Sie es erneut.", pt: "Não foi possível transferir o motor oficial. Verifica a ligação e tenta novamente.", 'pt-BR': "Não foi possível baixar o motor oficial. Verifique a conexão e tente novamente.", it: "Impossibile scaricare il motore ufficiale. Controlla la connessione e riprova.", tr: "Resmi motor indirilemedi. Bağlantıyı kontrol edip yeniden deneyin.", 'zh-CN': "无法下载官方引擎。请检查网络连接后重试。", 'zh-TW': "無法下載官方引擎。請檢查網路連線後再試一次。", ko: "공식 엔진을 다운로드할 수 없습니다. 연결을 확인하고 다시 시도하세요.", ja: "公式エンジンをダウンロードできませんでした。接続を確認して、もう一度お試しください。" },
+  'El motor descargado no coincide con su huella publicada y se ha descartado.': { en: "The downloaded engine does not match its published fingerprint and was discarded.", fr: "Le moteur téléchargé ne correspond pas à son empreinte publiée et a été écarté.", de: "Die heruntergeladene Engine stimmt nicht mit ihrem veröffentlichten Fingerabdruck überein und wurde verworfen.", pt: "O motor transferido não corresponde à impressão digital publicada e foi descartado.", 'pt-BR': "O motor baixado não corresponde à impressão digital publicada e foi descartado.", it: "Il motore scaricato non corrisponde alla sua impronta pubblicata ed è stato scartato.", tr: "İndirilen motor yayımlanan parmak iziyle eşleşmiyor ve atıldı.", 'zh-CN': "下载的引擎与其公布的指纹不符，已被丢弃。", 'zh-TW': "下載的引擎與其公布的指紋不符，已被捨棄。", ko: "다운로드한 엔진이 게시된 지문과 일치하지 않아 폐기했습니다.", ja: "ダウンロードしたエンジンが公開されているフィンガープリントと一致しないため、破棄しました。" },
+  'Esta instalación de Nodus no indica de dónde descargar el motor oficial.': { en: "This Nodus installation does not say where to download the official engine from.", fr: "Cette installation de Nodus n’indique pas où télécharger le moteur officiel.", de: "Diese Nodus-Installation gibt nicht an, woher die offizielle Engine heruntergeladen wird.", pt: "Esta instalação do Nodus não indica de onde transferir o motor oficial.", 'pt-BR': "Esta instalação do Nodus não indica de onde baixar o motor oficial.", it: "Questa installazione di Nodus non indica da dove scaricare il motore ufficiale.", tr: "Bu Nodus kurulumu resmi motorun nereden indirileceğini belirtmiyor.", 'zh-CN': "此 Nodus 安装未指明从何处下载官方引擎。", 'zh-TW': "此 Nodus 安裝未指明從何處下載官方引擎。", ko: "이 Nodus 설치에는 공식 엔진을 다운로드할 위치가 지정되어 있지 않습니다.", ja: "この Nodus のインストールには、公式エンジンのダウンロード元が示されていません。" },
+  'El paquete descargado no contiene el ejecutable esperado.': { en: "The downloaded package does not contain the expected executable.", fr: "Le paquet téléchargé ne contient pas l’exécutable attendu.", de: "Das heruntergeladene Paket enthält nicht die erwartete ausführbare Datei.", pt: "O pacote transferido não contém o executável esperado.", 'pt-BR': "O pacote baixado não contém o executável esperado.", it: "Il pacchetto scaricato non contiene l’eseguibile previsto.", tr: "İndirilen paket beklenen yürütülebilir dosyayı içermiyor.", 'zh-CN': "下载的软件包不包含预期的可执行文件。", 'zh-TW': "下載的套件不包含預期的可執行檔。", ko: "다운로드한 패키지에 예상한 실행 파일이 없습니다.", ja: "ダウンロードしたパッケージに想定された実行ファイルが含まれていません。" },
   'No se encontró el runtime oficial de Codex incluido con Nodus.': { en: 'The official Codex runtime bundled with Nodus was not found.', fr: 'Le runtime officiel de Codex fourni avec Nodus est introuvable.', de: 'Die mit Nodus gelieferte offizielle Codex-Laufzeit wurde nicht gefunden.', pt: 'Não foi encontrado o runtime oficial do Codex incluído no Nodus.', 'pt-BR': 'Não foi encontrado o runtime oficial do Codex incluído no Nodus.', it: 'Il runtime ufficiale di Codex incluso in Nodus non è stato trovato.', tr: 'Nodus ile birlikte gelen resmi Codex çalışma zamanı bulunamadı.' , "zh-CN": "未找到 Nodus 随附的官方 Codex 运行时。" ,
   'zh-TW': "未找到 Nodus 隨附的官方 Codex 執行時。",
   ko: "Nodus와 함께 번들로 제공되는 공식 Codex 런타임을 찾을 수 없습니다.",
@@ -2952,6 +3068,10 @@ export const MAIN_PROCESS_ERRORS: Record<string, MainErrorTranslations> = {
   'zh-TW': "後臺向量搜尋超時。",
   ko: "배경 벡터 검색 시간이 초과되었습니다.",
   ja: "背景ベクトル検索がタイムアウトしました。", },
+  'La búsqueda vectorial se detuvo para sustituir la base de datos.': { en: 'The vector search stopped so the database could be replaced.', fr: 'La recherche vectorielle s’est arrêtée pour remplacer la base de données.', de: 'Die Vektorsuche wurde angehalten, um die Datenbank zu ersetzen.', pt: 'A pesquisa vetorial parou para substituir a base de dados.', 'pt-BR': 'A busca vetorial parou para substituir o banco de dados.', it: 'La ricerca vettoriale si è fermata per sostituire il database.', tr: 'Vektör araması veritabanının değiştirilmesi için durduruldu.' , "zh-CN": "向量搜索已停止，以便替换数据库。" ,
+  'zh-TW': "向量搜尋已停止，以便替換資料庫。",
+  ko: "데이터베이스를 교체하기 위해 벡터 검색이 중지되었습니다.",
+  ja: "データベースを置き換えるため、ベクトル検索を停止しました。", },
   'El artículo necesita un título.': { en: 'The article needs a title.', fr: 'L’article doit avoir un titre.', de: 'Der Artikel braucht einen Titel.', pt: 'O artigo precisa de um título.', 'pt-BR': 'O artigo precisa de um título.', it: 'L’articolo ha bisogno di un titolo.', tr: 'Makalenin bir başlığı olmalı.' , "zh-CN": "文章需要标题。" ,
   'zh-TW': "文章需要標題。",
   ko: "기사에는 제목이 필요합니다.",
@@ -4656,6 +4776,10 @@ export const MAIN_PROCESS_ERRORS: Record<string, MainErrorTranslations> = {
   'zh-TW': "找不到科目。",
   ko: "과목을 찾을 수 없습니다.",
   ja: "科目が見つかりません。", },
+  'El servidor MCP local no está activo.': { en: 'The local MCP server is not running.', fr: 'Le serveur MCP local n’est pas actif.', de: 'Der lokale MCP-Server läuft nicht.', pt: 'O servidor MCP local não está ativo.', 'pt-BR': 'O servidor MCP local não está ativo.', it: 'Il server MCP locale non è attivo.', tr: 'Yerel MCP sunucusu çalışmıyor.' , "zh-CN": "本地 MCP 服务器未运行。" ,
+  'zh-TW': "本機 MCP 伺服器未執行。",
+  ko: "로컬 MCP 서버가 실행 중이 아닙니다.",
+  ja: "ローカル MCP サーバーが起動していません。", },
 };
 
 /**
@@ -4685,6 +4809,12 @@ function localProviderDetail(detail: string): MainErrorTranslations | null {
 /** Messages that carry runtime values, matched by shape. Order matters: the more
  *  specific pattern of a family must come first. */
 export const MAIN_PROCESS_ERROR_PATTERNS: { pattern: RegExp; translate: (...groups: string[]) => MainErrorTranslations }[] = [
+  ...MODEL_NETWORK_ERROR_PATTERNS,
+  ...EMBEDDING_GEMMA2_ERROR_PATTERNS,
+  ...STT_RUNTIME_ERROR_PATTERNS,
+  ...BACKUPS_RUNTIME_ERROR_PATTERNS,
+  ...SCRIPTOR_RUNTIME_ERROR_PATTERNS,
+  ...CLOUDFLARE_SYNC_ERROR_PATTERNS,
   // ── Local providers: the failure this whole table was opened for ─────────────
   {
     pattern: /^No se pudo conectar con (Ollama|LM Studio) en (.+?)\. (.+)$/,
@@ -5145,8 +5275,6 @@ export const MAIN_PROCESS_ERROR_PATTERNS: { pattern: RegExp; translate: (...grou
   // names, child-process output) and travels verbatim, like transport output elsewhere.
   { pattern: /^(.+) agotó el tiempo de espera\.$/, translate: (command) => ({ en: `${command} timed out.`, fr: `Délai dépassé pour ${command}.`, de: `${command} hat das Zeitlimit überschritten.`, pt: `${command} excedeu o tempo de espera.`, 'pt-BR': `${command} excedeu o tempo limite.`, it: `Tempo scaduto per ${command}.`, tr: `${command} zaman aşımına uğradı.` , 'zh-CN': `${command} 超时。` ,
   'zh-TW': `${command} 超時。`,}) },
-  { pattern: /^No se pudo instalar un runtime de llama\.cpp utilizable\. (.+)$/, translate: (details) => ({ en: `No usable llama.cpp runtime could be installed. ${details}`, fr: `Aucun moteur llama.cpp utilisable n’a pu être installé. ${details}`, de: `Es konnte keine nutzbare llama.cpp-Laufzeit installiert werden. ${details}`, pt: `Não foi possível instalar um motor llama.cpp utilizável. ${details}`, 'pt-BR': `Não foi possível instalar um runtime llama.cpp utilizável. ${details}`, it: `Non è stato possibile installare un runtime llama.cpp utilizzabile. ${details}`, tr: `Kullanılabilir bir llama.cpp çalışma zamanı kurulamadı. ${details}` , 'zh-CN': `无法安装可用的 llama.cpp 运行时。${details}` ,
-  'zh-TW': `無法安裝可用的 llama.cpp 執行時。${details}`,}) },
 
   // The complete study guide fails a job whose extraction could not read more than a tenth
   // of the source windows, and says how many. The counts are the whole point of the

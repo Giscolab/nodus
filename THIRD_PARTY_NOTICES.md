@@ -1,6 +1,6 @@
 # Nodus third-party notices
 
-Nodus 5.7.3 is free software distributed exclusively under the GNU Affero
+Nodus 5.16.1 is free software distributed exclusively under the GNU Affero
 General Public License v3.0 (`AGPL-3.0-only`). Versions through 3.2.7 remain
 available under MIT. Nodus includes or interoperates with the components and
 data described below. Those components keep their own licenses and their
@@ -15,6 +15,18 @@ resources with:
 - the Electron and Chromium license collections;
 - the GNU GPL/LGPL and Creative Commons license texts; and
 - instructions and source references for replacing/rebuilding LGPL components.
+
+## BlockNote editorial editor
+
+Nodus uses the unmodified base packages `@blocknote/core`, `@blocknote/react`
+and `@blocknote/ariakit`, each pinned to 0.55.0, by TypeCell and the BlockNote
+contributors. Source: <https://github.com/TypeCellOS/BlockNote/tree/v0.55.0>.
+These packages are licensed under Mozilla Public License 2.0 (MPL-2.0).
+Their complete license is distributed in `legal/generated/MPL-2.0.txt` and in
+the generated production dependency inventory. Nodus's editor schema, user
+interface, storage adapters, AI and voice integration are Nodus source files.
+No BlockNote XL packages are used. Upstream licensing details:
+<https://github.com/TypeCellOS/BlockNote/blob/v0.55.0/LICENSE.txt>.
 
 ## Managed Zotero MCP and private CPython
 
@@ -250,7 +262,7 @@ endorsed by any of them.
 
 Nodus can download unmodified citation styles from the official CSL styles repository
 and bundles a small set of CSL styles and locale files supplied through
-`@citation-js/plugin-csl`. Chicago author-date, MLA, and IEEE are bundled as
+`@citation-js/plugin-csl`. Chicago author-date, Chicago notes-bibliography, MLA, and IEEE are bundled as
 unmodified compressed files from official Style Repository revision
 `d17b5135c5b38f9ffadd0c3ec257f6892ba07f6e`. The style data originates from the
 Citation Style Language project and is licensed under Creative Commons
@@ -295,14 +307,11 @@ its bundled ggml component are MIT licensed; license texts are included in the
 downloaded archive and the corresponding source is:
 https://github.com/leejet/stable-diffusion.cpp/tree/b290693
 
-Piper speech downloads `@diffusionstudio/piper-wasm` 1.0.0 from jsDelivr when
-the user first invokes it. That runtime incorporates eSpeak NG, licensed under
-GPL-3.0-or-later. Nodus is AGPL/GPL-compatible free software and imposes no
-additional restriction on that component. The GPL text is included in
-`legal/generated/GPL-3.0.txt`; source and build information are available at:
-
-- https://github.com/diffusion-studio/piper-wasm/tree/69522c832bd52d7c16389e9a8aee568065027689
-- https://github.com/espeak-ng/espeak-ng
+Narration installs a private Python environment the first time the user enables it.
+pip downloads hash-pinned wheels from PyPI (and, outside Apple Silicon, PyTorch from
+download.pytorch.org); the exact versions are listed in `runtime/ming-tts/*.lock`.
+They include mlx and mlx-audio (MIT, Apple Silicon), PyTorch (BSD-3-Clause),
+transformers, diffusers and accelerate (Apache-2.0), and onnxruntime (MIT).
 
 ## Downloadable models and voices
 
@@ -322,9 +331,67 @@ Nodus. Sources:
 - https://huggingface.co/unsloth/Qwen3-4B-GGUF
 - https://huggingface.co/Qwen/Qwen3-4B
 
-Nodus is free and open-source software. Some optional Piper
-voice datasets, including HFC Female and Ryan, are marked CC BY-NC-SA 4.0 and
-must not be reused for commercial purposes. LFM2.5 is governed by the LFM Open
+Narration downloads Ming-3.0-tts 0.5B by inclusionAI (MIT), either the official
+PyTorch checkpoint or the MLX conversion by mlx-community (MIT). The checkpoint
+bundles a CAM++ speaker encoder (`campplus`). Sources:
+
+- https://github.com/inclusionAI/Ming-3.0-tts
+- https://huggingface.co/inclusionAI/Ming-3.0-tts-0.5B
+- https://huggingface.co/mlx-community/Ming-3.0-tts-0.5B-8bit
+
+The bundled Castilian reference voice `electron/assets/tts/voices/es-dave.wav` is
+a clip of the `es_ES/dave` dataset from https://github.com/OHF-Voice/voice-datasets,
+dedicated to the public domain under CC0 1.0. Nodus leaves out Ming's built-in
+voices that imitate characters from films, series and cartoons.
+
+Narration can also use Phonon by Gradium. The `ptts` runtime (gradium-ai/xn-ptts) is
+installed from PyPI under MIT OR Apache-2.0 (`runtime/ming-tts/requirements-phonon.lock`). Its
+weights are downloaded only when the user asks, never bundled:
+
+- Phonon S 31M (`gradium/phonon-31m-en`): Apache-2.0.
+- Phonon 40M Spanish and multilingual (`gradium/phonon-40m-es`, `gradium/phonon-40m-multilingual`):
+  **CC BY-NC 4.0, non-commercial**. These repositories are gated on Hugging Face. Nodus downloads
+  them only after the user accepts the licence in Settings and supplies their own Hugging Face
+  token. CC BY-NC terms are not compatible with redistribution under AGPL-3.0, so Nodus never
+  ships or redistributes these weights.
+- Voice catalogue (`gradium/phonon-voices`): Apache-2.0. Each voice embedding is downloaded on
+  first use.
+
+Narration can also use Kokoro-82M by hexgrad. The checkpoint and its voice styles are
+Apache-2.0; the 31 English and Spanish voices are shipped in `voices-v1.0.bin` and are not
+separate downloads. Nodus downloads the model from the pinned
+`thewh1teagle/kokoro-onnx` v1.0 release only when the user asks. The private runtime is
+built from `runtime/ming-tts/requirements-kokoro.lock`: `kokoro-onnx` (MIT), ONNX Runtime
+(MIT), `phonemizer` (GPL-3.0) and `espeakng-loader`/eSpeak NG (GPL-3.0), installed into a
+separate Python environment on the user's machine. Sources:
+
+- https://huggingface.co/hexgrad/Kokoro-82M
+- https://github.com/thewh1teagle/kokoro-onnx
+- https://github.com/espeak-ng/espeak-ng
+
+Narration can optionally use Kyutai Pocket TTS. Its official `pocket-tts` 4.0.1
+implementation (MIT) is installed with CPU PyTorch into a separate private environment
+from `runtime/ming-tts/requirements-pocket.lock`. No Pocket runtime packages, weights
+or voice states are included in the installer. Nodus downloads the official six-layer
+checkpoints (CC BY 4.0) after the user accepts Kyutai's terms on Hugging Face and provides
+their own read token. The multilingual catalogue groups seven language checkpoints;
+only one language is resident at a time. There is no MLX Pocket implementation in Nodus.
+
+The official defaults are Alba (English), Lola (Spanish), Estelle (French), Juergen
+(German), Giovanni (Italian), Rafael (Portuguese) and Daan (Dutch). Default voice states
+are included in the optional model download; the remaining official voices download on
+demand. Voice states preserve the source recordings' licences: CC0 for voice donations,
+Voice-Zero and the Common Voice samples; CC BY 4.0 for Alba, VCTK and CML-TTS; CC BY-NC
+4.0 for Expresso (Cosette) and EARS (Jean). The catalogue displays each voice's attribution.
+Saved user references and derived conditioning states stay on the user's machine.
+Sources:
+
+- https://github.com/kyutai-labs/pocket-tts
+- https://huggingface.co/kyutai/pocket-tts
+- https://huggingface.co/kyutai/tts-voices
+- https://huggingface.co/kyutai/pocket-tts-without-voice-cloning
+
+Nodus is free and open-source software. LFM2.5 is governed by the LFM Open
 License v1.0, which contains a separate condition for legal entities with at
 least USD 10 million in annual revenue. Users remain responsible for uses
 outside the license terms of those optional datasets.
@@ -386,3 +453,7 @@ and Legalize are not endorsed by the BOE. The original document's update and
 reuse metadata are preserved. Other mandatory source attributions, including
 SAIJ, IMPO, Lovdata, Crown/database rights and Korean KOGL type 1, appear in the
 country register and alongside applicable results.
+
+## Academic delivery: Paged.js, MathJax and fflate
+
+Nodus Scriptor uses Paged.js (`pagedjs` 0.4.3, MIT, Fred Chasen and contributors, https://github.com/pagedjs/pagedjs) for local pagination; MathJax (`@mathjax/src` 4.1.3, Apache-2.0, MathJax Consortium, https://github.com/mathjax/MathJax-src) and its New Computer Modern font package for mathematical SVG; `fflate` 0.8.2 (MIT, Arjun Barrett, https://github.com/101arrowz/fflate) for LaTeX packages; and `@xmldom/xmldom` 0.9.12 (MIT, xmldom contributors, https://github.com/xmldom/xmldom) for converting mathematical markup to native Word equations. Full package license texts and font notices are included in the generated dependency notices. The browser used by Nodus Server is Chromium; its upstream notices are distributed with the operating-system package.

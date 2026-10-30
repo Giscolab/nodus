@@ -4,19 +4,59 @@
 import { ipcRenderer } from 'electron';
 import type { QueueProgress, ReprocessProgress, EmbeddingPipelineProgress, PassageEmbeddingProgress, SemanticBridgeProgress, ChapterRelationsProgress, DocumentIndexProgress } from '@shared/types';
 import type { AcademicApi } from '@shared/api/academic';
+import { chatStreamRegistry } from './chatStreams';
 
 // The stream currently in flight for each cancellable channel, so the Stop
 // button can abort it without the renderer having to juggle request ids. One
-// stream at a time per surface (the composer is disabled while sending).
-let activeChatRequestId: string | null = null;
+// stream at a time per surface (the composer is disabled while sending), except
+// the chats, which may answer in several conversations at once.
+const researchChatStreams = chatStreamRegistry();
 /** How long a finished research turn still accepts its late activity events. */
 const ACTIVITY_GRACE_MS = 2000;
 let activeLibraryReaderChatRequestId: string | null = null;
 let activeStudyImproveRequestId: string | null = null;
-let activeStudyAssistantRequestId: string | null = null;
+const studyAssistantStreams = chatStreamRegistry();
 let activeStudySttRequestId: string | null = null;
 
 export const academicApi: AcademicApi = {
+  listEmbeddingIndexes: vaultId => ipcRenderer.invoke('embeddingIndexes:list', vaultId),
+  listEmbeddingIndexRuns: (id, vaultId) => ipcRenderer.invoke('embeddingIndexes:runs', id, vaultId),
+  compareEmbeddingIndexes: input => ipcRenderer.invoke('embeddingIndexes:compare', input),
+  cancelEmbeddingComparison: id => ipcRenderer.invoke('embeddingIndexes:cancelComparison', id),
+  getLocalRerankerStatus: () => ipcRenderer.invoke('embeddingIndexes:rerankerStatus'),
+  prepareLocalReranker: (action, modelId) => ipcRenderer.invoke('embeddingIndexes:rerankerPrepare', action, modelId),
+  deleteLocalReranker: modelId => ipcRenderer.invoke('embeddingIndexes:rerankerDelete', modelId),
+  previewEmbeddingIndex: input => ipcRenderer.invoke('embeddingIndexes:preview', input),
+  prepareEmbeddingIndex: input => ipcRenderer.invoke('embeddingIndexes:prepare', input),
+  activateEmbeddingIndex: (id, vaultId) => ipcRenderer.invoke('embeddingIndexes:activate', id, vaultId),
+  controlEmbeddingIndex: (id, action, vaultId) => ipcRenderer.invoke('embeddingIndexes:control', id, action, vaultId),
+  deleteEmbeddingIndex: (id, vaultId) => ipcRenderer.invoke('embeddingIndexes:delete', id, vaultId),
+  onActiveEmbeddingIndexChanged: callback => {
+    const listener = () => callback();
+    ipcRenderer.on('embeddingIndexes:activeChanged', listener);
+    return () => ipcRenderer.removeListener('embeddingIndexes:activeChanged', listener);
+  },
+  onEmbeddingIndexesChanged: callback => {
+    const listener = () => callback();
+    ipcRenderer.on('embeddingIndexes:changed', listener);
+    return () => ipcRenderer.removeListener('embeddingIndexes:changed', listener);
+  },
+  onEmbeddingIndexProgress: callback => {
+    const listener = (_event: unknown, progress: import('@shared/embeddingIndexes').EmbeddingIndexProgress) => callback(progress);
+    ipcRenderer.on('embeddingIndexes:progress', listener);
+    return () => ipcRenderer.removeListener('embeddingIndexes:progress', listener);
+  },
+  listResearchRuns: (conversationId, entryId) => ipcRenderer.invoke('research:run:list', conversationId, entryId),
+  getResearchRun: id => ipcRenderer.invoke('research:run:get', id),
+  pauseResearchRun: id => ipcRenderer.invoke('research:run:pause', id),
+  cancelResearchRun: id => ipcRenderer.invoke('research:run:cancel', id),
+  resumeResearchRun: id => ipcRenderer.invoke('research:run:resume', id),
+  onResearchRun: callback => {
+    const listener = (_event: unknown, run: import('@shared/researchHarness').ResearchRunSummary) => callback(run);
+    ipcRenderer.on('research:run:update', listener);
+    return () => ipcRenderer.removeListener('research:run:update', listener);
+  },
+  exportAcademicDocument: input => ipcRenderer.invoke('workspace:academic:export',input),
   getResearchCorpusSources: () => ipcRenderer.invoke('research:corpus:sources'),
   setResearchZoteroAutomatic: enabled => ipcRenderer.invoke('research:zotero:automatic', enabled),
   getZoteroMcpStatus: notebookId => ipcRenderer.invoke('research:zotero:status', notebookId),
@@ -115,7 +155,7 @@ export const academicApi: AcademicApi = {
   listDuplicateIdeas: () => ipcRenderer.invoke('ideas:listDuplicates'),
   mergeIdeas: (canonicalId, duplicateIds) => ipcRenderer.invoke('ideas:merge', canonicalId, duplicateIds),
   backupDatabase: () => ipcRenderer.invoke('ideas:backup'),
-  getWorkMeta: (nodusId) => ipcRenderer.invoke('works:meta', nodusId),
+  getWorkMeta: (nodusId, options) => ipcRenderer.invoke('works:meta', nodusId, options),
   openInZotero: (zoteroKey) => ipcRenderer.invoke('works:openInZotero', zoteroKey).then(() => undefined),
   openEvidenceAtPage: (nodusId, location) => ipcRenderer.invoke('works:openAtPage', nodusId, location),
   getLibraryReaderDocument: (nodusId) => ipcRenderer.invoke('libraryReader:get', nodusId),
@@ -259,7 +299,8 @@ export const academicApi: AcademicApi = {
   updateStudyAnnotation: (id, patch) => ipcRenderer.invoke('study:annotation:update', id, patch),
   deleteStudyAnnotation: (id) => ipcRenderer.invoke('study:annotation:delete', id).then(() => undefined),
   transcribeStudyAudio: async (request, handlers = {}) => {
-    const requestId = `study-stt-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const explicitId = request.requestId && /^[\w-]{1,128}$/.test(request.requestId) ? request.requestId : null;
+    const requestId = explicitId || `study-stt-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const onProgress = (_event: unknown, id: string, fraction: number) => { if (id === requestId) handlers.onProgress?.(fraction); };
     const onPartial = (_event: unknown, id: string, text: string) => { if (id === requestId) handlers.onPartial?.(text); };
     let markStreamComplete: () => void = () => {};
@@ -268,7 +309,9 @@ export const academicApi: AcademicApi = {
     ipcRenderer.on('study:stt:progress', onProgress);
     ipcRenderer.on('study:stt:partial', onPartial);
     ipcRenderer.on('study:stt:complete', onComplete);
-    activeStudySttRequestId = requestId;
+    // Live dictation owns its request IDs and cancels them explicitly. It must
+    // not steal the default cancellation target of a recording in another view.
+    if (!explicitId) activeStudySttRequestId = requestId;
     try {
       const result = await ipcRenderer.invoke('study:stt:transcribe', { ...request, requestId });
       // The invoke reply and webContents.send events travel through separate IPC
@@ -283,8 +326,9 @@ export const academicApi: AcademicApi = {
       ipcRenderer.removeListener('study:stt:complete', onComplete);
     }
   },
-  cancelStudyTranscription: async () => {
-    if (activeStudySttRequestId) await ipcRenderer.invoke('study:stt:cancel', activeStudySttRequestId);
+  cancelStudyTranscription: async (requestId) => {
+    const target = requestId || activeStudySttRequestId;
+    if (target) await ipcRenderer.invoke('study:stt:cancel', target);
   },
   getWhisperCppStatus: () => ipcRenderer.invoke('study:stt:whisperCpp:status'),
   installWhisperCpp: () => ipcRenderer.invoke('study:stt:whisperCpp:install'),
@@ -418,15 +462,16 @@ export const academicApi: AcademicApi = {
     const onDelta = (_e: unknown, id: string, delta: string) => { if (id === requestId) handlers.onDelta(delta); };
     const onReasoning = (_e: unknown, id: string, delta: string) => { if (id === requestId) handlers.onReasoning?.(delta); };
     ipcRenderer.on('study:assistant:delta', onDelta); ipcRenderer.on('study:assistant:reasoning', onReasoning);
-    activeStudyAssistantRequestId = requestId;
+    const untrack = studyAssistantStreams.track(requestId, request.conversationId);
     try { return await ipcRenderer.invoke('study:assistant:stream', requestId, request); }
     finally {
-      if (activeStudyAssistantRequestId === requestId) activeStudyAssistantRequestId = null;
+      untrack();
       ipcRenderer.removeListener('study:assistant:delta', onDelta); ipcRenderer.removeListener('study:assistant:reasoning', onReasoning);
     }
   },
-  cancelStudyAssistant: async () => {
-    if (activeStudyAssistantRequestId) await ipcRenderer.invoke('study:assistant:cancel', activeStudyAssistantRequestId);
+  cancelStudyAssistant: async (conversationId) => {
+    const requestId = studyAssistantStreams.find(conversationId);
+    if (requestId) await ipcRenderer.invoke('study:assistant:cancel', requestId);
   },
   exportStudyAssistantConversation: (id) => ipcRenderer.invoke('study:assistant:export', id),
   listStudyQuestions: (filters) => ipcRenderer.invoke('study:questions:list', filters),
@@ -614,6 +659,8 @@ export const academicApi: AcademicApi = {
       if (id === requestId) handlers.onActivity?.(activity);
     };
     ipcRenderer.on('research:chatStream:activity', onActivity);
+    const onRun = (_e: unknown, id: string, run: import('@shared/researchHarness').ResearchRunSummary) => { if (id === requestId) handlers.onRun?.(run); };
+    ipcRenderer.on('research:chatStream:run', onRun);
     const onDelta = (_e: unknown, id: string, delta: string) => {
       if (id === requestId) handlers.onDelta(delta);
     };
@@ -631,24 +678,26 @@ export const academicApi: AcademicApi = {
     ipcRenderer.on('research:chatStream:delta', onDelta);
     ipcRenderer.on('research:chatStream:reasoning', onReasoning);
     ipcRenderer.on('research:chatStream:replace', onReplace);
-    activeChatRequestId = requestId;
+    const untrack = researchChatStreams.track(requestId, request.conversationId);
     try {
       const response = await ipcRenderer.invoke('research:chatStream', requestId, request);
       handlers.onStats?.(response.stats);
       return response;
     } finally {
-      if (activeChatRequestId === requestId) activeChatRequestId = null;
+      untrack();
       // Activity events and the invoke reply travel on different IPC pipes, so the reply can
       // overtake the last events of the turn. Keep listening briefly for those stragglers.
       setTimeout(() => ipcRenderer.removeListener('research:chatStream:activity', onActivity), ACTIVITY_GRACE_MS);
+      ipcRenderer.removeListener('research:chatStream:run', onRun);
       ipcRenderer.removeListener('research:chatStream:concilium', onConcilium);
       ipcRenderer.removeListener('research:chatStream:delta', onDelta);
       ipcRenderer.removeListener('research:chatStream:reasoning', onReasoning);
       ipcRenderer.removeListener('research:chatStream:replace', onReplace);
     }
   },
-  cancelResearchChat: async () => {
-    if (activeChatRequestId) await ipcRenderer.invoke('research:chatStream:cancel', activeChatRequestId);
+  cancelResearchChat: async (conversationId) => {
+    const requestId = researchChatStreams.find(conversationId);
+    if (requestId) await ipcRenderer.invoke('research:chatStream:cancel', requestId);
   },
 
   getWritingWorkshopSnapshot: (brief) => ipcRenderer.invoke('writing:snapshot', brief),
@@ -825,6 +874,8 @@ export const academicApi: AcademicApi = {
   getCitationPreview: (ref) => ipcRenderer.invoke('citations:preview', ref),
   searchVaultContent: (query, kinds, semantic, limit) => ipcRenderer.invoke('search:vaultContent', query, kinds, semantic, limit),
   globalSearch: (query, limitPerKind, kinds) => ipcRenderer.invoke('search:global', query, limitPerKind, kinds),
+  inspectAcademicDocument: input => ipcRenderer.invoke('workspace:academic:inspect',input),
+  listEditorReferences: options => ipcRenderer.invoke('editor:references',options),
   getSearchResultDetail: (kind, id) => ipcRenderer.invoke('search:detail', kind, id),
   semanticSearch: (query, options) => ipcRenderer.invoke('search:semantic', query, options),
   findSimilarToIdea: (globalId, limit) => ipcRenderer.invoke('search:similarIdea', globalId, limit),

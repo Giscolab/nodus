@@ -7,7 +7,6 @@ import {
   assertObjectHash,
   clampInteger,
   first,
-  json,
   mimeFromBytes,
   nowIso,
   problem,
@@ -21,6 +20,9 @@ import {
   sha256Hex,
 } from './util.mjs';
 import { R2_ROW_BODY_FIELD, R2_ROW_HASH_FIELD, R2_ROW_TITLE_FIELD } from './rows.mjs';
+
+import { stageObject, queueObject } from './objectLifecycle.mjs';
+import { createEmbeddingContract, canonicalizeEmbeddingContract } from './generated/embeddingContract.mjs';
 
 const PUBLICATION_TTL_MS = 24 * 3600_000;
 const VALID_TABLE = /^[a-z][a-z0-9_]{0,127}$/;
@@ -48,6 +50,23 @@ async function publicationFor(env, spaceId, publicationId, requiredStatus = null
 
 export async function createPublication(env, auth, request) {
   const manifest = await readJson(request, 2 * 1024 * 1024);
+  if (manifest.embeddingIndex !== undefined) {
+    const index = manifest.embeddingIndex;
+    if (index !== null && (!index || typeof index.id !== 'string' || index.id.length > 128 || !Number.isSafeInteger(index.generation) || index.generation < 1)) throw new HttpError(400, 'bad_embedding_index', 'The active embedding index is invalid.');
+    if (!Array.isArray(manifest.vectors) || manifest.vectors.length > 3 || (!index && manifest.vectors.length)) throw new HttpError(400, 'bad_embedding_vectors', 'Only vectors of the declared active index may be published.');
+    const seen = new Set();
+    let commonContract = null;
+    for (const vector of manifest.vectors) {
+      let contract;
+      try { contract = createEmbeddingContract(vector.embeddingContract); } catch { throw new HttpError(400, 'bad_embedding_contract', 'A complete embedding contract is required.'); }
+      const canonical = canonicalizeEmbeddingContract(contract);
+      if (commonContract && commonContract !== canonical) throw new HttpError(400, 'embedding_index_mismatch', 'All vector families must use the same embedding contract.');
+      commonContract = canonical;
+      if (!['ideas', 'documents', 'passages'].includes(vector.kind) || seen.has(vector.kind) || vector.indexId !== index.id || vector.generation !== index.generation
+        || contract.provider !== vector.provider || contract.model !== vector.model || contract.dim !== vector.dimensions) throw new HttpError(400, 'embedding_index_mismatch', 'Vectors must belong to one active embedding index.');
+      seen.add(vector.kind);
+    }
+  }
   if (Number(manifest.protocolVersion) !== 3) throw new HttpError(400, 'unsupported_protocol', 'This Worker requires publication protocol 3.');
   const revision = String(manifest.revision || '');
   if (!/^[A-Za-z0-9_-]{20,128}$/.test(revision)) throw new HttpError(400, 'bad_revision', 'The publication revision is invalid.');
@@ -72,13 +91,19 @@ export async function createPublication(env, auth, request) {
     }
     return { hash, bytes, table, key };
   });
-  const existing = await first(env.DB, 'SELECT id, generation, status FROM publications WHERE space_id = ?1 AND revision = ?2', auth.space_id, revision);
+  const existing = await first(env.DB, 'SELECT id, generation, status, expires_at FROM publications WHERE space_id = ?1 AND revision = ?2', auth.space_id, revision);
   if (existing?.status === 'active') {
     return { id: existing.id, generation: existing.generation, deduplicated: true, committed: true };
   }
-  if (existing?.status === 'staging') return publicationSession(existing, counts);
-  const latest = await first(env.DB, 'SELECT COALESCE(MAX(generation), 0) AS generation FROM publications WHERE space_id = ?1', auth.space_id);
-  const generation = Number(latest?.generation || 0) + 1;
+  if (existing?.status === 'staging') {
+    // Reopening an expired session must renew the stored deadline. Merely returning
+    // a fresh-looking expiresAt left every subsequent upload failing with HTTP 410.
+    if (!existing.expires_at || Date.parse(existing.expires_at) <= Date.now()) {
+      existing.expires_at = new Date(Date.now() + PUBLICATION_TTL_MS).toISOString();
+      await run(env.DB, "UPDATE publications SET expires_at = ?1 WHERE id = ?2 AND status = 'staging'", existing.expires_at, existing.id);
+    }
+    return publicationSession(existing, counts);
+  }
   const id = randomId('pub_');
   const now = Date.now();
   const sanitized = {
@@ -92,13 +117,37 @@ export async function createPublication(env, auth, request) {
     rowObjects: sanitizedRowObjects,
     library: manifest.library && typeof manifest.library === 'object' ? manifest.library : null,
     snapshot: manifest.snapshot && typeof manifest.snapshot === 'object' ? manifest.snapshot : null,
+    embeddingIndex: manifest.embeddingIndex,
     vectors: Array.isArray(manifest.vectors) ? manifest.vectors : [],
   };
-  await run(env.DB, `INSERT INTO publications
+  const insert = env.DB.prepare(`INSERT INTO publications
     (id, space_id, generation, revision, status, manifest_json, expires_at, created_by_device, created_at)
-    VALUES (?1, ?2, ?3, ?4, 'staging', ?5, ?6, ?7, ?8)`,
-    id, auth.space_id, generation, revision, JSON.stringify(sanitized), new Date(now + PUBLICATION_TTL_MS).toISOString(), auth.device_id || null, new Date(now).toISOString());
-  return publicationSession({ id, generation }, counts);
+    SELECT ?1, ?2, COALESCE(MAX(generation), 0) + 1, ?3, 'staging', ?4, ?5, ?6, ?7
+    FROM publications WHERE space_id = ?2`).bind(
+    id, auth.space_id, revision, JSON.stringify(sanitized), new Date(now + PUBLICATION_TTL_MS).toISOString(), auth.device_id || null, new Date(now).toISOString());
+  try {
+    if (existing) {
+      // A → B → A can repeat a snapshot's revision after its old generation was
+      // superseded (and possibly collected). Keep that generation immutable and
+      // stage a fresh one. The reserved key cannot collide with a client revision.
+      // Archival and insertion share a transaction, so a failed upload setup
+      // leaves both the old revision and the currently published bundle intact.
+      await env.DB.batch([
+        env.DB.prepare("UPDATE publications SET revision = ?1 WHERE id = ?2 AND revision = ?3 AND status IN ('superseded', 'failed')")
+          .bind(`retired:${existing.id}`, existing.id, revision),
+        insert,
+      ]);
+    } else await insert.run();
+  } catch (error) {
+    // Another device may have opened this same revision while we were validating
+    // its manifest. Reuse its session rather than reporting a uniqueness error.
+    const concurrent = await first(env.DB, 'SELECT id, generation, status, expires_at FROM publications WHERE space_id = ?1 AND revision = ?2', auth.space_id, revision);
+    if (concurrent?.status === 'active') return { id: concurrent.id, generation: concurrent.generation, deduplicated: true, committed: true };
+    if (concurrent?.status === 'staging') return publicationSession(concurrent, counts);
+    throw error;
+  }
+  const created = await first(env.DB, 'SELECT id, generation, expires_at FROM publications WHERE id = ?1', id);
+  return publicationSession(created, counts);
 }
 
 function publicationSession(publication, counts) {
@@ -107,7 +156,7 @@ function publicationSession(publication, counts) {
     generation: Number(publication.generation),
     deduplicated: false,
     committed: false,
-    expiresAt: new Date(Date.now() + PUBLICATION_TTL_MS).toISOString(),
+    expiresAt: publication.expires_at || new Date(Date.now() + PUBLICATION_TTL_MS).toISOString(),
     tableChunkRows: TABLE_CHUNK_ROWS,
     tableChunkBytes: TABLE_CHUNK_BYTES,
     objectPartBytes: OBJECT_PART_BYTES,
@@ -178,7 +227,7 @@ export async function uploadTableChunk(env, auth, publicationId, table, request)
   return { ok: true, table, received: Number(count?.count || 0), expected };
 }
 
-function objectKey(spaceId, purpose, hash, publication = null) {
+function objectKey(spaceId, purpose, hash, _publication = null) {
   if (purpose === 'asset') return `spaces/${spaceId}/assets/${hash}`;
   if (purpose === 'library') return `spaces/${spaceId}/library/${hash}.zip`;
   if (purpose === 'vector') return `spaces/${spaceId}/vectors/${hash}.bin`;
@@ -213,7 +262,7 @@ export async function putSmallObject(env, auth, purpose, hashValue, request, pub
   if (!VALID_PURPOSES.has(purpose)) throw new HttpError(400, 'bad_purpose', 'The object purpose is invalid.');
   const hash = assertObjectHash(hashValue);
   const publication = publicationId ? await publicationFor(env, auth.space_id, publicationId, 'staging') : null;
-  const max = purpose === 'asset' ? 8 * 1024 * 1024 : purpose === 'row' ? 512 * 1024 * 1024 : 96 * 1024 * 1024;
+  const max = 8 * 1024 * 1024;
   const bytes = await readBody(request, max);
   if (await sha256Hex(bytes) !== hash) throw new HttpError(400, 'hash_mismatch', 'The uploaded bytes do not match their SHA-256 address.');
   const detected = mimeFromBytes(bytes);
@@ -221,20 +270,23 @@ export async function putSmallObject(env, auth, purpose, hashValue, request, pub
   if (purpose === 'asset' && !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(detected)) throw new HttpError(415, 'unsupported_media_type', 'Nodus only publishes PNG, JPEG, WebP or GIF image assets.');
   if (purpose === 'library' && detected !== 'application/zip') throw new HttpError(415, 'unsupported_media_type', 'A library package must be a ZIP archive.');
   const mime = purpose === 'asset' ? detected : declared || detected;
-  const key = objectKey(auth.space_id, purpose, hash, publication);
+  const key = await stageObject(env, objectKey(auth.space_id, purpose, hash, publication));
   const active = publication ? null : await first(env.DB, 'SELECT active_generation FROM spaces WHERE id=?1', auth.space_id);
   const referencedGeneration = publication?.generation ?? active?.active_generation ?? 0;
   await env.OBJECTS.put(key, bytes, {
     httpMetadata: { contentType: mime, contentDisposition: 'attachment' },
     customMetadata: { sha256: hash, purpose, spaceId: auth.space_id },
   });
-  await run(env.DB, `INSERT INTO objects (space_id, hash, kind, object_key, mime, bytes, created_at, last_referenced_generation)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-    ON CONFLICT(space_id, kind, hash) DO UPDATE SET last_referenced_generation = MAX(COALESCE(last_referenced_generation, 0), COALESCE(excluded.last_referenced_generation, 0))`,
-    auth.space_id, hash, purpose, key, mime, bytes.byteLength, nowIso(), referencedGeneration);
-  if (purpose === 'snapshot' && publication) {
-    await run(env.DB, 'UPDATE publications SET snapshot_key = ?1, snapshot_sha256 = ?2, snapshot_bytes = ?3 WHERE id = ?4', key, hash, bytes.byteLength, publication.id);
-  }
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO objects (space_id,hash,kind,object_key,mime,bytes,created_at,last_referenced_generation)
+      VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
+      ON CONFLICT(space_id,kind,hash) DO UPDATE SET last_referenced_generation=MAX(COALESCE(last_referenced_generation,0),excluded.last_referenced_generation)`)
+      .bind(auth.space_id,hash,purpose,key,mime,bytes.byteLength,nowIso(),referencedGeneration),
+    env.DB.prepare(`DELETE FROM r2_delete_queue WHERE object_key=?1 AND EXISTS(SELECT 1 FROM objects WHERE object_key=?1)`).bind(key),
+    ...(purpose === 'snapshot' && publication ? [env.DB.prepare(`UPDATE publications SET
+      snapshot_key=(SELECT object_key FROM objects WHERE space_id=?1 AND kind='snapshot' AND hash=?2),
+      snapshot_sha256=?2,snapshot_bytes=?3 WHERE id=?4`).bind(auth.space_id,hash,bytes.byteLength,publication.id)] : []),
+  ]);
   return { ok: true, hash, bytes: bytes.byteLength, mime, deduplicated: false };
 }
 
@@ -246,7 +298,8 @@ export async function startMultipart(env, auth, publicationId, request) {
   const hash = assertObjectHash(input.hash);
   const bytes = Number(input.bytes);
   if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes > MULTIPART_MAX_BYTES[purpose]) throw new HttpError(400, 'bad_size', 'The declared object size is invalid for this object type.');
-  const key = objectKey(auth.space_id, purpose, hash, publication);
+  const key = await stageObject(env, objectKey(auth.space_id, purpose, hash, publication));
+  await run(env.DB, 'UPDATE r2_delete_queue SET not_before=?1 WHERE object_key=?2', nowIso(Date.now()+8*86400_000), key);
   const multipart = await env.OBJECTS.createMultipartUpload(key, {
     httpMetadata: { contentType: String(input.mime || 'application/octet-stream'), contentDisposition: 'attachment' },
     customMetadata: { sha256: hash, purpose, spaceId: auth.space_id },
@@ -295,10 +348,11 @@ export async function completeMultipart(env, auth, uploadId) {
     if (index < parts.length - 1 && Number(parts[index].bytes) < 5 * 1024 * 1024) throw new HttpError(409, 'part_too_small', 'Every multipart part except the last must be at least 5 MiB.');
   }
   const multipart = env.OBJECTS.resumeMultipartUpload(record.object_key, record.r2_upload_id);
+  await run(env.DB, 'UPDATE r2_delete_queue SET not_before=?1 WHERE object_key=?2', nowIso(Date.now()+86400_000), record.object_key);
   await multipart.complete(parts.map(({ partNumber, etag }) => ({ partNumber, etag })));
   const object = await env.OBJECTS.get(record.object_key);
   if (!object || Number(object.size) !== Number(record.bytes)) {
-    await env.OBJECTS.delete(record.object_key);
+    await queueObject(env, record.object_key);
     await run(env.DB, 'DELETE FROM multipart_uploads WHERE id = ?1', record.id);
     throw new HttpError(409, 'size_mismatch', 'The completed object size is not the declared size.');
   }
@@ -307,18 +361,18 @@ export async function completeMultipart(env, auth, uploadId) {
   await object.body.pipeTo(digestStream);
   const actualHash = [...new Uint8Array(await digestPromise)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
   if (actualHash !== record.hash) {
-    await env.OBJECTS.delete(record.object_key);
+    await queueObject(env, record.object_key);
     await run(env.DB, 'DELETE FROM multipart_uploads WHERE id = ?1', record.id);
     throw new HttpError(400, 'hash_mismatch', 'The completed object does not match its declared SHA-256 address.');
   }
   const prefix = await env.OBJECTS.get(record.object_key, { range: { offset: 0, length: 16 } });
   const detected = prefix?.body ? mimeFromBytes(new Uint8Array(await prefix.arrayBuffer())) : 'application/octet-stream';
   if (record.purpose === 'asset' && !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(detected)) {
-    await env.OBJECTS.delete(record.object_key); await run(env.DB, 'DELETE FROM multipart_uploads WHERE id = ?1', record.id);
+    await queueObject(env, record.object_key); await run(env.DB, 'DELETE FROM multipart_uploads WHERE id = ?1', record.id);
     throw new HttpError(415, 'unsupported_media_type', 'Nodus only publishes PNG, JPEG, WebP or GIF image assets.');
   }
   if (record.purpose === 'library' && detected !== 'application/zip') {
-    await env.OBJECTS.delete(record.object_key); await run(env.DB, 'DELETE FROM multipart_uploads WHERE id = ?1', record.id);
+    await queueObject(env, record.object_key); await run(env.DB, 'DELETE FROM multipart_uploads WHERE id = ?1', record.id);
     throw new HttpError(415, 'unsupported_media_type', 'A library package must be a ZIP archive.');
   }
   const publication = record.publication_id ? await publicationFor(env, auth.space_id, record.publication_id, 'staging') : null;
@@ -329,10 +383,11 @@ export async function completeMultipart(env, auth, uploadId) {
       ON CONFLICT(space_id, kind, hash) DO UPDATE SET last_referenced_generation = MAX(COALESCE(last_referenced_generation, 0), COALESCE(excluded.last_referenced_generation, 0))`).bind(
         auth.space_id, record.hash, record.purpose, record.object_key, verifiedMime, record.bytes, nowIso(), publication?.generation ?? null,
       ),
+    env.DB.prepare(`DELETE FROM r2_delete_queue WHERE object_key=?1 AND EXISTS(SELECT 1 FROM objects WHERE object_key=?1)`).bind(record.object_key),
     env.DB.prepare('DELETE FROM multipart_uploads WHERE id = ?1').bind(record.id),
     ...(record.purpose === 'snapshot' && publication ? [
-      env.DB.prepare('UPDATE publications SET snapshot_key = ?1, snapshot_sha256 = ?2, snapshot_bytes = ?3 WHERE id = ?4')
-        .bind(record.object_key, record.hash, record.bytes, publication.id),
+      env.DB.prepare(`UPDATE publications SET snapshot_key=(SELECT object_key FROM objects WHERE space_id=?1 AND kind='snapshot' AND hash=?2),snapshot_sha256=?2,snapshot_bytes=?3 WHERE id=?4`)
+        .bind(auth.space_id, record.hash, record.bytes, publication.id),
     ] : []),
   ]);
   return { ok: true, hash: record.hash, bytes: Number(record.bytes), purpose: record.purpose };
@@ -503,7 +558,7 @@ export async function getObject(env, spaceId, hashValue, request, kind = null) {
 }
 
 export async function cleanupPublications(env, retainGenerations = 3) {
-  const spaces = await all(env.DB, 'SELECT id, active_generation FROM spaces WHERE active_generation IS NOT NULL');
+  const spaces = await all(env.DB, `SELECT id,active_generation FROM spaces WHERE active_generation IS NOT NULL ORDER BY COALESCE(gc_checked_at,'') LIMIT 1`);
   let removedRows = 0;
   for (const space of spaces) {
     const floor = Number(space.active_generation) - Math.max(1, retainGenerations) + 1;
@@ -511,8 +566,8 @@ export async function cleanupPublications(env, retainGenerations = 3) {
     // namespaces multiplies billed dimensions without improving data recovery.
     const vectorFloor = Number(space.active_generation);
     const obsoleteMembers = await all(env.DB, `SELECT vector_id, index_binding FROM vector_members
-      WHERE space_id = ?1 AND generation < ?2 ORDER BY generation LIMIT 5000`, space.id, vectorFloor);
-    for (const binding of [...new Set(obsoleteMembers.map((row) => row.index_binding))]) {
+      WHERE space_id = ?1 AND generation < ?2 ORDER BY generation LIMIT 1000`, space.id, vectorFloor);
+    for (const binding of [...new Set(obsoleteMembers.map((row) => row.index_binding))].slice(0,4)) {
       const index = env[binding];
       if (!index?.deleteByIds) continue;
       const ids = obsoleteMembers.filter((row) => row.index_binding === binding).map((row) => row.vector_id);
@@ -523,22 +578,16 @@ export async function cleanupPublications(env, retainGenerations = 3) {
           AND vector_id IN (SELECT value FROM json_each(?2))`, space.id, JSON.stringify(chunk));
       }
     }
-    const obsoleteObjects = await all(env.DB, `SELECT kind, hash, object_key FROM objects
-      WHERE space_id = ?1 AND kind <> 'backup' AND COALESCE(last_referenced_generation, 0) < ?2 LIMIT 100`, space.id, floor);
-    if (obsoleteObjects.length) {
-      const candidates = obsoleteObjects.map((object) => object.object_key);
-      // Delete the catalogue rows conditionally before deleting bytes. A concurrent
-      // commit can therefore acquire a reference first and make this DELETE skip the
-      // object; if R2 deletion later fails, the only outcome is an inert orphan, never
-      // an active D1 reference to missing data.
-      const deleted = await all(env.DB, `DELETE FROM objects
-        WHERE space_id = ?1 AND kind <> 'backup'
-          AND COALESCE(last_referenced_generation, 0) < ?2
-          AND object_key IN (SELECT value FROM json_each(?3))
-        RETURNING object_key`, space.id, floor, JSON.stringify(candidates));
-      const keys = deleted.map((object) => object.object_key);
-      if (keys.length) await env.OBJECTS.delete(keys);
-    }
+    // Enqueue and detach in one transaction. The predicate is evaluated at commit;
+    // concurrent reference acquisition either wins or finds the object missing.
+    const predicate = `space_id=?1 AND kind<>'backup' AND COALESCE(last_referenced_generation,0)<?2`;
+    await env.DB.batch([
+      env.DB.prepare(`INSERT OR IGNORE INTO r2_delete_queue(object_key,not_before,created_at)
+        SELECT object_key,?3,?3 FROM objects WHERE ${predicate} LIMIT 10000`).bind(space.id,floor,nowIso()),
+      env.DB.prepare(`DELETE FROM objects WHERE ${predicate} AND object_key IN
+        (SELECT object_key FROM r2_delete_queue WHERE not_before<=?3)`).bind(space.id,floor,nowIso()),
+      env.DB.prepare('UPDATE spaces SET gc_checked_at=?1 WHERE id=?2').bind(nowIso(),space.id),
+    ]);
     const result = await run(env.DB, `DELETE FROM published_rows WHERE space_id = ?1 AND generation < ?2`, space.id, floor);
     await run(env.DB, `DELETE FROM published_search WHERE space_id = ?1 AND CAST(generation AS INTEGER) < ?2`, space.id, floor);
     await run(env.DB, `DELETE FROM publications WHERE space_id = ?1 AND generation < ?2 AND status <> 'active'`, space.id, floor);
@@ -548,9 +597,13 @@ export async function cleanupPublications(env, retainGenerations = 3) {
       AND NOT EXISTS (SELECT 1 FROM vector_members m WHERE m.space_id = vector_sets.space_id AND m.generation = vector_sets.generation)`, space.id, vectorFloor);
     removedRows += Number(result?.meta?.changes || 0);
   }
-  const expired = await all(env.DB, 'SELECT * FROM multipart_uploads WHERE expires_at < ?1 LIMIT 40', nowIso());
+  const expired = await all(env.DB, 'SELECT * FROM multipart_uploads WHERE expires_at < ?1 LIMIT 2', nowIso());
   for (const record of expired) {
-    try { await env.OBJECTS.resumeMultipartUpload(record.object_key, record.r2_upload_id).abort(); } catch { /* already gone */ }
+    try { await env.OBJECTS.resumeMultipartUpload(record.object_key, record.r2_upload_id).abort(); } catch {
+      // Already completed/aborted sessions may reject abort. R2 also automatically
+      // aborts incomplete uploads after seven days; the physical key stays queued.
+    }
+    await queueObject(env,record.object_key);
     await run(env.DB, 'DELETE FROM multipart_uploads WHERE id = ?1', record.id);
   }
   await run(env.DB, 'DELETE FROM pairing_codes WHERE expires_at < ?1', nowIso());

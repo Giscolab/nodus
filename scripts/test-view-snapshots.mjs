@@ -52,6 +52,7 @@ class FakeStorage {
 globalThis.localStorage = new FakeStorage();
 
 const store = bundleOf('src/app/viewSnapshots.ts', 'viewSnapshots.cjs');
+const editorialPreferences = bundleOf('src/app/workspacePreferences.ts', 'workspacePreferences.cjs');
 // Bundled apart from the store on purpose: a second instance of the module shares
 // no memory with the first, so anything the two agree on came through the disk.
 const preferences = bundleOf('src/app/filterPreferences.ts', 'filterPreferences.cjs');
@@ -60,6 +61,17 @@ const { readingBlocks, topBlockIndex } = bundleOf('src/readingPlace.ts', 'readin
 const { groupParenthesizedCitations } = bundleOf('src/markdownCitationGroups.ts', 'markdownCitationGroups.cjs');
 
 test.after(async () => { await rm(bundleDir, { recursive: true, force: true }); });
+
+test('editorial preferences survive a fresh snapshot and remain scoped to user and vault', () => {
+  const scope = 'server:user-one:vault-editorial';
+  store.patchViewSnapshot(scope, 'workspace', { layout: 'navigator', catalogView: 'cards', contextOpen: true, focusMode: true, pinnedActionIds: ['read', 'note'] });
+  store.clearViewSnapshots();
+  assert.deepEqual(editorialPreferences.readWorkspacePreferences(scope), { layout: 'navigator', catalogView: 'cards', contextOpen: true, focusMode: true, pinnedActionIds: ['read', 'note'] });
+  assert.equal(store.readViewSnapshot(scope, 'workspace').catalogView, 'cards');
+  for (const other of ['server:user-two:vault-editorial','server:user-one:other-vault']) {
+    assert.deepEqual(editorialPreferences.readWorkspacePreferences(other), { layout: 'editorial', catalogView: 'list', contextOpen: false, focusMode: false, pinnedActionIds: [] });
+  }
+});
 
 const AUTHORS_CUT = { query: 'ricoeur', sortBy: 'ideas', synthFilter: 'with', savedOnly: true, filtersOpen: true };
 
@@ -535,9 +547,11 @@ test('a place in a report is a block, and it says which rendering it was counted
 
 test('Deep Research restores its gallery, the report it was left in and the place inside it', async () => {
   const view = await readSource('src/views/DeepResearchView.tsx');
-  for (const restored of ['search', 'readFilter', 'sortKey', 'viewMode']) {
+  for (const restored of ['search', 'sortKey', 'viewMode']) {
     assert.match(view, new RegExp(`useState[^\\n]*\\(\\) => snapshot\\?\\.${restored}`), `${restored} survives leaving the section`);
   }
+  // The read filter is a multi-select now; the snapshot keeps the tri-state form.
+  assert.match(view, /useState<ReadState\[\]>\(\(\) => readStatesFromFilter\(snapshot\?\.readFilter\)\)/, 'readFilter survives leaving the section');
   // A reader with no report in it would render the gallery anyway.
   assert.match(view, /snapshot\?\.surface === 'reader' && snapshot\.openReport \? 'reader' : 'gallery'/);
   // The gallery is the only source of a saved report, so the reopen waits for it

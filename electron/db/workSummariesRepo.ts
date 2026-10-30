@@ -1,7 +1,9 @@
+import { clearActiveEmbeddingFamilies } from './embeddingIndexesRepo';
 import type { ModelRef, WorkSummary } from '@shared/types';
 import { getDb } from './database';
 import { currentEmbeddingConfig, embeddingTextHash, encodeEmbedding } from './ideasRepo';
 import { scanSimilar } from './vectorScan';
+import { isEmbeddingGemma2, prepareEmbeddingGemma2Input } from '@shared/embeddingGemma2';
 
 interface WorkSummaryRow extends WorkSummary {
   model_json: string | null;
@@ -67,12 +69,23 @@ export function upsertWorkSummary(input: UpsertWorkSummaryInput): void {
 }
 
 export function getWorkSummary(nodusId: string): WorkSummary | null {
-  const row = getDb().prepare('SELECT * FROM work_summaries WHERE nodus_id = ?').get(nodusId) as WorkSummaryRow | undefined;
+  const row = getDb().prepare('SELECT * FROM embedding_read_work_summaries AS work_summaries WHERE nodus_id = ?').get(nodusId) as WorkSummaryRow | undefined;
   return row ? toSummary(row) : null;
 }
 
-export function updateWorkSummaryEmbedding(nodusId: string, summaryText: string, embedding: number[]): void {
+function summaryTitle(nodusId?: string): string | undefined {
+  return nodusId ? (getDb().prepare('SELECT title FROM works WHERE nodus_id=?').get(nodusId) as { title: string } | undefined)?.title : undefined;
+}
+function summaryVectorHash(text: string, nodusId?: string): string {
   const config = currentEmbeddingConfig();
+  return embeddingTextHash(config.provider === 'nodus' && isEmbeddingGemma2(config.model)
+    ? prepareEmbeddingGemma2Input(text, 'document', summaryTitle(nodusId)) : text);
+}
+export function updateWorkSummaryEmbedding(nodusId: string, summaryText: string, embedding: number[], title?: string): void {
+  const config = currentEmbeddingConfig();
+  const source = getDb().prepare('SELECT summary FROM work_summaries WHERE nodus_id=?').get(nodusId) as { summary: string } | undefined;
+  if (!source || source.summary !== summaryText) return;
+  if (config.provider === 'nodus' && isEmbeddingGemma2(config.model) && title !== summaryTitle(nodusId)) return;
   getDb()
     .prepare(
       `UPDATE work_summaries
@@ -89,14 +102,14 @@ export function updateWorkSummaryEmbedding(nodusId: string, summaryText: string,
       config.provider,
       config.model,
       embedding.length,
-      embeddingTextHash(summaryText),
+      summaryVectorHash(summaryText, nodusId),
       new Date().toISOString(),
       nodusId
     );
 }
 
 export function summaryNeedsEmbedding(
-  row: Pick<WorkSummaryRow, 'embedding' | 'embedding_provider' | 'embedding_model' | 'embedding_dim' | 'embedding_text_hash'>,
+  row: Pick<WorkSummaryRow, 'embedding' | 'embedding_provider' | 'embedding_model' | 'embedding_dim' | 'embedding_text_hash'> & { nodus_id?: string },
   summaryText: string
 ): boolean {
   if (!row.embedding) return true;
@@ -106,7 +119,7 @@ export function summaryNeedsEmbedding(
     row.embedding_provider !== config.provider ||
     row.embedding_model !== config.model ||
     row.embedding_dim !== dim ||
-    row.embedding_text_hash !== embeddingTextHash(summaryText)
+    row.embedding_text_hash !== summaryVectorHash(summaryText, row.nodus_id)
   );
 }
 
@@ -120,7 +133,7 @@ export function findSimilarWorks(
     .prepare(
       `SELECT * FROM (
          SELECT nodus_id, summary, vec_cosine(embedding, ?) AS similarity
-           FROM work_summaries
+           FROM embedding_read_work_summaries AS work_summaries
           WHERE embedding IS NOT NULL
             AND embedding_provider = ?
             AND embedding_model = ?
@@ -158,7 +171,7 @@ export async function findSimilarWorksPaged(
   const ranked = await scanSimilar<{ nodus_id: string; rid: number; similarity: number }>({
     table: 'work_summaries',
     sql: `SELECT nodus_id, rowid AS rid, vec_scan(embedding) AS similarity
-            FROM work_summaries
+            FROM embedding_read_work_summaries AS work_summaries
            WHERE rowid > ? AND rowid <= ?
              AND embedding IS NOT NULL
              AND embedding_provider = ?
@@ -189,21 +202,11 @@ export async function findSimilarWorksPaged(
 }
 
 export function clearAllWorkSummaryEmbeddings(): void {
-  getDb()
-    .prepare(
-      `UPDATE work_summaries
-          SET embedding = NULL,
-              embedding_provider = NULL,
-              embedding_model = NULL,
-              embedding_dim = NULL,
-              embedding_text_hash = NULL
-        WHERE embedding IS NOT NULL`
-    )
-    .run();
+  clearActiveEmbeddingFamilies(getDb(), ['work_summaries']);
 }
 
 export function allWorkSummaryRows(): WorkSummaryRow[] {
-  return getDb().prepare('SELECT * FROM work_summaries ORDER BY updated_at ASC').all() as WorkSummaryRow[];
+  return getDb().prepare('SELECT * FROM embedding_read_work_summaries AS work_summaries ORDER BY updated_at ASC').all() as WorkSummaryRow[];
 }
 
 export function pendingSummaryWorks(): { nodus_id: string; title: string }[] {

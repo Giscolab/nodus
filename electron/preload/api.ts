@@ -34,11 +34,21 @@ import { reactionIndexApi } from './reactionIndex';
 import { compassApi } from './compass';
 import { logsApi } from './logs';
 import { driftApi } from './drift';
+import { ttsApi } from './tts';
 
 // Tracks the Nodi chat stream currently in flight so `cancelNodiChat` can abort
 // it without the renderer having to juggle request ids. Only one chat stream
 // runs at a time (the composer is disabled while sending).
 let activeNodiChatRequestId: string | null = null;
+
+const editorFlushers = new Set<() => Promise<boolean>>();
+async function flushEditors(): Promise<boolean> {
+  const results = await Promise.allSettled([...editorFlushers].map(flush => flush()));
+  return results.every(result => result.status === 'fulfilled' && result.value);
+}
+ipcRenderer.on('editor:flush', (_event, requestId: string) => {
+  void flushEditors().then(saved => ipcRenderer.send('editor:flushed', requestId, saved));
+});
 
 const DEFAULT_OVERLAY_PLACEMENT: NodiOverlayPlacement = { x: 16, y: 16, horizontal: 'left', vertical: 'up' };
 
@@ -77,6 +87,7 @@ export const nodusApi: NodusApi = {
   ...browserApi,
   ...logsApi,
   ...driftApi,
+  ...ttsApi,
   ...radarApi,
   ...reactionIndexApi,
   ...compassApi,
@@ -94,6 +105,11 @@ export const nodusApi: NodusApi = {
   ...testimoniesApi,
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
+  updateAcademicLearning: (vaultId, patch) => ipcRenderer.invoke('learning:update', vaultId, patch),
+  getAcademicLearningWorkspace: () => ipcRenderer.invoke('learning:workspace'),
+  openAcademicLearningWorkspace: lessonId => ipcRenderer.invoke('learning:workspace:open', lessonId),
+  academicLearningWorkspaceReady: () => ipcRenderer.invoke('learning:workspace:ready'),
+  closeAcademicLearningWorkspace: discard => ipcRenderer.invoke('learning:workspace:close', discard),
   getAiConcurrencySnapshot: () => ipcRenderer.invoke('ai:concurrency:get'),
   onAiConcurrencySnapshot: (cb) => {
     const listener = (_e: unknown, snapshot: Parameters<typeof cb>[0]) => cb(snapshot);
@@ -289,7 +305,10 @@ export const nodusApi: NodusApi = {
   replicaDetach: (vaultId) => ipcRenderer.invoke('vaults:replicaDetach', vaultId),
   renameVault: (id, name) => ipcRenderer.invoke('vaults:rename', id, name),
   setVaultType: (id, type) => ipcRenderer.invoke('vaults:setType', id, type),
-  switchVault: (id, options) => ipcRenderer.invoke('vaults:switch', id, options),
+  onBeforeEditorLeave: callback => { editorFlushers.add(callback); return () => { editorFlushers.delete(callback); }; },
+  switchVault: async (id, options) => await flushEditors()
+    ? ipcRenderer.invoke('vaults:switch', id, options)
+    : { ok: false, message: 'No se han podido guardar los cambios.', copiedProviders: [] },
   duplicateVault: (id, name, options) => ipcRenderer.invoke('vaults:duplicate', id, name, options),
   deleteVault: (id, deleteFiles) => ipcRenderer.invoke('vaults:delete', id, deleteFiles).then(() => undefined),
   resetVault: (id) => ipcRenderer.invoke('vaults:reset', id),
@@ -304,6 +323,12 @@ export const nodusApi: NodusApi = {
   // Core: sync, backups, recovery. Regrouped here so the academic and study
   // bindings above form one range — they used to sit inside it.
   syncNow: (options) => ipcRenderer.invoke('sync:now', options),
+  getZoteroSyncStatus: () => ipcRenderer.invoke('sync:status'),
+  onZoteroSyncStatus: (cb) => {
+    const listener = (_e: unknown, status: Parameters<typeof cb>[0]) => cb(status);
+    ipcRenderer.on('sync:status', listener);
+    return () => ipcRenderer.removeListener('sync:status', listener);
+  },
   getSyncLog: () => ipcRenderer.invoke('sync:log'),
   hasSyncPassphrase: () => ipcRenderer.invoke('sync:hasPassphrase'),
   setSyncPassphrase: (passphrase: string) => ipcRenderer.invoke('sync:setPassphrase', passphrase),

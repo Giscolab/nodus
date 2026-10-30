@@ -1,21 +1,35 @@
+import { RESEARCH_QUEUE_TRANSLATIONS } from './i18n.researchQueue';
+import { EMBEDDING_INDEX_TRANSLATIONS } from './i18n.embeddingIndexes';
+import { RESEARCH_HARNESS_TRANSLATIONS } from './i18n.researchHarness';
+import { EMBEDDING_GEMMA2_TRANSLATIONS } from './i18n.embeddingGemma2';
+import { SIGN_TRANSLATIONS } from './i18n.sign';
+import { CHAT_ORGANIZATION_HELP_TRANSLATIONS } from './i18n.chatOrganizationHelp';
+import { RESEARCH_CHAT_SELECTION_TRANSLATIONS } from './i18n.researchChatSelection';
+import { ACADEMIC_INTERFACE_TRANSLATIONS } from './i18n.academicInterface';
+import { BACKUPS_TRANSLATIONS } from './i18n.backups';
+import { SCRIPTOR_AI_TRANSLATIONS } from './i18n.scriptorAi';
 import { RESEARCH_CHAT_HISTORY_TRANSLATIONS } from './i18n.researchChatHistory';
 import { RESEARCH_ACTIVITY_TRANSLATIONS } from './i18n.researchActivity';
 import { RESEARCH_NOTEBOOK_TRANSLATIONS } from './i18n.researchNotebooks';
 import { CALENDAR_SYNC_TRANSLATIONS } from './i18n.calendarSync';
+import { AGENT_RUNTIME_TRANSLATIONS } from './i18n.agentRuntimes';
 import { ACADEMIC_MANUAL_TRANSLATIONS } from './i18n.academicManual';
 import { STUDY_SOURCE_TRANSLATIONS } from './i18n.studySources';
 import { COMPLETE_GUIDE_TRANSLATIONS } from './i18n.completeGuide';
 import { STUDY_FOCUS_TRANSLATIONS } from './i18n.studyFocus';
 import { STUDY_NOTE_LINKS_TRANSLATIONS } from './i18n.studyNoteLinks';
+import { BOOKMARK_SORT_TRANSLATIONS } from './i18n.bookmarkSort';
 import { CONCILIUM_TRANSLATIONS } from './i18n.concilium';
 import { DRIFT_TRANSLATIONS } from './i18n.drift';
 import { RESEARCH_ATTACHMENT_TRANSLATIONS } from './i18n.researchAttachments';
+import { RESEARCH_VERIFICATION_TRANSLATIONS } from './i18n.researchVerification';
 import { VAULT_FILE_DROP_TRANSLATIONS } from './i18n.vaultFileDrop';
 import { DOCUMENT_SKILLS_TRANSLATIONS } from './i18n.documentSkills';
 import { RESEARCH_PROMPT_TRANSLATIONS } from './i18n.researchPrompts';
 import { RESEARCH_SOURCE_TRANSLATIONS } from './i18n.researchSources';
 import { RESEARCH_REASONING_TRANSLATIONS } from './i18n.researchReasoning';
 import { CHAT_SKILLS_TRANSLATIONS } from './i18n.chatSkills';
+import { NARRATION_TRANSLATIONS } from './i18n.narration';
 import { CAPABILITIES_TRANSLATIONS } from './i18n.capabilities';
 import { STELLAR_GRAPH_TRANSLATIONS } from './i18n.stellarGraph';
 import { PROTECT_TRANSLATIONS } from './i18n.protect';
@@ -66,11 +80,15 @@ import { SOURCE_CITATION_TRANSLATIONS } from './i18n.sourceCitation';
 import { DEEP_RESEARCH_APPROACH_TRANSLATIONS } from './i18n.deepResearchApproaches';
 import { DICTIONARY_TRANSLATIONS } from './i18n.dictionary';
 import { DEEP_RESEARCH_VERSION_TRANSLATIONS } from './i18n.deepResearchVersions';
+import { GALLERY_FILTER_TRANSLATIONS } from './i18n.galleryFilters';
 import { DOCUMENT_UNDERSTANDING_TRANSLATIONS } from './i18n.documentUnderstanding';
 import { STALE_MODEL_TRANSLATIONS } from './i18n.staleModels';
+import { SCHEME_DECLUTTER_TRANSLATIONS } from './i18n.schemeDeclutter';
+import { CHEMISTRY_STOCK_TRANSLATIONS } from './i18n.chemistryStock';
 import { DEEP_RESEARCH_QUALITY_TRANSLATIONS } from './i18n.deepResearchQuality';
 import { TEXT_PROVENANCE_TRANSLATIONS } from './i18n.textProvenance';
 import { MODEL_SETTINGS_TRANSLATIONS } from './i18n.modelSettings';
+import { SETTINGS_LAYOUT_TRANSLATIONS } from './i18n.settingsLayout';
 import { ADAPTIVE_CONCURRENCY_TRANSLATIONS } from './i18n.adaptiveConcurrency';
 import { DATABASE_DEEP_RESEARCH_TRANSLATIONS } from './i18n.databaseDeepResearch';
 import { ACADEMIC_TOUR_TRANSLATIONS } from './i18n.academicTour';
@@ -83,9 +101,12 @@ import { ACADEMIC_TOUR_TRANSLATIONS } from './i18n.academicTour';
 
 /** Traditional Chinese UI table. Keys are the Spanish source strings (see i18n.ts). */
 export const ZH_TW: Record<string, string> = {
+  ...EMBEDDING_INDEX_TRANSLATIONS["zh-TW"],
+  ...BACKUPS_TRANSLATIONS['zh-TW'],
   // First, so every entry below wins: the server's English-only keys.
   ...SERVER_ENGLISH_FALLBACKS['zh-TW'],
   ...CALENDAR_SYNC_TRANSLATIONS["zh-TW"],
+  ...AGENT_RUNTIME_TRANSLATIONS["zh-TW"],
   ...ACADEMIC_MANUAL_TRANSLATIONS["zh-TW"],
   // Nodus Tools catalogue
   "Navega por la web y guarda fuentes para tu investigación.": "瀏覽網頁並儲存研究資料。",
@@ -98,12 +119,15 @@ export const ZH_TW: Record<string, string> = {
   ...RESEARCH_ACTIVITY_TRANSLATIONS["zh-TW"],
   ...RESEARCH_CHAT_HISTORY_TRANSLATIONS["zh-TW"],
   ...RESEARCH_ATTACHMENT_TRANSLATIONS['zh-TW'],
+  ...RESEARCH_VERIFICATION_TRANSLATIONS['zh-TW'],
   ...VAULT_FILE_DROP_TRANSLATIONS['zh-TW'],
   ...RESEARCH_PROMPT_TRANSLATIONS['zh-TW'],
   ...RESEARCH_SOURCE_TRANSLATIONS["zh-TW"],
+  ...RESEARCH_HARNESS_TRANSLATIONS["zh-TW"],
   ...RESEARCH_REASONING_TRANSLATIONS["zh-TW"],
   ...RESEARCH_NOTEBOOK_TRANSLATIONS["zh-TW"],
   ...CHAT_SKILLS_TRANSLATIONS['zh-TW'],
+  ...NARRATION_TRANSLATIONS['zh-TW'],
   ...CAPABILITIES_TRANSLATIONS['zh-TW'],
   ...DOCUMENT_SKILLS_TRANSLATIONS['zh-TW'],
   ...STELLAR_GRAPH_TRANSLATIONS["zh-TW"],
@@ -111,6 +135,8 @@ export const ZH_TW: Record<string, string> = {
   ...ADAPTIVE_CONCURRENCY_TRANSLATIONS['zh-TW'],
   ...DATABASE_DEEP_RESEARCH_TRANSLATIONS['zh-TW'],
   ...MODEL_SETTINGS_TRANSLATIONS['zh-TW'],
+  ...SETTINGS_LAYOUT_TRANSLATIONS['zh-TW'],
+  ...EMBEDDING_GEMMA2_TRANSLATIONS['zh-TW'],
   ...DICTIONARY_TRANSLATIONS['zh-TW'],
   ...PAGE_TRANSLATIONS['zh-TW'],
   ...DATABASE_PROPERTY_TRANSLATIONS['zh-TW'],
@@ -123,8 +149,11 @@ export const ZH_TW: Record<string, string> = {
   ...SOURCE_CITATION_TRANSLATIONS['zh-TW'],
   ...DEEP_RESEARCH_APPROACH_TRANSLATIONS['zh-TW'],
   ...DEEP_RESEARCH_VERSION_TRANSLATIONS['zh-TW'],
+  ...GALLERY_FILTER_TRANSLATIONS['zh-TW'],
   ...DOCUMENT_UNDERSTANDING_TRANSLATIONS['zh-TW'],
   ...STALE_MODEL_TRANSLATIONS['zh-TW'],
+  ...SCHEME_DECLUTTER_TRANSLATIONS['zh-TW'],
+  ...CHEMISTRY_STOCK_TRANSLATIONS['zh-TW'],
   ...DEEP_RESEARCH_QUALITY_TRANSLATIONS['zh-TW'],
   ...TEXT_PROVENANCE_TRANSLATIONS['zh-TW'],
   ...LIBRARY_BIBLIOGRAPHY_TRANSLATIONS['zh-TW'],
@@ -158,6 +187,8 @@ export const ZH_TW: Record<string, string> = {
   ...COMPLETE_GUIDE_TRANSLATIONS["zh-TW"],
   ...STUDY_FOCUS_TRANSLATIONS["zh-TW"],
   ...STUDY_NOTE_LINKS_TRANSLATIONS["zh-TW"],
+  ...BOOKMARK_SORT_TRANSLATIONS["zh-TW"],
+  ...SCRIPTOR_AI_TRANSLATIONS["zh-TW"],
   ...STUDY_IMPROVE_TRANSLATIONS['zh-TW'],
   ...WORKSPACE_TRANSLATIONS['zh-TW'],
   ...AI_OCR_TRANSLATIONS['zh-TW'],
@@ -1210,7 +1241,7 @@ export const ZH_TW: Record<string, string> = {
   "Nodus Compass": "Nodus Compass",
   "Nodus Tools": "Nodus Tools",
   "Herramientas prácticas y local-first para convertir archivos y procesar documentos, integradas en Nodus.": "實用的本地優先工具，用於轉換檔案和處理文件，內置於Nodus。",
-  "Nodus PDF Presenter": "Nodus PDF Presenter",
+  'Nodus Presenter': 'Nodus Presenter',
   "Presentar archivos PDF y presentaciones externas con vista del presentador, control remoto desde el móvil, notas del orador y herramientas de anotación en directo.": "演示PDF檔案和外部製作的簡報，支援演講者檢視、手機遙控、演講者備註和即時註釋工具。",
   "Nodus OCR Workspace": "Nodus OCR Workspace",
   "OCR asistido por IA para PDF escaneados e imágenes, con revisión página a página, limpieza de texto, reprocesamiento e integración directa con las bóvedas de Nodus.": "面向掃描版PDF和影像的AI輔助OCR，支援逐頁審閱、文本清理、重新處理，並與Nodus知識庫直接整合。",
@@ -2578,8 +2609,8 @@ export const ZH_TW: Record<string, string> = {
   "Buscar dentro del documento": "在文件內搜尋",
   "Preparando el índice de búsqueda…": "正在準備搜尋索引…",
   "Este archivo no contiene una capa de texto que Nodus pueda buscar.": "此檔案不含 Nodus 可搜尋的文本層。",
-  "Este PDF no contiene texto buscable. Abre el Markdown limpio para consultar el OCR.": "此 PDF 不含可搜尋文本。開啟乾淨的 Markdown 以檢視 OCR 文本。",
-  "Las imágenes no contienen una capa textual. Usa el Markdown limpio para buscar el OCR.": "影像不含文本層。使用乾淨的 Markdown 搜尋 OCR 文本。",
+  "Este PDF no contiene texto buscable. Abre el Markdown para consultar el OCR.": "此 PDF 不含可搜尋文本。開啟 Markdown 以檢視 OCR 文本。",
+  "Las imágenes no contienen una capa textual. Usa el Markdown para buscar el OCR.": "影像不含文本層。使用 Markdown 搜尋 OCR 文本。",
   "Coincidencia {current} de {total}": "第 {current} 個，共 {total} 個",
   "No se encontró ese texto": "未找到該文本",
   "Ir a la coincidencia anterior": "轉到上一個匹配項",
@@ -5032,6 +5063,7 @@ export const ZH_TW: Record<string, string> = {
   "Cambiar modelo": "更改模型",
   "Si cambias de modelo de embeddings, los vectores anteriores no servirán con el nuevo modelo y tendrás que reindexar.": "如果更換嵌入模型，原有向量將無法與新模型配合使用，你必須重新建立索引。",
   "Embeddings multilingües de alta calidad para corpus amplios.": "面向大型語料庫的高質量多語言嵌入。",
+  "Embeddings multilingües de Microsoft con instrucción de búsqueda. La mejor puntuación MTEB multilingüe de los modelos locales; reserva unos 6,5 GB de memoria de GPU, así que conviene un equipo con 16 GB o más.": "微軟的多語言嵌入，附帶檢索指令。在本機模型中多語言 MTEB 分數最高；會佔用約 6.5 GB 的 GPU 記憶體，建議使用 16 GB 或以上記憶體的電腦。",
   "Embeddings multilingües con contexto largo y buen equilibrio entre precisión y memoria.": "長上下文多語言嵌入，在精度與記憶體佔用之間取得良好平衡。",
   "Opción ligera y rápida para equipos con menos memoria.": "適合記憶體較少電腦的輕量快速選項。",
   "Modelo visual muy ligero para conversación, resúmenes e ideas.": "非常輕量的視覺模型，適用於對話、摘要和觀點。",
@@ -7250,7 +7282,7 @@ export const ZH_TW: Record<string, string> = {
   "Activar Global": "啟用全域性",
   "Configura las copias de seguridad para activar Global.": "配置備份以啟用全域性。",
   "Biblioteca global activada.": "全域性文獻庫已啟用。",
-  "Global reúne originales y Markdown limpio para todos tus vaults.": "全域性彙集所有知識庫的原始檔案與乾淨的 Markdown。",
+  "Global reúne originales y Markdown para todos tus vaults.": "全域性彙集所有知識庫的原始檔案與 Markdown。",
   "Este vault conserva colecciones, scans, resúmenes, embeddings y análisis existentes.": "此知識庫保留現有的合集、掃描件、摘要、嵌入和分析。",
   "Activa la Biblioteca global cuando quieras; este vault no cambiará.": "你可以隨時啟用全域性文獻庫；此知識庫不會改變。",
   "Light": "淺色",
@@ -7874,4 +7906,55 @@ export const ZH_TW: Record<string, string> = {
   "Sent": "已傳送",
   ...CONCILIUM_TRANSLATIONS['zh-TW'],
   ...DRIFT_TRANSLATIONS['zh-TW'],
+  // PDF Presenter — editorial workspace
+  "Organiza tus diapositivas. Comparte tus ideas.": "整理投影片，分享您的想法。",
+  "Buscar por número o notas…": "按編號或備註搜尋…",
+
+  // PDF Presenter folder navigation.
+  "Editar carpeta": "編輯資料夾",
+  "Carpeta principal": "上層資料夾",
+  "Biblioteca principal": "主資料庫",
+  "Color personalizado": "自訂顏色",
+  "Ruta de carpetas": "資料夾路徑",
+  "Opciones de la carpeta {name}": "資料夾 {name} 的選項",
+  "No se pudo eliminar la carpeta.": "無法刪除資料夾。",
+  "Se eliminará la carpeta «{name}» y sus subcarpetas ({n}).": "將刪除資料夾「{name}」及其子資料夾（{n} 個）。",
+  "¿Qué quieres hacer con sus {n} presentaciones?": "如何處理其中的 {n} 份簡報？",
+  "Conservar presentaciones": "保留簡報",
+  "Moverlas a la biblioteca principal, con sus notas y vídeos.": "將簡報連同備註和影片移至主資料庫。",
+  "Eliminar también las presentaciones": "同時刪除簡報",
+  "Se eliminarán sus copias de la biblioteca. Los archivos originales se conservarán.": "將刪除資料庫中的副本，保留原始檔案。",
+  "Eliminar carpeta y presentaciones": "刪除資料夾和簡報",
+  "Ciencia": "科學",
+  "Imagen": "影像",
+  "Arte": "藝術",
+  "Favoritos": "收藏",
+  "Inicio": "首頁",
+  "Conexión móvil": "行動連線",
+  "Navegador web": "網頁瀏覽器",
+  "App iPhone–iPad": "iPhone–iPad App",
+  "Escanea desde Nodus Presenter. Mantén Wi-Fi encendido en el Mac y el móvil; no necesitas el router de la sala.": "使用 Nodus Presenter 掃描。請保持 Mac 和行動裝置的 Wi-Fi 開啟；無需場地路由器。",
+  "El enlace nativo no está disponible. Requiere macOS y permiso de red local.": "原生連線無法使用。需要 macOS 和區域網路權限。",
+  "Escanea desde Nodus Presenter. Conecta el ordenador y el móvil a la misma red local.": "使用 Nodus Presenter 掃描。請將電腦和手機連線至同一個區域網路。",
+  "El enlace de la app no está disponible. Comprueba la conexión de red e inicia de nuevo la presentación.": "App 連線無法使用。請檢查網路連線並重新開始簡報。",
+  // Live local dictation in Scriptor.
+  "No se pudo iniciar el micrófono.": "無法啟動麥克風。",
+  "Dictado pausado para terminar el audio pendiente. Reanuda cuando esté listo.": "聽寫已暫停，以完成待處理的音訊。處理完成後可繼續。",
+  "Preparando dictado…": "正在準備聽寫…",
+  "Cancelar dictado": "取消聽寫",
+  "Dictado en directo · Local": "即時聽寫 · 本機",
+  "Escuchando…": "正在聆聽…",
+  "El texto se inserta automáticamente en el cursor.": "文字將自動插入游標位置。",
+  "Opciones de dictado": "聽寫選項",
+  "Descarga un modelo local de transcripción en Ajustes → Modelos IA para dictar.": "請在設定 → AI 模型中下載本機轉錄模型以使用聽寫。",
+  "Audio pendiente": "待處理音訊",
+  "Modelo local": "本機模型",
+  "Detener dictado": "停止聽寫",
+  ...ACADEMIC_INTERFACE_TRANSLATIONS["zh-TW"],
+  ...CHAT_ORGANIZATION_HELP_TRANSLATIONS["zh-TW"],
+  ...RESEARCH_CHAT_SELECTION_TRANSLATIONS["zh-TW"],
 };
+
+Object.assign(ZH_TW, SIGN_TRANSLATIONS['zh-TW']);
+
+Object.assign(ZH_TW, RESEARCH_QUEUE_TRANSLATIONS['zh-TW']);

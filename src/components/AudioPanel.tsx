@@ -2,35 +2,34 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AudioClip,
   AudioEntityKind,
-  AudioProvider,
   AudioSegment,
   AudioSegmentRequest,
   StudyAudioBookmark,
   StudyAudioPlaylistItem,
   StudyPronunciationEntry,
 } from '@shared/types';
-import { findVoice, getEngine } from '../lib/audio';
-import { synthesizeSegment } from '../lib/audio/synth';
+import { refreshTtsStatus, ttsReady } from '../lib/narration/ttsClient';
+import { startNarration } from '../lib/narration/narrate';
+import { clipTracks } from '../lib/narration/clipTracks';
 import {
   audioGenerationJobKey,
   cancelAudioGeneration,
   clearBackgroundJob,
-  startAudioGeneration,
   subscribeBackgroundJob,
   type AudioGenerationProgress,
   type AudioGenerationRequest,
   type AudioGenerationResult,
 } from '../backgroundJobs';
 import { useAudioPlayer, type PlayerTrack } from './AudioPlayer';
+import { HoverLabelButton, Icon, ModalBackdrop } from './ui';
 import { localizeRuntimeError } from '@shared/uiLanguage';
 import { getActiveLang, t, tx } from '../i18n';
 
 /**
- * Reusable narration panel for a Deep Research report or an immersion. It asks
- * the main process for the speakable segments (sections / stages), synthesises
- * each one with the active voice provider, and hands the WAV bytes back to be
- * persisted. Playback is delegated to the app-wide player (the bottom strip), so
- * there is a single audio stream across the whole app.
+ * Narration panel for Study documents and transcripts. It asks the main process for the
+ * speakable segments, narrates each with Ming (fragments play as they are generated) and
+ * the main process saves every segment as a clip. Playback goes through the app-wide
+ * player, controlled from the header's sound button.
  */
 interface RunProgress {
   done: number;
@@ -43,21 +42,24 @@ export function AudioPanel({
   entityKind,
   entityId,
   compact,
+  toolbar = false,
   sourceMarkdown,
   selectionText,
   cursorOffset,
   title,
   subjectId,
-  localOnly = false,
 }: {
   entityKind: AudioEntityKind;
   entityId: string;
   compact?: boolean;
+  /** Show a fixed reader action; narration controls open only on click. */
+  toolbar?: boolean;
   sourceMarkdown?: string;
   selectionText?: string;
   cursorOffset?: number;
   title?: string;
   subjectId?: string | null;
+  /** Kept for callers from before Ming: every narration is local now. */
   localOnly?: boolean;
 }) {
   const player = useAudioPlayer();
@@ -72,6 +74,7 @@ export function AudioPanel({
   const [playlist, setPlaylist] = useState<StudyAudioPlaylistItem[]>([]);
   const [dictionaryDraft, setDictionaryDraft] = useState({ written: '', spoken: '' });
   const [showStudyTools, setShowStudyTools] = useState(false);
+  const [open, setOpen] = useState(false);
   const mounted = useRef(true);
 
   const generating = run != null;
@@ -101,21 +104,11 @@ export function AudioPanel({
     if (mounted.current) { setBookmarks(nextBookmarks); setPronunciations(nextPronunciations); setPlaylist(nextPlaylist); }
   };
 
-  const checkVoice = async (): Promise<{ provider: AudioProvider; voiceId: string } | null> => {
-    const settings = await window.nodus.getSettings();
-    const provider = settings.audioProvider ?? 'piper';
-    if (localOnly && provider === 'hume') {
-      if (mounted.current) setVoiceReady(false);
-      return null;
-    }
-    const chosen = settings.audioVoice;
-    if (!chosen) {
-      if (mounted.current) setVoiceReady(false);
-      return null;
-    }
-    const ready = (await getEngine(provider).ready()).has(chosen);
+  const checkVoice = async (): Promise<boolean> => {
+    const status = await refreshTtsStatus().catch(() => null);
+    const ready = ttsReady(status);
     if (mounted.current) setVoiceReady(ready);
-    return ready ? { provider, voiceId: chosen } : null;
+    return ready;
   };
 
   useEffect(() => {
@@ -160,34 +153,24 @@ export function AudioPanel({
   }, [entityKind, entityId, segmentRequest]);
 
   const totalDuration = useMemo(() => clips.reduce((acc, c) => acc + c.durationSec, 0), [clips]);
-  const playable = useMemo<PlayerTrack[]>(
-    () => clips.filter((c) => !c.missing).map((c) => ({ id: c.id, label: c.segmentLabel })),
-    [clips]
-  );
+  const playable = useMemo<PlayerTrack[]>(() => clipTracks(clips, title || t('Narración'), segments), [clips, title, segments]);
+  const narrationSource = useMemo(() => ({ key: `${entityKind}:${entityId}`, title: title || t('Narración') }), [entityKind, entityId, title]);
 
   const generate = async () => {
     setError(null);
-    const chosen = await checkVoice();
-    if (!chosen) {
-      setError(localOnly ? t('La lectura de estudio requiere una voz local de Piper o Kokoro.') : t('Elige y prepara una voz en Ajustes → IA → Audio y voz.'));
+    if (!(await checkVoice())) {
+      setError(t('Descarga el motor de voz y un modelo en Ajustes → Modelos → Voz y narración.'));
       return;
     }
-    // Local voices carry static metadata; cloud (Hume) voices are dynamic, so the
-    // language is best-effort and defaults to empty.
-    const language = findVoice(chosen.provider, chosen.voiceId)?.language ?? '';
-    player.stop();
-    // Hand the loop to the module-scope job store; the subscription above drives
-    // the progress bar and clip list. Segment fetching, clip clearing and errors
-    // (including "no narratable text") are reported through the job.
-    startAudioGeneration({
-      entityKind,
-      entityId,
-      provider: chosen.provider,
-      voiceId: chosen.voiceId,
-      language,
+    // Hand the loop to the module-scope job store; the subscription above drives the
+    // progress bar and clip list, and the player starts as soon as fragments arrive.
+    startNarration(player, {
+      kind: entityKind,
+      id: entityId,
+      title: title ?? '',
       segmentRequest,
       labels: { preparing: t('Preparando…'), noText: t('No hay texto narrable en este contenido.') },
-    }, synthesizeSegment);
+    }, narrationSource);
   };
 
   const cancel = () => {
@@ -196,7 +179,7 @@ export function AudioPanel({
 
   const playFrom = (clip: AudioClip) => {
     const idx = playable.findIndex((tk) => tk.id === clip.id);
-    if (idx >= 0) player.play(playable, idx);
+    if (idx >= 0) player.play(playable, idx, narrationSource);
   };
 
   const deleteClip = async (id: string) => {
@@ -216,7 +199,7 @@ export function AudioPanel({
   const pct = run && run.total > 0 ? Math.round((run.done / run.total) * 100) : 0;
   const segmentText = new Map(segments.map((segment) => [segment.index, segment.text]));
 
-  return (
+  const panel = (
     <div className={`rounded-lg border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/40 ${compact ? 'p-3' : 'p-4'}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm font-medium text-neutral-200">
@@ -237,7 +220,7 @@ export function AudioPanel({
           {study && <button data-testid="study-audio-tools" className={`btn btn-ghost h-8 px-2 text-xs ${showStudyTools ? 'bg-teal-100 text-teal-700 dark:bg-teal-950 dark:text-teal-300' : ''}`} onClick={() => setShowStudyTools((value) => !value)}>{t('Pronunciación y lista')}</button>}
           {hasClips && !generating && (
             <>
-              <button className="btn btn-ghost border border-neutral-700 text-xs" onClick={() => player.play(playable, 0)} disabled={playable.length === 0}>
+              <button className="btn btn-ghost border border-neutral-700 text-xs" onClick={() => player.play(playable, 0, narrationSource)} disabled={playable.length === 0}>
                 ▶ {t('Reproducir todo')}
               </button>
               <button className="btn btn-ghost text-xs text-red-400" onClick={() => void deleteAll()}>
@@ -264,7 +247,7 @@ export function AudioPanel({
 
       {voiceReady === false && !generating && (
         <div className="mt-2 text-xs text-amber-400/90">
-          {localOnly ? t('Elige una voz local de Piper o Kokoro en Ajustes → IA → Audio y voz.') : t('Elige y prepara una voz en Ajustes → IA → Audio y voz para poder narrar.')}
+          {t('Descarga el motor de voz y un modelo en Ajustes → Modelos → Voz y narración para poder narrar.')}
         </div>
       )}
 
@@ -290,7 +273,7 @@ export function AudioPanel({
         </div>
       )}
 
-      {error && <div className="mt-2 text-xs text-red-400">{error}</div>}
+      {error && <div role="alert" className="mt-2 text-xs text-red-400">{error}</div>}
 
       {anyMissing && !generating && (
         <div className="mt-2 text-[11px] text-neutral-500">
@@ -353,6 +336,44 @@ export function AudioPanel({
       )}
     </div>
   );
+
+  if (!toolbar) return panel;
+
+  return <>
+    <HoverLabelButton
+      icon={generating ? 'sync' : 'audio'}
+      label={generating || hasClips ? t('Audio') : t('Generar audio')}
+      iconOnly
+      spinning={generating}
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      data-testid="deep-research-audio-toggle"
+      className={`btn-ghost h-9 min-h-9 border ${generating || hasClips ? 'border-indigo-700/60 text-indigo-200' : 'border-neutral-700'}`}
+      onClick={() => {
+        setOpen(true);
+        if (!hasClips && !generating) void generate();
+      }}
+    />
+    {open && <ModalBackdrop onClose={() => setOpen(false)}>
+      <section
+        className="card-modal flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('Audio')}
+        data-testid="deep-research-audio-dialog"
+      >
+        <header className="flex items-center gap-2 border-b border-neutral-200 px-5 py-3 dark:border-neutral-800">
+          <Icon name="audio" className="text-indigo-500 dark:text-indigo-300" />
+          <h2 className="text-sm font-semibold">{t('Audio')}</h2>
+          <div className="flex-1" />
+          <button type="button" autoFocus className="btn btn-ghost !p-2" onClick={() => setOpen(false)} aria-label={t('Cerrar')} title={t('Cerrar')}>
+            <Icon name="x" size={15} />
+          </button>
+        </header>
+        <div className="min-h-0 overflow-y-auto p-5">{panel}</div>
+      </section>
+    </ModalBackdrop>}
+  </>;
 }
 
 function formatDuration(seconds: number): string {

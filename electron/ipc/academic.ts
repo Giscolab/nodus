@@ -1,9 +1,12 @@
+import { exportAcademicDocument, inspectAcademicDocument } from '../export/academicExport';
 import * as preparationExperience from '../ai/researchPreparationExperience';
 import { onDocumentaryPreparationChanged } from '../ai/documentaryPreparationEvents';
 import { manualIndexStatus, scheduleManualIndex } from '../ai/manualIdeaIndex';
-import { embed as embedResearchQuery } from '../ai/aiClient';
+import { embedQuery as embedResearchQuery } from '../ai/aiClient';
 import { assertAcademicAutomation } from '../ai/academicMode';
+import * as embeddingIndexes from '../ai/embeddingIndexes';
 import { registerResearchAttachmentIpc } from './researchAttachments';
+import { registerResearchHarnessIpc } from './researchHarness';
 import { dialogTitle } from '../dialogTitles';
 import { getResearchSystemPrompts, saveResearchSystemPrompt, selectResearchSystemPrompt, deleteResearchSystemPrompt } from '../db/researchSystemPromptsRepo';
 import { mergeHybridResults, searchSnippet } from '@shared/hybridSearch';
@@ -145,13 +148,12 @@ import type {
   DictionaryEvidenceRef,
   DictionaryEvidenceRequest,
   DictionaryGenerationRequest,
-  DictionaryProgress,
   DictionaryListRequest,
   DictionaryRelationType,
 } from '@shared/dictionary';
 import { immersionAnnotationDocumentId } from '@shared/readerAnnotations';
 import { applyDecorativeImageOption, invalidateDecorativeImageGeneration } from '../ai/decorativeImages';
-import { DictionaryGenerationQueue } from '../ai/dictionaryGenerationQueue';
+import { dictionaryGenerationJobs } from '../ai/dictionaryGenerationLane';
 import * as zotero from '../zotero/zoteroClient';
 import * as dedupe from '../db/dedupeRepo';
 import * as ideaDedupe from '../db/ideaDedupeRepo';
@@ -190,6 +192,7 @@ import { reorderNotesByAI } from '../ai/notesOrder';
 import { suggestFolderIdeas } from '../ai/folderIdeaSuggestions';
 import { verifyCitations, previewCitation } from '../citations/verifyCitations';
 import { getSearchResultDetail, globalSearch } from '../db/searchRepo';
+import { listEditorReferences } from '../db/editorReferencesRepo';
 import { semanticSearch, findSimilarToIdea } from '../ai/semanticSearch';
 import { listSavedSearches, saveSearch, deleteSavedSearch } from '../db/savedSearchesRepo';
 import { getCorpusHealth } from '../db/corpusHealthRepo';
@@ -288,6 +291,8 @@ import { exportImmersionSessionPdf } from '../export/immersionExport';
 import { generateProjectSuggestions } from '../ai/projectInsertion';
 import { exportProject, exportProjectChapter } from '../export/projectExport';
 import path from 'node:path';
+import { tempFileFor } from '../util/tempFileName';
+import { openDocumentPath } from '../util/openDocument';
 import fs from 'node:fs';
 import os from 'node:os';
 import AdmZip from 'adm-zip';
@@ -315,7 +320,7 @@ import type { StudyNoteLinkFilter, StudyNoteLinkInput } from '@shared/studyNoteL
 import { getDb, withVaultDatabase } from '../db/database';
 import { deleteWorks, worksRunningNow } from '../db/workDeletion';
 import { removeGlobalLibraryLinksForWorks } from '../library/libraryService';
-import { getActiveVault, withOwningVault } from '../vaults/vaultRegistry';
+import { getActiveVault, getVault, withOwningVault } from '../vaults/vaultRegistry';
 import { completeGuideOrganization, listCompleteGuideCatalog, previewCompleteGuide } from '../ai/completeGuide/sources';
 import type { CompleteGuidePreviewRequest } from '@shared/completeGuide/preview';
 import { getCompleteGuideEvidence } from '../ai/completeGuide/evidence';
@@ -399,26 +404,6 @@ function announceDictionary(entryId: string | null): void {
   }
 }
 
-function announceDictionaryProgress(progress: DictionaryProgress): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
-      win.webContents.send('dictionary:progress', localizedForUi(progress));
-      if (progress.phase === 'failed' && isAiModelRequiredError(progress.error)) {
-        win.webContents.send('ai:modelRequired');
-      }
-    }
-  }
-}
-
-const dictionaryGenerationJobs = new DictionaryGenerationQueue(
-  async (request, report) => {
-    const version = await generateDictionaryEntry(request, report);
-    announceDictionary(request.entryId);
-    return version;
-  },
-  announceDictionaryProgress,
-);
-
 function announceWritingDraftAnnotations(draftId: string | null): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
@@ -465,6 +450,7 @@ function pageCapableLibraryCopy(nodusId: string): OpenEvidenceAtPageResult['loca
 
 let releasePreparationProgress: (() => void) | null = null;
 export function registerAcademicIpc(context: IpcContext): void {
+  registerResearchHarnessIpc(context);
   releasePreparationProgress?.();
   releasePreparationProgress = onDocumentaryPreparationChanged(() => {
     const progress = preparationExperience.getResearchPreparationProgress();
@@ -699,11 +685,13 @@ export function registerAcademicIpc(context: IpcContext): void {
     }
     return all.length;
   });
-  h('works:meta', async (_e, nodusId: string) => {
+  h('works:meta', async (_e, nodusId: string, options?: { timeoutMs?: number }) => {
     const w = works.getWork(nodusId);
     if (!w) return null;
     const { zoteroUserId } = getSettings();
-    const meta = await zotero.getItemMeta(zoteroUserId, w.zotero_key).catch(() => null);
+    const timeoutMs = Number(options?.timeoutMs);
+    const signal = Number.isFinite(timeoutMs) ? AbortSignal.timeout(Math.max(100, Math.min(10_000, Math.trunc(timeoutMs)))) : undefined;
+    const meta = await zotero.getItemMeta(zoteroUserId, w.zotero_key, signal).catch(() => null);
     if (!meta) return null;
     return meta;
   });
@@ -742,14 +730,14 @@ export function registerAcademicIpc(context: IpcContext): void {
     const work = works.getWork(nodusId);
     if (!work) return;
     works.setSummaryPending(nodusId);
-    scanQueue.enqueue(nodusId, work.title, 'summary', model);
+    scanQueue.enqueue(nodusId, work.title, 'summary', model, { refresh: work.summary_status === 'done' });
   });
   h('works:summarizeBulk', async (_e, nodusIds: string[], model?: ModelRef | null) => {
     for (const nodusId of nodusIds) {
       const work = works.getWork(nodusId);
       if (!work) continue;
       works.setSummaryPending(nodusId);
-      scanQueue.enqueue(nodusId, work.title, 'summary', model);
+      scanQueue.enqueue(nodusId, work.title, 'summary', model, { refresh: work.summary_status === 'done' });
     }
   });
   h('works:summarizeAll', async (_e, model?: ModelRef | null) => {
@@ -825,7 +813,7 @@ export function registerAcademicIpc(context: IpcContext): void {
   h('libraryReader:openOriginal', async (_e, nodusId: string) => {
     const originalPath = libraryReader.libraryReaderOriginalPath(nodusId);
     if (!originalPath) return false;
-    return (await shell.openPath(originalPath)) === '';
+    return (await openDocumentPath(originalPath)) === '';
   });
   h('libraryReader:annotations:list', async (_e, nodusId: string) =>
     libraryReader.listLibraryReaderAnnotations(nodusId)
@@ -1475,7 +1463,7 @@ export function registerAcademicIpc(context: IpcContext): void {
       filters: [{ name: 'Markdown', extensions: ['md'] }],
     });
     if (picked.canceled || !picked.filePath) return null;
-    fs.writeFileSync(picked.filePath, studyAssessments.renderStudyAssessmentMarkdown(assessment, Boolean(includeAnswers)), 'utf8');
+    fs.writeFileSync(picked.filePath, studyAssessments.renderStudyAssessmentMarkdown(assessment, Boolean(includeAnswers), getSettings().uiLanguage), 'utf8');
     return { path: picked.filePath };
   });
   h('study:grading:rubrics:list', async (_e, includeArchived?: boolean) => studyGrading.listStudyRubrics(includeArchived));
@@ -1529,7 +1517,7 @@ export function registerAcademicIpc(context: IpcContext): void {
       fs.writeFileSync(picked.filePath, ics, 'utf8');
       return { path: picked.filePath };
     }
-    const filePath = path.join(os.tmpdir(), `nodus-${event.id}.ics`);
+    const filePath = tempFileFor(os.tmpdir(), 'nodus-', event.id, '.ics');
     fs.writeFileSync(filePath, ics, 'utf8');
     const error = await shell.openPath(filePath);
     if (error) throw new Error(error);
@@ -1745,18 +1733,26 @@ export function registerAcademicIpc(context: IpcContext): void {
     const controller = new AbortController();
     chatAborters.set(requestId, controller);
     const unregisterNotebook = request.selection.notebookId ? researchNotebooks.registerNotebookRun(request.selection.notebookId, controller) : () => {};
+    // Timeline of one answer (request, first and last streamed text, done), for perf diagnosis.
+    const t0 = Date.now();
+    let firstDelta = 0, lastDelta = 0, chars = 0;
     try {
       return await streamResearchChat(
         request,
         (delta, kind) => {
+          const now = Date.now();
+          if (kind !== 'replace') { if (!firstDelta) firstDelta = now; lastDelta = now; chars += delta.length; }
           const channel = kind === 'reasoning' ? 'research:chatStream:reasoning' : kind === 'replace' ? 'research:chatStream:replace' : 'research:chatStream:delta';
           e.sender.send(channel, requestId, delta);
         },
         controller.signal,
         result => { if (!e.sender.isDestroyed()) e.sender.send('research:chatStream:concilium', requestId, result); },
-        activity => { if (!e.sender.isDestroyed()) e.sender.send('research:chatStream:activity', requestId, activity); }
+        activity => { if (!e.sender.isDestroyed()) e.sender.send('research:chatStream:activity', requestId, activity); },
+        run => { if (!e.sender.isDestroyed()) e.sender.send('research:chatStream:run', requestId, run); }
       );
     } finally {
+      const s = (t: number) => (t ? ((t - t0) / 1000).toFixed(1) : '-');
+      console.info(`${new Date().toISOString()} [chatTimeline] first text ${s(firstDelta)}s · last text ${s(lastDelta)}s · done ${s(Date.now())}s · streamed ${chars} chars`);
       chatAborters.delete(requestId);
       unregisterNotebook();
     }
@@ -1892,8 +1888,13 @@ export function registerAcademicIpc(context: IpcContext): void {
       _e,
       id: string,
       messages: ChatMessageRecord[],
-      meta?: { model?: ModelRef | null; selection?: ResearchContextSelection | null }
-    ) => chat.saveMessages(id, messages, meta)
+      meta?: { model?: ModelRef | null; selection?: ResearchContextSelection | null; vaultId?: string }
+    ) => {
+      if (!meta?.vaultId) return chat.saveMessages(id, messages, meta);
+      const vault = getVault(meta.vaultId);
+      if (!vault || vault.type !== 'academic') throw new Error('invalid_academic_chat_vault');
+      return withOwningVault(vault.id, () => withVaultDatabase(vault.id, () => chat.saveMessages(id, messages, meta)));
+    }
   );
   h('chat:generateTitle', async (_e, id: string, model?: ModelRef | null) => {
     const conversation = chat.getConversation(id);
@@ -1977,6 +1978,7 @@ export function registerAcademicIpc(context: IpcContext): void {
   h('notes:folders:suggestIdeas', async (_e, folderId: string) => suggestFolderIdeas(folderId));
 
   // workspace — el editor completo sobre una nota, y sus enlaces con la biblioteca
+  h('workspace:academic:export', async (_e, input) => exportAcademicDocument(input));
   h('workspace:editor:data', async (_e, noteId: string) => workspace.getWorkspaceNoteEditorData(noteId));
   h('workspace:editor:update', async (_e, noteId: string, input: StudyDocUpdateInput) =>
     workspace.updateWorkspaceNote(noteId, input));
@@ -2014,6 +2016,8 @@ export function registerAcademicIpc(context: IpcContext): void {
       .map((hit) => ({ ...hit, snippet: searchSnippet(hit.snippet, query ?? '') }))
   );
   h('search:detail', async (_e, kind: SearchResultKind, id: string) => getSearchResultDetail(kind, id));
+  h('workspace:academic:inspect',async (_event,input)=>inspectAcademicDocument(input));
+  h('editor:references', async (_event,options) => listEditorReferences(options));
   h('search:semantic', async (_e, query: string, options?: SemanticSearchOptions) =>
     semanticSearch(query ?? '', options ?? {})
   );
@@ -2102,8 +2106,33 @@ export function registerAcademicIpc(context: IpcContext): void {
     exportProjectChapter(request)
   );
 
+  // Comparisons belong to their invoking renderer; cancellation cannot target
+  // another window's query. They never change the active index.
+  const embeddingComparisons = new Map<string, AbortController>();
+  h('embeddingIndexes:compare', async (event, input: import('@shared/embeddingComparison').EmbeddingComparisonRequest) => {
+    if (!input || typeof input.requestId !== 'string' || !/^[a-z0-9-]{8,80}$/i.test(input.requestId)) throw new Error('Identificador de comparación no válido.');
+    const owner = `${event.sender.id}:`;
+    if ([...embeddingComparisons.keys()].some(key => key.startsWith(owner))) throw new Error('Ya hay una comparación en curso.');
+    const key = owner + input.requestId, controller = new AbortController();
+    embeddingComparisons.set(key, controller);
+    const destroyed = () => controller.abort();
+    event.sender.once('destroyed', destroyed);
+    try { return await (await import('../ai/embeddingComparison')).compareEmbeddingIndexes(input, controller.signal); }
+    finally { embeddingComparisons.delete(key); event.sender.removeListener('destroyed', destroyed); }
+  });
+  h('embeddingIndexes:cancelComparison', async (event, id: string) => { embeddingComparisons.get(`${event.sender.id}:${id}`)?.abort(); });
+  h('embeddingIndexes:runs', async (_e, id?: string, vaultId?: string) => embeddingIndexes.listEmbeddingIndexRuns(id, vaultId));
+  h('embeddingIndexes:rerankerStatus', async () => (await import('../ai/localReranker')).localRerankerStatus());
+  h('embeddingIndexes:rerankerPrepare', async (_e, action: 'download' | 'cancel', modelId?: string) => (await import('../ai/localReranker')).prepareLocalReranker(action, modelId));
+  h('embeddingIndexes:rerankerDelete', async (_e, modelId: string) => (await import('../ai/localReranker')).deleteLocalReranker(modelId));
   // embedding pipeline
   h('embeddings:start', async (_e, nodusIds?: string[]) => startEmbedding(nodusIds));
+  h('embeddingIndexes:list', async (_e, vaultId?: string) => embeddingIndexes.listEmbeddingIndexes(vaultId));
+  h('embeddingIndexes:preview', async (_e, input) => embeddingIndexes.previewEmbeddingIndex(input));
+  h('embeddingIndexes:prepare', async (_e, input) => embeddingIndexes.prepareEmbeddingIndex(input));
+  h('embeddingIndexes:activate', async (_e, id: string, vaultId?: string) => embeddingIndexes.activateEmbeddingIndex(id, vaultId));
+  h('embeddingIndexes:control', async (_e, id: string, action: 'pause' | 'resume' | 'cancel', vaultId?: string) => embeddingIndexes.controlEmbeddingIndex(id, action, vaultId));
+  h('embeddingIndexes:delete', async (_e, id: string, vaultId?: string) => embeddingIndexes.deleteEmbeddingIndex(id, vaultId));
   h('embeddings:reindexAll', async () => reindexAll());
   h('embeddings:pause', async () => pauseEmbedding());
   h('embeddings:resume', async () => resumeEmbedding());

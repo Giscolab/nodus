@@ -13,6 +13,33 @@ export function sourceReferenceKey(reference: ResearchSourceReference): string {
   return JSON.stringify([reference.kind, reference.libraryType ?? null, reference.libraryId ?? null, reference.id]);
 }
 
+/**
+ * What a resolved scope AUTHORIZES: the vault, the notebook revision it was pinned at, the
+ * documents admitted together with their permission state, and the conversation attachments
+ * the turn was given. This is what a mid-run check must compare.
+ *
+ * Deliberately not the scope `id`. That also folds in each document's content `revision` and
+ * its pinned `indexedSource`, and a document's revision is a fingerprint over its extracted
+ * text (see researchCorpusInventory). Library preparation rewrites those as it indexes, so
+ * re-resolving a scope during a turn yielded a different id and the next stage check failed
+ * the whole turn with `research_scope_changed` — while exactly the same documents were
+ * admitted under exactly the same permissions. Any academic turn overlapping indexing died
+ * that way, and a turn is far longer than the gap between two preparation writes.
+ *
+ * `permissionRevision` is built from identity and permission state only — vault, work id,
+ * Zotero key, archived, source state — so this fingerprint moves when a document joins or
+ * leaves the scope, or its permissions change, and not when its text is re-read.
+ */
+export function researchScopeAuthorization(scope: ResolvedResearchScope): string {
+  return researchFingerprint([
+    scope.vaultId,
+    scope.notebookId,
+    scope.notebookRevision,
+    scope.permissionFingerprint,
+    (scope.conversationAttachments ?? []).map(attachment => [attachment.conversationId, attachment.attachmentId]),
+  ]);
+}
+
 /** Union of direct works and explicitly selected collection members, minus exclusions.
  * The inventory is supplied by the backend after permission checks, never by a model. */
 export function selectResearchDocuments(sources: ResearchSourceReference[], exclusions: string[], documents: ResearchCorpusDocument[], collections: ResearchCorpusCollection[]): string[] {
@@ -63,6 +90,24 @@ export function resolveNotebookScope(vaultId: string, notebook: ResearchNotebook
     changes: { added: [...current].filter(id => !old.has(id)), removed: [...old].filter(id => !current.has(id)) } };
 }
 
+/** Documents by id, the first of any duplicate winning exactly as `Array.prototype.find` would. */
+export function documentsById<T extends { id: string }>(documents: readonly T[]): Map<string, T> {
+  const index = new Map<string, T>();
+  for (const document of documents) if (!index.has(document.id)) index.set(document.id, document);
+  return index;
+}
+
+/** A resolved scope is never changed once built, so one index per scope object serves every check
+ *  against it. The lookup was a linear scan, and callers check each document of the scope in turn:
+ *  quadratic in the library, run several times per retrieval round. Measured 2026-10-09 at ~42% of
+ *  the main thread's busy time across a trace of nine turns. */
+const pinnedIndexes = new WeakMap<ResolvedResearchScope, Map<string, ResearchCorpusDocument>>();
+function pinnedDocument(scope: ResolvedResearchScope, documentId: string): ResearchCorpusDocument | undefined {
+  let index = pinnedIndexes.get(scope);
+  if (!index) { index = documentsById(scope.documents); pinnedIndexes.set(scope, index); }
+  return index.get(documentId);
+}
+
 /** Direct reads revalidate both authorization and pinned content; never substitute revisions. */
 export function assertResearchDocument(scope: ResolvedResearchScope, documentId: string, current: ResearchCorpusDocument | undefined): ResearchCorpusDocument {
   const pinned = assertResearchDocumentPermission(scope, documentId, current);
@@ -74,7 +119,7 @@ export function assertResearchDocument(scope: ResolvedResearchScope, documentId:
 /** Historical immutable evidence stays readable after a content edit. Access
  * revocations still win; active executions use the stricter revision check. */
 export function assertResearchDocumentPermission(scope: ResolvedResearchScope, documentId: string, current: ResearchCorpusDocument | undefined): ResearchCorpusDocument {
-  const pinned = scope.documents.find(document => document.id === documentId);
+  const pinned = pinnedDocument(scope, documentId);
   if (!pinned || !current || pinned.permissionRevision !== current.permissionRevision || (pinned.workId && pinned.workId !== current.workId)) throw new Error('research_source_not_authorized');
   // Removing an attachment is an access revocation, whereas replacing its
   // content under the same identity leaves immutable historical citations valid.

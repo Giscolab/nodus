@@ -13,6 +13,7 @@ import { FindInPage, type FindTextSegment } from '../FindInPage';
 import { ReaderSelectionActions } from '../ReaderSelectionActions';
 import { Icon, Spinner } from '../ui';
 import { confirm } from '../feedback';
+import { sanitizePublicationHtml } from '../../lib/publicationHtml';
 import { t, tx } from '../../i18n';
 
 GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -184,7 +185,7 @@ function PdfViewer(props: ViewerProps) {
       {loading && <Spinner label={t('Cargando documento…')} />}{error && <p role="alert" className="text-sm text-red-400">{error}</p>}
       <div className={viewMode === 'continuous' ? 'space-y-6' : ''}>{pageNumbers.map((number) => <LibraryPdfPage key={`${number}:${scale}:${viewMode}`} pdf={pdf!} pageNumber={number} scale={scale} continuous={viewMode === 'continuous'} scrollRef={scrollRef} props={props} onTextLayer={selectTextLayer} onRendered={markRendered} onError={setError} />)}</div>
     </main>
-    <FindInPage targetRef={activeTextRef} loadSegments={loadFindSegments} activeSegmentId={String(pageNumber)} onActivateSegment={(id) => goToPage(Number(id), false)} sourceRevision={`${pageNumber}:${renderedScale}:${renderRevision}`} ready={!loading && renderedScale > 0 && !!activeTextRef.current} emptyTextMessage={t('Este PDF no contiene texto buscable. Abre el Markdown limpio para consultar el OCR.')} placement="reader" />
+    <FindInPage targetRef={activeTextRef} loadSegments={loadFindSegments} activeSegmentId={String(pageNumber)} onActivateSegment={(id) => goToPage(Number(id), false)} sourceRevision={`${pageNumber}:${renderedScale}:${renderRevision}`} ready={!loading && renderedScale > 0 && !!activeTextRef.current} emptyTextMessage={t('Este PDF no contiene texto buscable. Abre el Markdown para consultar el OCR.')} placement="reader" />
   </section>;
 }
 
@@ -249,6 +250,8 @@ function RichTextViewer(props: ViewerProps) {
     const next = content.chapters.findIndex((chapter) => chapter.id === id);
     if (next >= 0) setChapterIndex(next);
   }, [content]);
+  // Sanitised once per chapter, not on every render (find, selection and annotations re-render it).
+  const safeHtml = useMemo(() => content ? sanitizePublicationHtml(content.chapters[chapterIndex]?.html || content.html || '') : '', [content, chapterIndex]);
   if (error) return <UnavailableTextViewer message={error} />;
   if (!content) return <div className="grid flex-1 place-items-center"><Spinner label={t('Preparando el adjunto…')} /></div>;
   const chapter = content.chapters[chapterIndex]; const isEpub = content.viewer === 'epub'; const scope = isEpub ? `attachment:${props.attachment.id}:chapter:${chapter?.id}` : `attachment:${props.attachment.id}`;
@@ -258,7 +261,7 @@ function RichTextViewer(props: ViewerProps) {
       <button data-testid="library-reader-open-external" className="btn btn-ghost ml-auto h-8" onClick={props.onOpenExternal} title={t('Abrir fuera de Nodus')}><Icon name="external" /><span className="max-md:hidden">{t('Abrir fuera de Nodus')}</span></button>
     </div>
     <TextSurface scope={scope} contextId={`${props.documentId}:${scope}`} annotations={props.annotations} highlighterColor={props.highlighterColor} onCreate={(nextScope, input) => props.onCreate(nextScope, { ...input, target: { type: 'text', attachmentId: props.attachment.id, ...(chapter ? { chapterId: chapter.id } : {}) } })} onUpdateComment={props.onUpdateComment} onDelete={props.onDelete} onError={props.onError} testId={content.viewer === 'html' ? 'library-reader-html-viewer' : isEpub ? 'library-reader-epub-content' : 'library-reader-text-content'} findSegments={findSegments} activeFindSegmentId={isEpub ? chapter?.id ?? '' : 'document'} onActivateFindSegment={activateFindSegment}>
-      {(chapter?.html || content.html) ? <article className="prose prose-neutral max-w-none dark:prose-invert" dangerouslySetInnerHTML={{ __html: chapter?.html || content.html || '' }} /> : <pre className="whitespace-pre-wrap font-serif text-base leading-8">{chapter?.text || content.text}</pre>}
+      {(chapter?.html || content.html) ? <article className="prose prose-neutral max-w-none dark:prose-invert" dangerouslySetInnerHTML={{ __html: safeHtml }} /> : <pre className="whitespace-pre-wrap font-serif text-base leading-8">{chapter?.text || content.text}</pre>}
     </TextSurface>
   </section>;
 }
@@ -274,7 +277,7 @@ function ImageViewer(props: ViewerProps) {
     <main ref={findTargetRef} className="min-h-0 flex-1 overflow-auto bg-neutral-200 p-6 dark:bg-black"><div className="relative mx-auto w-fit max-w-full select-none"><img ref={imageRef} src={props.attachment.url || ''} alt={props.attachment.title} draggable={false} className={`max-h-[calc(100vh-15rem)] max-w-full object-contain shadow-2xl ${drawing ? 'cursor-crosshair' : ''}`} onPointerDown={(event) => { if (!drawing) return; event.currentTarget.setPointerCapture(event.pointerId); const value = point(event); setStart(value); setDraft({ ...value, width: 0, height: 0 }); }} onPointerMove={move} onPointerUp={() => void finish()} />
       {regions.map((annotation) => { const target = annotation.target!; if (target.type !== 'region') return null; return <button key={annotation.id} aria-label={t('Eliminar subrayado')} className="absolute border-2 bg-yellow-300/20 hover:bg-red-400/30" style={{ left: `${target.x * 100}%`, top: `${target.y * 100}%`, width: `${target.width * 100}%`, height: `${target.height * 100}%`, borderColor: REGION_COLORS[annotation.color || 'yellow'] }} onClick={() => void confirm({ title: t('Eliminar subrayado'), message: t('¿Eliminar este subrayado?'), confirmLabel: t('Eliminar'), danger: true }).then(async (ok) => { if (ok) await props.onDelete(annotation.id); })} />; })}
       {draft && <span className="pointer-events-none absolute border-2 border-indigo-400 bg-indigo-300/20" style={{ left: `${draft.x * 100}%`, top: `${draft.y * 100}%`, width: `${draft.width * 100}%`, height: `${draft.height * 100}%` }} />}</div></main>
-    <FindInPage targetRef={findTargetRef} unavailableMessage={t('Las imágenes no contienen una capa textual. Usa el Markdown limpio para buscar el OCR.')} placement="reader" />
+    <FindInPage targetRef={findTargetRef} unavailableMessage={t('Las imágenes no contienen una capa textual. Usa el Markdown para buscar el OCR.')} placement="reader" />
   </section>;
 }
 
@@ -285,7 +288,7 @@ function UnavailableTextViewer({ message }: { message: string }) {
 
 function ExternalViewer({ props }: { props: ViewerProps }) {
   const targetRef = useRef<HTMLDivElement | null>(null);
-  return <div ref={targetRef} className="grid flex-1 place-items-center p-8 text-center"><div><Icon name="archive" size={40} className="mx-auto text-neutral-500" /><h2 className="mt-3 font-semibold">{props.attachment.title}</h2><p className="mt-1 max-w-md text-xs text-neutral-500">{tx('Nodus conserva este archivo. Usa la versión limpia para subrayar el texto o ábrelo con su aplicación compatible.', {})}</p><button data-testid="library-reader-open-external" className="btn btn-primary mt-5" onClick={props.onOpenExternal}><Icon name="external" />{t('Abrir fuera de Nodus')}</button></div><FindInPage targetRef={targetRef} unavailableMessage={t('Este archivo no contiene una capa de texto que Nodus pueda buscar.')} placement="reader" /></div>;
+  return <div ref={targetRef} className="grid flex-1 place-items-center p-8 text-center"><div><Icon name="archive" size={40} className="mx-auto text-neutral-500" /><h2 className="mt-3 font-semibold">{props.attachment.title}</h2><p className="mt-1 max-w-md text-xs text-neutral-500">{tx('Nodus conserva este archivo. Usa el Markdown para subrayar el texto o ábrelo con su aplicación compatible.', {})}</p><button data-testid="library-reader-open-external" className="btn btn-primary mt-5" onClick={props.onOpenExternal}><Icon name="external" />{t('Abrir fuera de Nodus')}</button></div><FindInPage targetRef={targetRef} unavailableMessage={t('Este archivo no contiene una capa de texto que Nodus pueda buscar.')} placement="reader" /></div>;
 }
 
 export function LibraryAttachmentViewer(props: ViewerProps) {

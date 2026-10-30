@@ -6,6 +6,55 @@ import { webUtils } from 'electron';
 import type { ToolkitApi } from '@shared/api/toolkit';
 
 export const toolkitApi: ToolkitApi = {
+  getSignLibrary: () => ipcRenderer.invoke('sign:library'),
+  saveSignSignature: signature => ipcRenderer.invoke('sign:signature:save', signature),
+  deleteSignSignature: id => ipcRenderer.invoke('sign:signature:delete', id),
+  saveSignProfile: profile => ipcRenderer.invoke('sign:profile:save', profile),
+  deleteSignProfile: id => ipcRenderer.invoke('sign:profile:delete', id),
+  openSignDocument: source => ipcRenderer.invoke('sign:document:open', source),
+  readSignHistory: id => ipcRenderer.invoke('sign:history:read', id),
+  deleteSignHistory: id => ipcRenderer.invoke('sign:history:delete', id),
+  saveSignVisual: (id, placements) => ipcRenderer.invoke('sign:visual:save', id, placements),
+  exportSignDocument: id => ipcRenderer.invoke('sign:document:export', id),
+  saveSignToVault: id => ipcRenderer.invoke('sign:document:vault', id),
+  revealSignDocument: id => ipcRenderer.invoke('sign:document:reveal', id),
+  getSignEngineStatus: () => ipcRenderer.invoke('sign:engine:status'),
+  configureSignPython: () => ipcRenderer.invoke('sign:engine:configure'),
+  installSignEngine: async onProgress => {
+    const listener = (_e: unknown, event: Parameters<typeof onProgress>[0]) => onProgress(event);
+    ipcRenderer.on('sign:engine:progress', listener);
+    try { return await ipcRenderer.invoke('sign:engine:install'); }
+    finally { ipcRenderer.removeListener('sign:engine:progress', listener); }
+  },
+  cancelSignEngineInstall: () => ipcRenderer.invoke('sign:engine:cancel'),
+  pickSignCertificate: () => ipcRenderer.invoke('sign:certificate:pick'),
+  inspectSignCertificate: (token, password) => ipcRenderer.invoke('sign:certificate:inspect', token, password),
+  inspectSignDocument: id => ipcRenderer.invoke('sign:document:inspect', id),
+  signWithCertificate: request => ipcRenderer.invoke('sign:crypto:sign', request),
+  cancelSignOperation: () => ipcRenderer.invoke('sign:operation:cancel'),
+  startSignTrackpad: async onFrame => {
+    ipcRenderer.removeAllListeners('sign:trackpad:frame');
+    ipcRenderer.on('sign:trackpad:frame', (_e, frame: Parameters<typeof onFrame>[0]) => onFrame(frame));
+    const surface = await ipcRenderer.invoke('sign:trackpad:start');
+    if (!surface) ipcRenderer.removeAllListeners('sign:trackpad:frame');
+    return surface;
+  },
+  stopSignTrackpad: async () => {
+    ipcRenderer.removeAllListeners('sign:trackpad:frame');
+    await ipcRenderer.invoke('sign:trackpad:stop');
+  },
+  getBackupCatalog: ids => ipcRenderer.invoke('backups:catalog', ids),
+  getBackupCatalogRecords: query => ipcRenderer.invoke('backups:records', query),
+  previewOpenBackup: options => ipcRenderer.invoke('backups:preview', options),
+  runOpenBackup: async (jobId, options, outputDir, onProgress) => {
+    const listener = (_e: unknown, id: string, progress: Parameters<typeof onProgress>[0]) => { if (id === jobId) onProgress(progress); };
+    ipcRenderer.on('backups:progress', listener);
+    try { return await ipcRenderer.invoke('backups:run', jobId, options, outputDir); }
+    finally { ipcRenderer.removeListener('backups:progress', listener); }
+  },
+  cancelOpenBackup: id => ipcRenderer.invoke('backups:cancel', id),
+  saveBackupPreset: preset => ipcRenderer.invoke('backups:presets:save', preset),
+  deleteBackupPreset: id => ipcRenderer.invoke('backups:presets:delete', id),
   // Nodus Toolkit (Convert). Progress is pushed on 'toolkit:job:event' filtered
   // by a per-run jobId, mirroring the Nodi chat-stream pattern.
   runToolkitJob: async (request, handlers) => {
@@ -113,6 +162,7 @@ export const toolkitApi: ToolkitApi = {
   importPresenterFile: (token) => ipcRenderer.invoke('presenter:import:file', token),
   getPresenterPdfData: (id) => ipcRenderer.invoke('presenter:pdf:getData', id),
   deletePresenterPresentation: (id) => ipcRenderer.invoke('presenter:delete', id).then(() => undefined),
+  deletePresenterFolder: (id, mode) => ipcRenderer.invoke('presenter:folder:delete', id, mode),
   importPresenterPptxNotes: () => ipcRenderer.invoke('presenter:import:pptxNotes'),
   exportPresenterNotesTxt: (presentation) => ipcRenderer.invoke('presenter:export:txtNotes', presentation),
   importPresenterNotesTxt: () => ipcRenderer.invoke('presenter:import:txtNotes'),

@@ -1,3 +1,7 @@
+import { AcademicLearningCatalog } from '../learning/AcademicLearningSurface';
+import { openAcademicLearning } from '../learning/AcademicLearningContext';
+import { NodusSupportSettings } from './settings/NodusSupportSettings';
+import { ACADEMIC_ALWAYS_VISIBLE, academicCustomizationPatch, academicSidebarEditorState, academicToolkitPages } from '../academicInterfaceProfiles';
 import { openResearchPreparation } from '../components/ResearchPreparationWelcome';
 // SPDX-FileCopyrightText: 2026 Jorge Pérez Burgueño and Nodus contributors
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -6,11 +10,9 @@ import { useEffect, useRef, useState } from 'react';
 import type {
   AppSettings,
   CustomAppTheme,
-  AiConcurrencySnapshot,
   BackupCleanupPreview,
   BackupRetentionUnit,
   CopilotServerStatus,
-  EmbeddingProvider,
   LocalServerAccess,
   LocalServerPowerStatus,
   LocalServerStatus,
@@ -27,11 +29,11 @@ import type {
   VaultSummary,
   VaultType,
 } from '@shared/types';
-import type { PrimarySourcePolicySettings } from '@shared/primarySourcesTypes';
 import { NODUS_SOCIAL_LINKS } from '@shared/socialLinks';
-import { recoveryHealthAdvice, recoveryHealthAge, recoveryHealthHeadline } from '../recoveryHealth';
-import { ImageGenerationSettings, ProvidersSettings } from './ProvidersSettings';
-import { AudioGenerationSettings } from './AudioGenerationSettings';
+import { recoveryHealthAdvice, recoveryHealthAge, recoveryHealthHeadline, recoverySetupRequest } from '../recoveryHealth';
+import { ProvidersSettings } from './ProvidersSettings';
+import { ModelSettings, type ModelTabRequest } from './settings/ModelSettings';
+import { SettingsPanel, SettingsRow } from '../components/SettingsPanel';
 import { ConnectedVaultsPanel } from '../components/ConnectedVaultsPanel';
 import { LocalServerPanel } from '../components/LocalServerPanel';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -43,15 +45,10 @@ import { GraphHealthPanel } from '../components/GraphHealthPanel';
 import { Icon } from '../components/ui';
 import { ThemeColourPicker } from '../components/ThemeColourPicker';
 import { ThemePalettePicker } from '../components/ThemePalettePicker';
-import { ModelPicker, ModelWithReasoning, SubscriptionQuotaNotice, ExtractionCapabilityNotice, SelfAuditNotice } from '../components/ModelPicker';
-import { EmbeddingModelControl } from '../components/EmbeddingModelControl';
-import { GeneralTextModelControl } from '../components/GeneralTextModelControl';
+import { ModelPicker } from '../components/ModelPicker';
 import { NodiStylePicker } from '../components/nodi/NodiStylePicker';
 import { TutorialVideoGrid } from '../components/TutorialVideos';
 import { vaultTypeLabel } from '../components/VaultSwitcher';
-import { SttSettings } from '../components/SttSettings';
-import { LocalAiModelsSettings } from '../components/LocalAiModelsSettings';
-import { LocalImageModelSettings } from '../components/LocalImageModelSettings';
 import { McpConnectionModal } from '../components/McpConnectionModal';
 import { CloudflareDeployModal } from '../components/CloudflareDeployModal';
 import { dedicatedVaultNavIds, groupedNav, NAV_GROUPS, navItemLabel, orderSidebarItems, orderedNav } from '../navigation';
@@ -122,13 +119,23 @@ const SETTINGS_TABS: { id: SettingsTabId; label: string; icon: string; keywords:
   { id: 'library', label: 'Biblioteca', icon: 'book', keywords: 'zotero sincronizacion tag lectura automatizacion cola analisis resumen relaciones' },
   { id: 'extraction', label: 'Texto y OCR', icon: 'search', keywords: 'pdf texto fulltext zotero ocr tesseract paginas idiomas' },
   { id: 'interface', label: 'Interfaz', icon: 'palette', keywords: 'idioma tema claro oscuro animaciones barra lateral menu navegacion accesibilidad contraste escala fuente lectura enfoque' },
-  { id: 'integrations', label: 'Integraciones', icon: 'link', keywords: 'mcp servidor token puerto chatgpt openai tunnel tunel word copilot certificado addin' },
+  { id: 'integrations', label: 'Integraciones', icon: 'link', keywords: 'mcp servidor token puerto chatgpt openai tunnel tunel word copilot certificado addin quimica chemistry stock mcule enamine proveedores comprar listas' },
   { id: 'browser', label: 'Nodus Browser', icon: 'compass', keywords: 'navegador browser web cookies cache almacenamiento datos permisos sitios descargas privacidad' },
   { id: 'server', label: 'Servidor', icon: 'globe', keywords: 'servidor docker compartir vault boveda estudiantes investigadores dominio subdominio oauth claude chatgpt reverse proxy caddy nginx publicar sincronizar' },
   { id: 'system', label: 'Tutoriales', icon: 'graduation', keywords: 'sistema ayuda tutorial' },
   { id: 'data', label: 'Backup / copia de seguridad', icon: 'download', keywords: 'datos backup exportar importar demo copia cifrada peligro reinicializar grafo borrar' },
   { id: 'about', label: 'Acerca de Nodus Research', icon: 'info', keywords: 'acerca proyecto codigo abierto open source gratuito privacidad privacy rgpd gdpr datos alumnado inteligencia artificial licencia terceros legal redes sociales social reddit youtube comunidad' },
   { id: 'updates', label: 'Actualizaciones y novedades', icon: 'sync', keywords: 'actualizaciones update actualizar version novedades ultimos cambios latest changes changelog buscar instalar reiniciar beta testers prerelease canal estable' },
+];
+
+// The navigation reads top to bottom from what the user configures most to what they
+// look up once: AI first, then their content, the app itself, their data, and help.
+const SETTINGS_TAB_GROUPS: { label: string; tabs: SettingsTabId[] }[] = [
+  { label: 'Inteligencia artificial', tabs: ['providers', 'models'] },
+  { label: 'Contenido', tabs: ['library', 'extraction'] },
+  { label: 'Aplicación', tabs: ['interface', 'integrations', 'browser', 'server'] },
+  { label: 'Datos', tabs: ['data'] },
+  { label: 'Ayuda', tabs: ['system', 'updates', 'about'] },
 ];
 
 const SETTINGS_TAB_STORAGE_KEY = 'nodus.settingsTab';
@@ -148,7 +155,7 @@ const ZOTERO_FREE_VAULT_TYPES = new Set<VaultType>(['testimonios', 'prosopograph
 
 const ABOUT_ACTION_BUTTON_CLASS = 'btn btn-ghost w-full min-h-9 shrink-0 justify-center border border-neutral-300 dark:border-neutral-700 sm:h-9 sm:w-auto sm:min-w-56 sm:whitespace-nowrap';
 const ABOUT_CARD_CLASS = 'rounded-xl border border-neutral-200 bg-neutral-50 p-5 dark:border-neutral-800 dark:bg-neutral-900/50';
-const NODUS_REPOSITORY_URL = 'https://github.com/Drakonis96/nodus';
+const NODUS_REPOSITORY_URL = 'https://github.com/jorgepb96/nodus';
 const NODUS_SERVER_GUIDE_URL = `${NODUS_REPOSITORY_URL}/blob/main/server/README.md`;
 const NODUS_PRIVACY_URL = `${NODUS_REPOSITORY_URL}/blob/main/PRIVACY.md`;
 const NODUS_VERSION_SOURCE_URL = `${NODUS_REPOSITORY_URL}/tree/v${__APP_VERSION__}`;
@@ -185,15 +192,6 @@ function backupRetentionLimit(unit: BackupRetentionUnit): number {
   return unit === 'days' ? 3650 : unit === 'weeks' ? 520 : unit === 'months' ? 120 : 10;
 }
 
-function aiConcurrencyReason(entry: AiConcurrencySnapshot): string | null {
-  if (entry.cooldownUntil || /quota-reserved/.test(entry.lastChangeReason)) return 'espera por cuota';
-  if (/rate-limited|overloaded|repeated-/.test(entry.lastChangeReason)) return 'reducción temporal';
-  if (entry.lastChangeReason === 'healthy-saturated-queue') return 'capacidad ampliada';
-  if (entry.lastChangeReason === 'quota-window-reset') return 'cuota restablecida';
-  if (entry.provider === 'nodus') return 'límite local seguro';
-  return null;
-}
-
 export function Settings({
   settings,
   vaults: _vaults,
@@ -216,12 +214,13 @@ export function Settings({
   onOpenRoadmap: () => void;
 }) {
   const [saved, setSaved] = useState<string | null>(null);
-  const [aiConcurrency, setAiConcurrency] = useState<AiConcurrencySnapshot[]>([]);
+  const [chemistryStudioActive, setChemistryStudioActive] = useState(false);
   const [supersededReloadKey, setSupersededReloadKey] = useState(0);
   const [syncHasPassphrase, setSyncHasPassphrase] = useState(true);
   const [importSyncPassphrase, setImportSyncPassphrase] = useState('');
   const [importSyncPromptOpen, setImportSyncPromptOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>(readRememberedSettingsTab);
+  const [interfaceFocusRequest, setInterfaceFocusRequest] = useState<{ id: string } | null>(null);
   const [settingsQuery, setSettingsQuery] = useState('');
   const [openLegalDoc, setOpenLegalDoc] = useState<LegalDocId | null>(null);
   // Reset-graph flow: a confirm() dialog, then a modal that requires typing a
@@ -241,23 +240,32 @@ export function Settings({
     applyRuntimeAppTheme('custom-preview', [{ id: 'custom-preview', ...themeDraft }]);
   }, [themeEditorOpen, themeDraft]);
   useEffect(() => {
+    // The stock-list option belongs to Chemistry Studio, not to model selection. Hide it
+    // until the package is actually active, and keep it live while Skills changes.
+    let cancelled = false;
+    const refresh = () => {
+      void window.nodus.listCapabilities().then((payload) => {
+        if (!cancelled) setChemistryStudioActive(payload.plugins.some((plugin) => plugin.id === 'chemistry-studio' && Boolean(plugin.active)));
+      }).catch(() => { /* a broken registry leaves the option hidden */ });
+    };
+    refresh();
+    const off = window.nodus.onCapabilityRegistryChanged(refresh);
+    return () => { cancelled = true; off(); };
+  }, []);
+  useEffect(() => {
     if (themeEditorOpen) return;
     applyRuntimeAppTheme(settings.appTheme, settings.customThemes ?? []);
   }, [settings.appTheme, settings.customThemes]);
   const [updateProgress, setUpdateProgress] = useUpdateProgress();
   const [requestingInstall, setRequestingInstall] = useState(false);
   const [confirmBetaUpdates, setConfirmBetaUpdates] = useState(false);
-  const [confirmReindex, setConfirmReindex] = useState(false);
-  const [pendingModelSettingsMode, setPendingModelSettingsMode] = useState<AppSettings['modelSettingsMode'] | null>(null);
-  const [pendingEmbeddingChange, setPendingEmbeddingChange] = useState<{ provider: EmbeddingProvider; model: string } | null>(null);
+  const [modelTabRequest, setModelTabRequest] = useState<ModelTabRequest | null>(null);
   const [backupResult, setBackupResult] = useState<{ path: string; password: string; recoveryKey: string } | null>(null);
   const [backupCopied, setBackupCopied] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
-  const [primarySourcePolicy, setPrimarySourcePolicy] = useState<PrimarySourcePolicySettings | null>(null);
   const hasZoteroLibraryWorkflow = !activeVault || !ZOTERO_FREE_VAULT_TYPES.has(activeVault.type);
   const dataTabRequested = settingsTabRequested('data', settingsTab, settingsQuery);
   const integrationsTabRequested = settingsTabRequested('integrations', settingsTab, settingsQuery);
-  const modelsTabRequested = settingsTabRequested('models', settingsTab, settingsQuery);
   const serverTabRequested = settingsTabRequested('server', settingsTab, settingsQuery);
 
   useEffect(() => {
@@ -269,34 +277,44 @@ export function Settings({
   }, [settingsTab]);
 
   useEffect(() => {
-    void window.nodus.getAiConcurrencySnapshot().then(setAiConcurrency);
-    return window.nodus.onAiConcurrencySnapshot(setAiConcurrency);
+    const applyTarget = () => {
+      const target = localStorage.getItem('nodus.settingsTarget');
+      if (target !== 'nodi' && target !== 'models' && target !== 'narration' && target !== 'narration-models' && target !== 'sidebar' && target !== 'appearance' && target !== 'help' && target !== 'tutorials') return;
+      localStorage.removeItem('nodus.settingsTarget');
+      if (target === 'sidebar' || target === 'appearance' || target === 'nodi') {
+        setSettingsTab('interface');
+        setSettingsQuery(target === 'sidebar' ? '' : target === 'appearance' ? t('Apariencia') : 'Nodi');
+        setInterfaceFocusRequest({ id: target === 'sidebar' ? 'settings-sidebar-editor' : target === 'appearance' ? 'settings-appearance-section' : 'settings-nodi-section' });
+      } else if (target === 'help' || target === 'tutorials') {
+        setSettingsTab('system'); setSettingsQuery(t('Ayuda'));
+      } else if (target === 'models' || target === 'narration' || target === 'narration-models') {
+        setSettingsTab('models');
+        setSettingsQuery('');
+        // Narration links land on what they were about: the voice library for «Grabar o subir
+        // una voz…», the checkpoint list for a model the balloon cannot download itself.
+        setModelTabRequest({
+          tab: target === 'models' ? 'essentials' : 'tts',
+          target: target === 'narration' ? '#narration-voices' : target === 'narration-models' ? '[data-testid="narration-models"]' : undefined,
+          nonce: Date.now(),
+        });
+      }
+    };
+    applyTarget();
+    window.addEventListener('nodus:settings-target', applyTarget);
+    return () => window.removeEventListener('nodus:settings-target', applyTarget);
   }, []);
 
   useEffect(() => {
-    const target = localStorage.getItem('nodus.settingsTarget');
-    if (target !== 'nodi' && target !== 'models') return;
-    localStorage.removeItem('nodus.settingsTarget');
-    if (target === 'models') {
-      setSettingsTab('models');
-      setSettingsQuery('');
-    } else {
-      setSettingsTab('interface');
-      setSettingsQuery('Nodi');
-    }
-  }, []);
-
-  useEffect(() => {
-    if (activeVault?.type !== 'primary_sources' || !modelsTabRequested) {
-      setPrimarySourcePolicy(null);
-      return;
-    }
-    let cancelled = false;
-    void window.nodus.getPrimarySourceGovernanceWorkspace().then((workspace) => {
-      if (!cancelled) setPrimarySourcePolicy(workspace.policy);
+    if (!interfaceFocusRequest || settingsTab !== 'interface') return;
+    const frame = requestAnimationFrame(() => {
+      const editor = document.getElementById(interfaceFocusRequest.id);
+      editor?.closest('section')?.scrollIntoView({ block: 'start', behavior: 'auto' });
+      editor?.focus({ preventScroll: true });
+      setInterfaceFocusRequest(null);
     });
-    return () => { cancelled = true; };
-  }, [activeVault?.id, activeVault?.type, modelsTabRequested]);
+    return () => cancelAnimationFrame(frame);
+  }, [interfaceFocusRequest, settingsTab]);
+
 
   useEffect(() => {
     if (!hasZoteroLibraryWorkflow && settingsTab === 'library') {
@@ -646,24 +664,6 @@ export function Settings({
     setTimeout(() => setSaved(null), 2000);
   };
 
-  const activeChunkWords =
-    settings.deepContextMode === 'long' ? settings.deepLongChunkWords : settings.deepStandardChunkWords;
-  const patchActiveChunkWords = (value: string) => {
-    const min = settings.deepContextMode === 'long' ? 5000 : 500;
-    const max = settings.deepContextMode === 'long' ? 50000 : 5000;
-    const parsed = Math.min(max, Math.max(min, parseInt(value, 10) || min));
-    void patch(
-      settings.deepContextMode === 'long'
-        ? { deepLongChunkWords: parsed }
-        : { deepStandardChunkWords: parsed }
-    );
-  };
-
-  const patchPrimarySourcePolicy = async (value: Partial<PrimarySourcePolicySettings>) => {
-    const next = await window.nodus.updatePrimarySourcePolicySettings(value);
-    setPrimarySourcePolicy(next);
-  };
-
   const startReset = async () => {
     const ok = await confirm({
       title: t('Reinicializar el grafo'),
@@ -988,9 +988,10 @@ export function Settings({
     visibleSettingsSection('integrations', 'Copiloto de escritura LibreOffice', 'libreoffice copilot macro python install instalacion instalando'),
     visibleSettingsSection('integrations', 'Nodus para Zotero', 'zotero plugin sidebar chat servidor puerto token pagina citas conexiones'),
     visibleSettingsSection('integrations', 'Nodus Research Connector', 'chrome navegador browser extension conector captura metadatos colecciones etiquetas pdf doi isbn'),
+    chemistryStudioActive && visibleSettingsSection('integrations', 'Chemistry Studio', 'quimica chemistry stock mcule enamine proveedores comprar listas'),
     visibleSettingsSection('data', 'Backup / copia de seguridad', 'datos demo exportar importar copia backup cifrada contraseña'),
-    visibleSettingsSection('models', 'Modelos de IA', 'basico avanzado modelo general extraccion sintesis tutor resumen fusion embeddings transcripcion voz imagen'),
-    visibleSettingsSection('extraction', 'Extracción de texto PDFs grandes', 'pdf texto zotero ocr tesseract paginas idiomas'),
+    visibleSettingsSection('models', 'Modelos de IA', 'basico avanzado modelo general extraccion sintesis tutor resumen fusion embeddings transcripcion voz narracion audio ming clonar grabar imagen'),
+    visibleSettingsSection('extraction', 'Extracción de texto PDFs grandes', 'pdf texto zotero ocr tesseract paginas idiomas esquemas figuras unpaywall email'),
     activeVault?.type === 'academic' && visibleSettingsSection('data', 'Salud del grafo', GRAPH_HEALTH_KEYWORDS),
     visibleSettingsSection('data', 'Zona de peligro', 'reinicializar grafo borrar ideas temas conexiones autores huecos'),
     visibleSettingsSection('about', 'Acerca de Nodus Research', 'proyecto independiente codigo abierto open source gratuito privacidad privacy rgpd gdpr datos alumnado licencia roadmap hoja de ruta futuro redes sociales social reddit youtube comunidad'),
@@ -998,17 +999,12 @@ export function Settings({
   ].filter(Boolean).length;
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="flex flex-wrap items-start gap-4 mb-4">
-        <div>
-          <h1 className="text-xl font-semibold">{t('Ajustes')}</h1>
-          <p className="text-sm text-neutral-500 mt-1">
-            {t('Busca un ajuste o entra por una sección temática.')}
-          </p>
-          <p className="text-xs text-neutral-600 mt-1">Nodus v{__APP_VERSION__}</p>
-        </div>
-        <div className="flex-1" />
-        <label className="relative w-full sm:w-80">
+    <div className="h-full overflow-y-auto" data-testid="settings-scroll">
+      <div className="mx-auto grid max-w-[80rem] gap-6 p-6 lg:grid-cols-[15rem_minmax(0,1fr)]">
+      <aside className="min-w-0 lg:sticky lg:top-6 lg:self-start" data-testid="settings-nav">
+        <h1 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100">{t('Ajustes')}</h1>
+        <p className="mt-0.5 text-xs text-neutral-500">Nodus v{__APP_VERSION__}</p>
+        <label className="relative mt-4 block">
           <Icon name="search" size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
           <input
             className="input input-with-leading-icon w-full"
@@ -1017,29 +1013,36 @@ export function Settings({
             placeholder={t('Buscar en ajustes…')}
           />
         </label>
-      </div>
+        <nav className="mt-4 flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:gap-4 lg:overflow-visible lg:pb-0" aria-label={t('Ajustes')}>
+          {SETTINGS_TAB_GROUPS.map((group) => {
+            const tabs = SETTINGS_TABS.filter((tab) => group.tabs.includes(tab.id) && (tab.id !== 'library' || hasZoteroLibraryWorkflow));
+            if (tabs.length === 0) return null;
+            return <div key={group.label} className="flex shrink-0 gap-1 lg:flex-col">
+              <p className="hidden px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-500 lg:block">{t(group.label)}</p>
+              {tabs.map((tab) => (
+                <SettingsTabButton
+                  key={tab.id}
+                  active={!settingsSearchActive && settingsTab === tab.id}
+                  icon={tab.icon}
+                  onClick={() => {
+                    setSettingsTab(tab.id);
+                    setSettingsQuery('');
+                  }}
+                >
+                  {t(tab.label)}
+                </SettingsTabButton>
+              ))}
+            </div>;
+          })}
+        </nav>
+      </aside>
 
-      <div className="mb-5 flex flex-wrap gap-2">
-        {SETTINGS_TABS.filter((tab) => tab.id !== 'library' || hasZoteroLibraryWorkflow).map((tab) => (
-          <SettingsTabButton
-            key={tab.id}
-            active={!settingsSearchActive && settingsTab === tab.id}
-            icon={tab.icon}
-            onClick={() => {
-              setSettingsTab(tab.id);
-              setSettingsQuery('');
-            }}
-          >
-            {t(tab.label)}
-          </SettingsTabButton>
-        ))}
-        {settingsSearchActive && (
-          <div className="ml-auto self-center text-xs text-neutral-500">
-            {visibleSettingsCount === 1 ? t('1 sección encontrada') : `${visibleSettingsCount} ${t('secciones encontradas')}`}
-          </div>
-        )}
-      </div>
-
+      <main className="min-w-0">
+      {settingsSearchActive && (
+        <p className="mb-3 text-xs text-neutral-500">
+          {visibleSettingsCount === 1 ? t('1 sección encontrada') : `${visibleSettingsCount} ${t('secciones encontradas')}`}
+        </p>
+      )}
       {visibleSettingsCount === 0 && (
         <div className="card p-5 text-sm text-neutral-500">
           {t('No hay ajustes que coincidan con la búsqueda.')}
@@ -1053,7 +1056,7 @@ export function Settings({
       )}
 
       {visibleSettingsSection('library', 'Zotero y sincronización', 'zotero sincronizacion manual tiempo real storage tag lectura') && (
-          <Section title={t('Zotero y sincronización')}>
+          <Section title={t('Zotero y sincronización')} icon="book">
             <Row label={t('Modo de sincronización')}>
               <select className="input" value={settings.syncMode} onChange={(e) => patch({ syncMode: e.target.value as any })}>
                 <option value="manual">{t('Manual')}</option>
@@ -1074,13 +1077,13 @@ export function Settings({
       )}
 
       {activeVault?.type === 'academic' && visibleSettingsSection('library', 'Preparar fuentes', 'documentos embeddings biblioteca consentimiento') && (
-        <Section title={t('Preparar fuentes')}>
+        <Section title={t('Preparar fuentes')} icon="layers">
           <button className="btn" onClick={() => openResearchPreparation(undefined, true)}>{t('Preparar fuentes')}</button>
         </Section>
       )}
 
       {settings.academicMode !== 'manual' && visibleSettingsSection('library', 'Automatización de análisis', 'analizar temas profundo resumen cola relaciones reanudar') && (
-          <Section title={t('Automatización de análisis')}>
+          <Section title={t('Automatización de análisis')} icon="sync">
             <Row label={t('Analizar temas al sincronizar')}>
               <input type="checkbox" checked={settings.autoLightScan} onChange={(e) => patch({ autoLightScan: e.target.checked })} />
             </Row>
@@ -1138,7 +1141,7 @@ export function Settings({
       )}
 
       {visibleSettingsSection('interface', 'Idioma', 'interfaz prompts idioma español english citas') && (
-          <Section title={t('Idioma')}>
+          <Section title={t('Idioma')} icon="languages">
             <Row label={t('Idioma de la interfaz')}>
               <select
                 className="input w-full md:w-64"
@@ -1177,7 +1180,7 @@ export function Settings({
       )}
 
       {visibleSettingsSection('interface', 'Apariencia', 'tema claro oscuro animaciones velocidad paleta color colores teal ocean forest sunset violet mint amber berry indigo rose') && (
-          <Section title={t('Apariencia')}>
+          <Section title={t('Apariencia')} id="settings-appearance-section" icon="palette">
             <Row label={t('Modo de color')} hint={t('Elige entre modo claro, oscuro o seguir el sistema operativo.')}>
               <select className="input" value={settings.theme} onChange={(e) => patch({ theme: e.target.value as any })}>
                 <option value="system">{t('Sistema')}</option>
@@ -1261,7 +1264,7 @@ export function Settings({
       )}
 
       {visibleSettingsSection('interface', 'Accesibilidad y lectura', 'escala zoom fuente legible contraste movimiento animaciones enfoque lectura teclado lector pantalla') && (
-          <Section title={t('Accesibilidad y lectura')}>
+          <Section title={t('Accesibilidad y lectura')} icon="eye">
             <div data-testid="accessibility-settings" className="space-y-3">
               <Row label={t('Tamaño de la interfaz')} hint={t('Ajusta menús, botones y texto sin cambiar el contenido de los documentos.') }>
                 <div className="flex w-full max-w-md items-center gap-3">
@@ -1302,7 +1305,7 @@ export function Settings({
       )}
 
       {visibleSettingsSection('interface', 'Mascota Nodi', 'nodi mascota mascot flotante superpuesta always on top encima escritorio companion acompanante aspecto orbe esfera color') && (
-          <Section title={t('Mascota Nodi')}>
+          <Section title={t('Mascota Nodi')} id="settings-nodi-section" icon="nodi">
             <p className="text-xs text-neutral-500 -mt-1">
               {t('Nodi es el nodo que acompaña la app, flotando abajo a la derecha. Haz clic en Nodi para abrir el chat, tus notificaciones y la ayuda.')}
             </p>
@@ -1450,7 +1453,7 @@ export function Settings({
       )}
 
       {activeVault?.type === 'testimonios' && visibleSettingsSection('interface', 'Testimonios', 'historia oral entrevistas acuerdo acceso embargo narrador repositorio conservacion transcripcion proveedor externo') && (
-          <Section title={t('Testimonios')}>
+          <Section title={t('Testimonios')} icon="userVoice">
             {/* Valores PREDETERMINADOS del proyecto, no decisiones irrevocables: cada
                 entrevista puede acordarse de otra manera y el programa no puede impedirlo.
                 Solo hay uno que manda por encima del acuerdo, y solo para CERRAR: los
@@ -1558,23 +1561,34 @@ export function Settings({
       )}
 
       {visibleSettingsSection('interface', 'Barra lateral', 'menu lateral ordenar ocultar mostrar navegacion') && (
-          <Section title={t('Barra lateral')}>
+          <Section title={t('Barra lateral')} id="settings-sidebar-section" icon="columns">
             <p className="text-xs text-neutral-500 -mt-1">
               {t('Reordena u oculta las secciones del menú lateral. «Inicio» queda siempre la primera y «Ajustes» la última; ninguna de las dos puede moverse ni ocultarse.')}
             </p>
+            {activeVault?.type === 'academic' && settings.academicInterfaceProfile && settings.academicInterfaceProfile !== 'custom' && (
+              <p data-testid="sidebar-preset-notice" className="mt-2 flex items-start gap-2 rounded-md bg-indigo-500/5 p-2.5 text-xs text-indigo-700 dark:text-indigo-300">
+                <Icon name="info" size={14} className="shrink-0" />
+                {t('Los cambios en la barra lateral activarán Personalizado. Puedes cambiar los botones del header sin salir de este perfil.')}
+              </p>
+            )}
+            <div id="settings-sidebar-editor" tabIndex={-1}>
             <SidebarOrderEditor
-              sidebarOrder={settings.sidebarOrder}
-              sidebarHidden={effectiveSidebarHidden(settings.sidebarHidden, settings.sidebarCustomized, activeVault?.type)}
-              toolkitPinnedPages={settings.toolkitPinnedPages}
+              alwaysVisible={activeVault?.type === 'academic' ? ACADEMIC_ALWAYS_VISIBLE : []}
+              sidebarOrder={activeVault?.type === 'academic' ? academicSidebarEditorState(settings).order : settings.sidebarOrder}
+              sidebarHidden={activeVault?.type === 'academic' ? academicSidebarEditorState(settings).hidden : effectiveSidebarHidden(settings.sidebarHidden, settings.sidebarCustomized, activeVault?.type)}
+              toolkitPinnedPages={activeVault?.type === 'academic' ? academicToolkitPages(settings.toolkitPinnedPages) : settings.toolkitPinnedPages}
               vaultType={activeVault?.type}
-              onReorder={(ids) => void patch({ sidebarOrder: ids })}
-              onToggleHidden={(hidden) => void patch({ sidebarHidden: hidden, sidebarCustomized: true })}
+              onReorder={(ids) => void patch({ ...(activeVault?.type === 'academic' ? academicCustomizationPatch(settings) : {}), sidebarOrder: ids })}
+              onToggleHidden={(hidden) => void patch({ ...(activeVault?.type === 'academic' ? academicCustomizationPatch(settings) : {}), sidebarHidden: hidden, sidebarCustomized: true })}
             />
+            </div>
           </Section>
       )}
 
       {visibleSettingsSection('system', 'Ayuda', 'tutorial uso avanzado') && (
-          <Section title={t('Ayuda')}>
+          <Section title={t('Ayuda')} icon="help">
+            <NodusSupportSettings language={settings.uiLanguage}/>
+            {activeVault?.type === 'academic' && <AcademicLearningCatalog settings={settings} onPatch={patch}/>}
             {/* The videos come first: for most people they are the fastest way in. Their
                 copy comes from shared/tutorialVideos.ts rather than t() because that
                 table covers the tutorial's twelve languages, not the interface's seven.
@@ -1602,7 +1616,7 @@ export function Settings({
               </div>
               <button
                 className="btn btn-ghost border border-neutral-700"
-                onClick={() => patch({ tourComplete: false }).then(() => flash(t('Se mostrará el tutorial.')))}
+                onClick={() => { if (activeVault?.type === 'academic') { openAcademicLearning('first-answer'); return; } return patch({ tourComplete: false }).then(() => flash(t('Se mostrará el tutorial.'))); }}
               >
                 <Icon name="help" /> {t('Ver de nuevo')}
               </button>
@@ -1614,7 +1628,7 @@ export function Settings({
               </div>
               <button
                 className="btn btn-ghost border border-neutral-700"
-                onClick={() => patch({ advancedTourComplete: false }).then(() => flash(t('Se mostrará el tutorial avanzado.')))}
+                onClick={() => activeVault?.type === 'academic' ? openAcademicLearning('research-question') : patch({ advancedTourComplete: false }).then(() => flash(t('Se mostrará el tutorial avanzado.')))}
               >
                 <Icon name="route" /> {t('Empezar')}
               </button>
@@ -1711,7 +1725,7 @@ export function Settings({
       )}
 
       {visibleSettingsSection('about', 'Acerca de Nodus Research', 'proyecto independiente codigo abierto open source gratuito privacidad privacy rgpd gdpr datos alumnado licencia terceros legal actualizaciones update version novedades roadmap hoja de ruta futuro redes sociales social reddit youtube comunidad') && (
-        <Section title={t('Acerca de Nodus Research')}>
+        <Section title={t('Acerca de Nodus Research')} icon="info">
           <div className={ABOUT_CARD_CLASS}>
             <div className="flex items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300">
@@ -1950,7 +1964,7 @@ export function Settings({
       )}
 
       {visibleSettingsSection('updates', 'Actualizaciones y novedades', 'actualizaciones update version novedades ultimos cambios latest changes changelog buscar instalar reiniciar avisos anuncios encuestas noticias beta testers prerelease canal estable') && (
-        <Section title={t('Actualizaciones y novedades')}>
+        <Section title={t('Actualizaciones y novedades')} icon="download">
           <div data-testid="about-latest-changes" className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-neutral-50 p-5 dark:border-neutral-800 dark:bg-neutral-900/50 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <label className="text-sm text-neutral-700 dark:text-neutral-300">{t('Últimos cambios')}</label>
@@ -2043,7 +2057,7 @@ export function Settings({
       )}
 
       {visibleSettingsSection('integrations', 'Servidor MCP', 'mcp servidor puerto token cliente conexion chatgpt openai tunnel tunel') && (
-          <Section title={t('Servidor MCP')}>
+          <Section title={t('Servidor MCP')} icon="plug">
             <div data-testid="mcp-settings-card" className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 dark:border-indigo-900/70 dark:bg-indigo-950/20">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-start gap-3">
@@ -2117,13 +2131,13 @@ export function Settings({
       )}
 
       {visibleSettingsSection('browser', 'Nodus Browser', 'navegador browser web cookies cache almacenamiento datos permisos sitios descargas privacidad') && (
-        <Section title={t('Nodus Browser')}>
+        <Section title={t('Nodus Browser')} icon="compass">
           <BrowserSettings settings={settings} onChange={onChange} />
         </Section>
       )}
 
       {visibleSettingsSection('server', 'Nodus Server', 'docker compartir vault boveda estudiantes investigadores dominio oauth reverse proxy caddy nginx sincronizacion remota') && (
-        <Section title={t('Nodus Server')}>
+        <Section title={t('Nodus Server')} icon="globe">
           <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
             {t('Versión experimental recomendada solo para testers. Guarda copias de seguridad y reporta cualquier error desde el botón superior.')}
           </p>
@@ -2474,7 +2488,7 @@ export function Settings({
       )}
 
       {visibleSettingsSection('integrations', 'Copiloto de escritura Word', 'word copilot addin certificado token localhost') && (
-          <Section title={`${t('Copiloto de escritura (Word)')} · beta`}>
+          <Section title={`${t('Copiloto de escritura (Word)')} · beta`} icon="fileText">
             <p className="text-xs text-neutral-500">
               {t('1) Genera el certificado local · 2) Activa el copiloto · 3) Instálalo en Word y ábrelo desde la pestaña Nodus.')}
             </p>
@@ -2538,7 +2552,7 @@ export function Settings({
       )}
 
       {visibleSettingsSection('integrations', 'Nodus para Zotero', 'zotero plugin sidebar chat servidor puerto token pagina citas conexiones') && (
-          <Section title={`${t('Nodus para Zotero')} · beta`}>
+          <Section title={`${t('Nodus para Zotero')} · beta`} icon="puzzle">
             <p className="text-xs text-neutral-500">
               {t('Chat de Nodus dentro de Zotero: pregunta sobre el ítem abierto con el contexto de tu biblioteca (resumen, ideas, conexiones). Instala el plugin en Zotero; se conecta a Nodus automáticamente.')}
             </p>
@@ -2608,7 +2622,7 @@ export function Settings({
       )}
 
       {visibleSettingsSection('integrations', 'Nodus Research Connector', 'chrome navegador browser extension conector captura metadatos colecciones etiquetas pdf doi isbn') && (
-          <Section title={t('Nodus Research Connector')}>
+          <Section title={t('Nodus Research Connector')} icon="link">
             <p className="text-xs leading-5 text-neutral-600 dark:text-neutral-400">
               {t('Guarda la página o documento abierto en la Biblioteca de Nodus con metadatos, archivos, colección y etiquetas. Solo lee la pestaña cuando pulsas el icono.')}
             </p>
@@ -2689,7 +2703,7 @@ export function Settings({
       )}
 
       {visibleSettingsSection('integrations', 'Copiloto de escritura LibreOffice', 'libreoffice copilot macro python install instalacion instalando') && (
-          <Section title={t('Copiloto de escritura (LibreOffice)')}>
+          <Section title={t('Copiloto de escritura (LibreOffice)')} icon="fileText">
             <div className="flex flex-wrap items-center gap-2">
               <button
                 className="btn btn-primary"
@@ -2720,8 +2734,28 @@ export function Settings({
           </Section>
       )}
 
+      {chemistryStudioActive && visibleSettingsSection('integrations', 'Chemistry Studio', 'quimica chemistry stock mcule enamine proveedores comprar listas') && (
+          <Section title={t('Química (Chemistry Studio)')} icon="flask">
+            <label data-testid="chemistry-stock-settings" className="flex cursor-pointer flex-col gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4 transition hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900/40 dark:hover:border-neutral-700 sm:flex-row sm:items-start">
+              <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300">
+                <Icon name="flask" size={16} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-neutral-900 dark:text-neutral-100">{t('Usar listas de stock comerciales')}</span>
+                <span className="mt-1 block text-xs leading-5 text-neutral-600 dark:text-neutral-400">{t('La búsqueda de rutas se detiene en los precursores que tus listas de proveedores tienen en stock, y el informe indica qué materiales de partida, o el propio objetivo, se pueden comprar. Desactívalo para planificar rutas sin tener en cuenta lo que se vende. Solo actúa si has importado alguna lista.')}</span>
+              </span>
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 shrink-0 self-start accent-indigo-600"
+                checked={settings.chemistryUseStockLists !== false}
+                onChange={(e) => patch({ chemistryUseStockLists: e.target.checked })}
+              />
+            </label>
+          </Section>
+      )}
+
       {visibleSettingsSection('data', 'Backup / copia de seguridad', 'datos demo exportar importar copia backup cifrada contraseña') && (
-          <Section title={t('Backup / copia de seguridad')}>
+          <Section title={t('Backup / copia de seguridad')} icon="save">
             {settings.demoMode && (
               <div className="flex items-center justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-800/60 dark:bg-amber-950/20">
                 <div>
@@ -2864,7 +2898,7 @@ export function Settings({
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       className="btn btn-ghost border border-neutral-700"
-                      onClick={() => void patch({ recoverySetupVersion: 0 })}
+                      onClick={() => void patch(recoverySetupRequest(settings))}
                     >
                       <Icon name="folder" /> {settings.autoBackupFolder ? t('Cambiar carpeta o recuperar') : t('Configurar carpeta segura')}
                     </button>
@@ -3054,7 +3088,7 @@ export function Settings({
                   <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300/70 bg-white/60 p-2.5 text-xs text-amber-900 dark:border-amber-900/70 dark:bg-neutral-950/30 dark:text-amber-200">
                     <Icon name="alert" size={14} />
                     <span>{t('Configura primero la carpeta de Recuperación y la contraseña maestra para poder verificar una copia superviviente.')}</span>
-                    <button className="btn btn-ghost ml-auto text-xs" onClick={() => void patch({ recoverySetupVersion: 0 })}>
+                    <button className="btn btn-ghost ml-auto text-xs" onClick={() => void patch(recoverySetupRequest(settings))}>
                       <Icon name="folder" /> {t('Configurar Recuperación')}
                     </button>
                   </div>
@@ -3206,262 +3240,15 @@ export function Settings({
           </Section>
       )}
 
-      {visibleSettingsSection('models', 'Modelos de IA', 'basico avanzado modelo general extraccion sintesis tutor resumen fusion embeddings transcripcion voz imagen') && (<>
-          <Section title={t('Selección de modelos')}>
-            <p className="mb-2 text-xs leading-5 text-neutral-600 dark:text-neutral-400">
-              {t('Solo puede haber un modo de configuración activo. Cambiar de modo modifica qué selección de modelos utiliza Nodus, no solo la vista de este formulario.')}
-            </p>
-            <div className="mb-5 flex rounded-lg border border-neutral-200 bg-neutral-100 p-1 dark:border-neutral-800 dark:bg-neutral-950" data-testid="model-settings-mode">
-              {(['basic', 'advanced'] as const).map((mode) => <button
-                key={mode}
-                className={`flex-1 rounded-md px-3 py-2 text-sm ${settings.modelSettingsMode === mode ? 'bg-indigo-600 text-white' : 'text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200'}`}
-                aria-pressed={settings.modelSettingsMode === mode}
-                onClick={() => {
-                  if (settings.modelSettingsMode !== mode) setPendingModelSettingsMode(mode);
-                }}
-              >{t(mode === 'basic' ? 'Configuración básica' : 'Configuración avanzada')}</button>)}
-            </div>
-            <p className="mb-4 text-sm leading-6 text-neutral-600 dark:text-neutral-400">
-              {settings.modelSettingsMode === 'basic'
-                ? t('Un modelo general atiende conversación, análisis, resúmenes y las demás tareas de texto. Las capacidades especializadas se configuran debajo.')
-                : t('Cada tarea utiliza el modelo concreto seleccionado. Los modelos de las herramientas se guardan solo en el vault actual.')}
-            </p>
-            {settings.modelSettingsMode === 'basic' && <>
-              <Row label={t('Modelo general de texto')} hint={t('Conversación, análisis, resúmenes y demás tareas de texto.')}>
-                <GeneralTextModelControl settings={settings} patch={patch} />
-              </Row>
-              {/* In basic mode this one model runs the scans too, so it is the single
-                  most expensive place to pick a subscription-billed provider — and it must be able
-                  to extract ideas, so vision-only local models are blocked here. */}
-              <ExtractionCapabilityNotice model={settings.synthesisModel} />
-              <SubscriptionQuotaNotice model={settings.synthesisModel} />
-            </>}
-            <Row
-              label={t('Modelo de embeddings (similitud semántica multilingüe)')}
-              hint={t('Representa el significado del texto para la búsqueda semántica y la recuperación por similitud.')}
-            >
-              <EmbeddingModelControl
-                settings={settings}
-                onEmbeddingChange={(provider, model) => setPendingEmbeddingChange({ provider, model })}
-              />
-            </Row>
-            {activeVault?.type === 'estudio' && <Row
-              label={t('Procesamiento de materiales nuevos con IA')}
-              hint={t('Controla si Nodus crea automáticamente conceptos, citas y relaciones para el mapa de Ideas y el grafo de estudio.')}
-            >
-              <select
-                data-testid="study-knowledge-auto-process"
-                className="input"
-                value={settings.studyKnowledgeAutoProcess}
-                onChange={(event) => void patch({ studyKnowledgeAutoProcess: event.target.value as AppSettings['studyKnowledgeAutoProcess'] })}
-              >
-                <option value="ask">{t('Preguntar cada vez')}</option>
-                <option value="always">{t('Procesar automáticamente')}</option>
-                <option value="never">{t('No procesar automáticamente')}</option>
-              </select>
-            </Row>}
-            {settings.modelSettingsMode === 'advanced' && <>
-              <div className="mt-5 space-y-3 border-t border-neutral-800 pt-4" data-testid="common-model-overrides">
-                <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">{t('Ajustes avanzados comunes')}</h3>
-                {/* The four selectors below drive the scan pipeline: one run covers a
-                    whole corpus, so a subscription plan's quota is the real limit. */}
-                <Row label={t('Extracción de temas, ideas y evidencias')} hint={t('Extrae temas, ideas, evidencias y relaciones cuando Nodus analiza el corpus.')}><ModelWithReasoning allowEmpty={false} settings={settings} value={settings.extractionModel} onChange={(extractionModel) => void patch({ extractionModel })} emptyLabel="Seleccionar modelo" requireExtraction menu /></Row>
-                <ExtractionCapabilityNotice model={settings.extractionModel} />
-                <SubscriptionQuotaNotice model={settings.extractionModel} />
-                <Row label={t('Visión y OCR de imágenes')} hint={t('Interpreta imágenes y páginas escaneadas y obtiene su texto cuando hace falta.')}><ModelWithReasoning allowEmpty={false} settings={settings} value={settings.visionModel} onChange={(visionModel) => void patch({ visionModel })} emptyLabel="Seleccionar modelo" menu /></Row>
-                <SubscriptionQuotaNotice model={settings.visionModel} />
-                <Row label={t('Resúmenes de obras')} hint={t('Redacta resúmenes breves de cada obra para orientar la navegación y la recuperación.')}><ModelWithReasoning allowEmpty={false} settings={settings} value={settings.summaryModel} onChange={(summaryModel) => void patch({ summaryModel })} emptyLabel="Seleccionar modelo" requiredCapability="summary" menu /></Row>
-                <SubscriptionQuotaNotice model={settings.summaryModel} />
-                {activeVault?.type === 'academic' && <>
-                  <Row label={t('Comprensión de documentos completos')} hint={t('Analiza todas las secciones y sintetiza la arquitectura global de cada obra.')}><ModelWithReasoning settings={settings} value={settings.documentProfileModel} onChange={(documentProfileModel) => void patch({ documentProfileModel })} emptyLabel="Usar modelo de resúmenes" requiredCapability="documentProfile" menu /></Row>
-                  <ExtractionCapabilityNotice model={settings.documentProfileModel ?? settings.summaryModel} />
-                  <SubscriptionQuotaNotice model={settings.documentProfileModel ?? settings.summaryModel} />
-                  <Row label={t('Auditor de fichas documentales')} hint={t('Revisa soporte, cobertura y fidelidad antes de publicar una versión nueva.')}><ModelWithReasoning settings={settings} value={settings.documentAuditModel} onChange={(documentAuditModel) => void patch({ documentAuditModel })} emptyLabel="Usar modelo de comprensión documental" requiredCapability="documentProfile" menu /></Row>
-                  <SelfAuditNotice generator={settings.documentProfileModel ?? settings.summaryModel} auditor={settings.documentAuditModel} />
-                  <SubscriptionQuotaNotice model={settings.documentAuditModel ?? settings.documentProfileModel ?? settings.summaryModel} />
-                </>}
-                <Row label={t('Fusión y deduplicación')} hint={t('Combina resultados equivalentes y elimina duplicados sin perder su evidencia.')}><ModelWithReasoning allowEmpty={false} settings={settings} value={settings.fusionModel} onChange={(fusionModel) => void patch({ fusionModel })} emptyLabel="Seleccionar modelo" requiredCapability="fusion" menu /></Row>
-                <ExtractionCapabilityNotice model={settings.fusionModel} />
-                <SubscriptionQuotaNotice model={settings.fusionModel} />
-                <Row label={t('Relaciones semánticas')} hint={t('Valida pares de ideas y genera las relaciones del grafo.')}><ModelWithReasoning allowEmpty settings={settings} value={settings.relationModel} onChange={(relationModel) => void patch({ relationModel })} emptyLabel="Usar modelo de fusión" requiredCapability="fusion" menu /></Row>
-                <ExtractionCapabilityNotice model={settings.relationModel ?? settings.fusionModel} />
-                <SubscriptionQuotaNotice model={settings.relationModel ?? settings.fusionModel} />
-                <Row label={t('Asistente Nodi')} hint={t('Responde en el asistente Nodi y usa el contexto de la vista cuando lo autorizas.')}><ModelWithReasoning allowEmpty={false} settings={settings} value={settings.nodiModel} onChange={(nodiModel) => void patch({ nodiModel })} emptyLabel="Seleccionar modelo" menu /></Row>
-              </div>
-              <VaultModelOverrides settings={settings} vaultType={activeVault?.type ?? 'academic'} vaultName={activeVault?.name ?? t('Vault actual')} patch={patch} />
-            </>}
-            {activeVault?.type === 'primary_sources' && primarySourcePolicy && (
-              <div className="mt-5 space-y-3 border-t border-neutral-800 pt-4" data-testid="primary-sources-ai-policy">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{t('Política de IA de Fuentes primarias')}</h3>
-                <p className="text-xs leading-5 text-neutral-500">
-                  {t('Las fuentes restringidas o embargadas nunca salen del dispositivo. Nodi solo recibe fuentes abiertas y no altamente sensibles; las notas privadas y las propuestas pendientes quedan excluidas.')}
-                </p>
-                <Row
-                  label={t('Confirmar cada envío externo')}
-                  hint={t('Si está activo, la indexación externa en segundo plano no enviará documentos. Desactívalo solo si autorizas el procesamiento de fuentes abiertas con el proveedor configurado.')}
-                >
-                  <input
-                    type="checkbox"
-                    checked={primarySourcePolicy.requireExternalConfirmation}
-                    onChange={(event) => void patchPrimarySourcePolicy({ requireExternalConfirmation: event.target.checked })}
-                  />
-                </Row>
-                <Row
-                  label={t('Permitir IA externa con fuentes privadas')}
-                  hint={t('Cada fuente privada seguirá necesitando consentimiento explícito. Las fuentes restringidas y embargadas continúan bloqueadas.')}
-                >
-                  <input
-                    type="checkbox"
-                    checked={primarySourcePolicy.allowPrivateExternalAi}
-                    onChange={(event) => void patchPrimarySourcePolicy({ allowPrivateExternalAi: event.target.checked })}
-                  />
-                </Row>
-                <Row
-                  label={t('Permitir IA local con fuentes restringidas')}
-                  hint={t('Solo se aplica a modelos que se ejecutan en tu equipo; nunca autoriza un proveedor remoto.')}
-                >
-                  <input
-                    type="checkbox"
-                    checked={primarySourcePolicy.allowRestrictedLocalAi}
-                    onChange={(event) => void patchPrimarySourcePolicy({ allowRestrictedLocalAi: event.target.checked })}
-                  />
-                </Row>
-              </div>
-            )}
-            <Row label={t('Indexación de embeddings')} hint={t('Genera los vectores pendientes para que la búsqueda semántica use el modelo actual.')}>
-              <div className="flex gap-2">
-                <button
-                  className="btn btn-ghost border border-cyan-800 text-cyan-300"
-                  title={t(activeVault?.type === 'primary_sources'
-                    ? 'Indexa el texto revisado de las fuentes permitido por la política del vault.'
-                    : 'Genera embeddings solo para ideas que aún no los tienen.')}
-                  onClick={() => {
-                    if (activeVault?.type === 'primary_sources') {
-                      void window.nodus.indexArchive().then((result) => {
-                        flash(result.indexed > 0
-                          ? tx('{n} fuentes indexadas.', { n: result.indexed })
-                          : t('No hay fuentes autorizadas pendientes de indexación.'));
-                      });
-                    } else {
-                      void window.nodus.startEmbedding();
-                    }
-                  }}
-                >
-                  <Icon name="search" /> {t('Indexar pendientes')}
-                </button>
-                {activeVault?.type !== 'primary_sources' && <button
-                  className="btn btn-ghost border border-cyan-800 text-cyan-300"
-                  title={t('Borra todos los embeddings y los regenera desde cero. Útil tras cambiar de modelo.')}
-                  onClick={() => setConfirmReindex(true)}
-                >
-                  <Icon name="search" /> {t('Reindexar todo')}
-                </button>}
-              </div>
-            </Row>
-            <Row label={t('Llamadas simultáneas')} hint={t('Automático se adapta por proveedor y modelo; Manual conserva un límite fijo entre 1 y 8.')}>
-              <div className="flex items-center gap-2">
-                <select
-                  className="input"
-                  value={settings.aiConcurrencyMode}
-                  onChange={(e) => patch({
-                    aiConcurrencyMode: e.target.value as AppSettings['aiConcurrencyMode'],
-                    aiConcurrencyVersion: 1,
-                  })}
-                >
-                  <option value="automatic">{t('Automático')}</option>
-                  <option value="manual">{t('Manual')}</option>
-                </select>
-                {settings.aiConcurrencyMode === 'manual' && <input
-                  type="number"
-                  min={1}
-                  max={8}
-                  className="input w-20"
-                  value={settings.concurrency}
-                  onChange={(e) => patch({ concurrency: Math.max(1, Math.min(8, parseInt(e.target.value) || 1)) })}
-                />}
-              </div>
-            </Row>
-            {settings.aiConcurrencyMode === 'automatic' && aiConcurrency.length > 0 && (
-              <div className="-mt-2 rounded-lg border border-neutral-800 px-3 py-2 text-xs text-neutral-400">
-                {aiConcurrency.map((entry) => {
-                  const reason = aiConcurrencyReason(entry);
-                  return <div key={`${entry.provider}:${entry.model}`}>
-                    {entry.provider} · {entry.model}: {t('Automático')} · {entry.currentLimit}/{entry.maximumLimit} {t('ahora')}
-                    {reason ? ` · ${t(reason)}` : ''}
-                  </div>;
-                })}
-              </div>
-            )}
-            <Row
-              label={t('Razonamiento (chat/tutor/escritura)')}
-              hint={t('Los escaneos van sin razonamiento para ir más rápido; esto solo afecta a las respuestas conversacionales. En Codex, el nivel que fijes a cada tarea en Modelos manda también en sus escaneos.')}
-            >
-              <select
-                className="input"
-                value={settings.chatReasoning}
-                onChange={(e) => patch({ chatReasoning: e.target.value as AppSettings['chatReasoning'] })}
-              >
-                <option value="off">{t('Desactivado (más rápido)')}</option>
-                <option value="low">{t('Bajo')}</option>
-                <option value="medium">{t('Medio')}</option>
-                <option value="high">{t('Alto (más lento)')}</option>
-              </select>
-            </Row>
-            <Row
-              label={t('IA y datos del alumnado')}
-              hint={t('La IA de Nodus no recibe listados, notas ni respuestas del alumnado y no puede calificar, perfilar ni evaluar estudiantes. Solo puede generar o estructurar contenido docente que no contenga datos del alumnado.')}
-            >
-              <span data-testid="settings-no-ai-student-evaluation" className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:border-emerald-800/60 dark:bg-emerald-950/30 dark:text-emerald-300">
-                <Icon name="shield" size={12} /> {t('Bloqueado por diseño')}
-              </span>
-            </Row>
-            <Row
-              label={t('OpenRouter: priorizar velocidad')}
-              hint={t('Enruta hacia el proveedor más rápido disponible. Puede aumentar ligeramente el coste.')}
-            >
-              <input
-                type="checkbox"
-                checked={settings.openRouterThroughput}
-                onChange={(e) => patch({ openRouterThroughput: e.target.checked })}
-              />
-            </Row>
-            <Row label={t('Email Unpaywall (fallback de texto)')} hint={t('Se usa para recuperar texto académico cuando el documento no está disponible por otras vías.')}>
-              <input className="input" value={settings.unpaywallEmail} onChange={(e) => patch({ unpaywallEmail: e.target.value })} />
-            </Row>
-            <Row label={t('Modo de contexto deep scan')} hint={t('Elige cuánto texto conserva cada análisis profundo antes de dividirlo.')}>
-              <select
-                className="input"
-                value={settings.deepContextMode}
-                onChange={(e) => patch({ deepContextMode: e.target.value as AppSettings['deepContextMode'] })}
-              >
-                <option value="standard">{t('Estándar')}</option>
-                <option value="long">{t('Contexto largo')}</option>
-              </select>
-            </Row>
-            <Row label={t('Palabras por fragmento')} hint={t('Define el tamaño de cada fragmento según el modo de contexto seleccionado.')}>
-              <input
-                type="number"
-                min={settings.deepContextMode === 'long' ? 5000 : 500}
-                max={settings.deepContextMode === 'long' ? 50000 : 5000}
-                step={settings.deepContextMode === 'long' ? 1000 : 100}
-                className="input w-28"
-                value={activeChunkWords}
-                onChange={(e) => patchActiveChunkWords(e.target.value)}
-              />
-            </Row>
-          </Section>
-          <LocalAiModelsSettings
-            settings={settings}
-            patch={patch}
-          />
-          <SttSettings settings={settings} patch={patch} />
-          <LocalImageModelSettings settings={settings} patch={patch} />
-          <ImageGenerationSettings settings={settings} onChange={onChange} />
-          <AudioGenerationSettings settings={settings} onChange={onChange} />
-      </>)}
+      {visibleSettingsSection('models', 'Modelos de IA', 'basico avanzado modelo general extraccion sintesis tutor resumen fusion embeddings transcripcion voz narracion audio ming clonar grabar imagen') && (
+        <ModelSettings settings={settings} activeVault={activeVault} query={settingsQuery} request={modelTabRequest} patch={patch} onChange={onChange} />
+      )}
 
-      {visibleSettingsSection('extraction', 'Extracción de texto PDFs grandes', 'pdf texto zotero ocr tesseract paginas idiomas') && (
-          <Section title={t('Extracción de texto (PDFs grandes)')}>
+      {visibleSettingsSection('extraction', 'Extracción de texto PDFs grandes', 'pdf texto zotero ocr tesseract paginas idiomas unpaywall email') && (
+          <Section title={t('Extracción de texto (PDFs grandes)')} icon="scanText">
+            <Row label={t('Email Unpaywall (fallback de texto)')} hint={t('Se usa para recuperar texto académico cuando el documento no está disponible por otras vías.')}>
+              <input className="input w-full sm:w-80" value={settings.unpaywallEmail} onChange={(e) => patch({ unpaywallEmail: e.target.value })} />
+            </Row>
             <Row label={t('Reusar texto indexado por Zotero')}>
               <input
                 type="checkbox"
@@ -3493,6 +3280,16 @@ export function Settings({
             <p className="text-xs text-neutral-500">
               {t('El OCR es local pero descarga los datos de idioma de Tesseract la primera vez. Desactivado por defecto.')}
             </p>
+            <Row
+              label={t('Simplificar esquemas y figuras en PDFs nuevos')}
+              hint={t('Las etiquetas sueltas de esquemas de reacción, figuras y tablas se sustituyen por «[scheme]» y se quitan los encabezados de página. Solo se aplica a obras cuyo texto aún no se ha usado; la elección se conserva para cada obra.')}
+            >
+              <input
+                type="checkbox"
+                checked={settings.declutterNewDocuments !== false}
+                onChange={(e) => patch({ declutterNewDocuments: e.target.checked })}
+              />
+            </Row>
           </Section>
       )}
 
@@ -3501,20 +3298,13 @@ export function Settings({
       )}
 
       {visibleSettingsSection('data', 'Zona de peligro', 'reinicializar grafo borrar ideas temas conexiones autores huecos') && (
-          <section className="card p-4 mb-4 border border-red-200 dark:border-red-900/60">
-            <h2 className="text-sm font-semibold text-red-600 uppercase tracking-wide mb-3 dark:text-red-400">{t('Zona de peligro')}</h2>
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <label className="text-sm text-neutral-700 dark:text-neutral-300">{t('Reinicializar grafo')}</label>
-                <p className="text-xs text-neutral-500 mt-0.5">
-                  {t('Borra todas las ideas, temas, conexiones, autores y huecos, y deja cada obra sin analizar. La biblioteca y los ajustes se conservan.')}
-                </p>
-              </div>
+          <SettingsPanel icon="alert" className="border-red-200 dark:border-red-900/60" title={<span className="text-red-600 dark:text-red-400">{t('Zona de peligro')}</span>}>
+            <Row label={t('Reinicializar grafo')} hint={t('Borra todas las ideas, temas, conexiones, autores y huecos, y deja cada obra sin analizar. La biblioteca y los ajustes se conservan.')}>
               <button className="btn border border-red-300 text-red-700 hover:bg-red-50 shrink-0 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/50" onClick={startReset}>
                 <Icon name="trash" /> {t('Reinicializar…')}
               </button>
-            </div>
-          </section>
+            </Row>
+          </SettingsPanel>
       )}
 
       {resetCode && (
@@ -3637,56 +3427,6 @@ export function Settings({
           </div>
         </div>
       )}
-      {confirmReindex && (
-        <ConfirmModal
-          title={t('Reindexar todos los embeddings')}
-          message={t('Se borrarán TODOS los embeddings existentes y se regenerarán desde cero. Esto consumirá tokens del proveedor de embeddings configurado. ¿Continuar?')}
-          confirmLabel={t('Reindexar todo')}
-          danger
-          onConfirm={() => {
-            setConfirmReindex(false);
-            void window.nodus.reindexAll();
-          }}
-          onCancel={() => setConfirmReindex(false)}
-        />
-      )}
-
-      {pendingModelSettingsMode && (
-        <ConfirmModal
-          title={t(pendingModelSettingsMode === 'basic' ? '¿Cambiar a la configuración básica?' : '¿Cambiar a la configuración avanzada?')}
-          message={pendingModelSettingsMode === 'basic' ? (
-            <div data-testid="confirm-model-settings-mode" className="space-y-2">
-              <p>{t('Solo un modo puede estar activo. El modelo general pasará a utilizarse en las tareas de texto y las selecciones avanzadas dejarán de aplicarse.')}</p>
-              <p>{t('Después del cambio, revisa y completa «Modelo general de texto» antes de utilizar las funciones de IA. Una configuración incompleta puede hacer que esas funciones fallen.')}</p>
-            </div>
-          ) : (
-            <div data-testid="confirm-model-settings-mode" className="space-y-2">
-              <p>{t('Solo un modo puede estar activo. Cada tarea pasará a utilizar el modelo seleccionado en su propio campo en lugar de depender únicamente del modelo general.')}</p>
-              <p>{t('Después del cambio, revisa y completa los modelos de «Ajustes avanzados comunes» y del vault actual. Una tarea sin un modelo válido puede fallar.')}</p>
-            </div>
-          )}
-          confirmLabel={t(pendingModelSettingsMode === 'basic' ? 'Cambiar a configuración básica' : 'Cambiar a configuración avanzada')}
-          onConfirm={() => {
-            const mode = pendingModelSettingsMode;
-            setPendingModelSettingsMode(null);
-            void patch({ modelSettingsMode: mode });
-          }}
-          onCancel={() => setPendingModelSettingsMode(null)}
-        />
-      )}
-      {pendingEmbeddingChange && (
-        <ConfirmModal
-          title={t('Cambiar modelo de embeddings')}
-          message={t('Los embeddings creados con el modelo anterior no son compatibles con el nuevo. Nodus conservará los datos, pero tendrás que reindexar para que la búsqueda semántica y las relaciones usen el nuevo modelo. ¿Cambiar de todos modos?')}
-          confirmLabel={t('Cambiar modelo')}
-          onConfirm={() => {
-            const next = pendingEmbeddingChange;
-            setPendingEmbeddingChange(null);
-            void patch({ embeddingProvider: next.provider, embeddingModel: next.model });
-          }}
-          onCancel={() => setPendingEmbeddingChange(null)}
-        />
-      )}
       {confirmBetaUpdates && (
         <ConfirmModal
           title={t('¿Activar Beta updates?')}
@@ -3765,6 +3505,8 @@ export function Settings({
           onClose={() => setOpenLegalDoc(null)}
         />
       )}
+      </main>
+      </div>
     </div>
   );
 }
@@ -3834,6 +3576,7 @@ function NodusServerGuideModal({ onOpenGuide, onClose }: { onOpenGuide: () => vo
 function SidebarOrderEditor({
   sidebarOrder,
   sidebarHidden,
+  alwaysVisible = [],
   toolkitPinnedPages,
   vaultType,
   onReorder,
@@ -3841,6 +3584,7 @@ function SidebarOrderEditor({
 }: {
   sidebarOrder: string[];
   sidebarHidden: string[];
+  alwaysVisible?: string[];
   toolkitPinnedPages: AppSettings['toolkitPinnedPages'];
   vaultType: VaultType | undefined;
   onReorder: (ids: string[]) => void;
@@ -3888,6 +3632,7 @@ function SidebarOrderEditor({
     const orderedAll = orderedNav(sidebarOrder).filter(
       (item) => item.id !== 'home'
         && item.id !== 'settings'
+        && !(vaultType === 'academic' && item.id === 'notes')
         && isViewAllowedForVaultType(item.id, vaultType)
         && (!dedicated || dedicated.has(item.id)),
     );
@@ -3903,7 +3648,7 @@ function SidebarOrderEditor({
     groups.push({
       id: universalTools.id,
       label: universalTools.label,
-      items: universalTools.items.map((item) => ({ ...item, group: universalTools.id })),
+      items: universalTools.items.filter(item => !(vaultType === 'academic' && item.id === 'notes')).map((item) => ({ ...item, group: universalTools.id })),
     });
   }
   groups = groups.filter((group) => group.items.length > 0);
@@ -4003,7 +3748,9 @@ function SidebarOrderEditor({
                       ? 'text-neutral-600 hover:text-neutral-300'
                       : 'text-neutral-500 hover:text-neutral-100'
                   }`}
-                  title={hidden.has(item.id) ? t('Mostrar') : t('Ocultar')}
+                  disabled={alwaysVisible.includes(item.id)}
+                  aria-label={alwaysVisible.includes(item.id) ? t('Siempre visible') : hidden.has(item.id) ? t('Mostrar') : t('Ocultar')}
+                  title={alwaysVisible.includes(item.id) ? t('Siempre visible') : hidden.has(item.id) ? t('Mostrar') : t('Ocultar')}
                   onClick={() => toggleHidden(item.id)}
                 >
                   <Icon name={hidden.has(item.id) ? 'eyeOff' : 'eye'} size={14} />
@@ -4031,85 +3778,6 @@ function SidebarOrderEditor({
       ))}
     </div>
   );
-}
-
-type VaultModelKey = 'chatModel' | 'deepResearchModel' | 'immersionModel' | 'writingModel' | 'argumentMapModel' | 'authorModel' | 'dictionaryModel' | 'studyModel' | 'tutorModel' | 'hypothesisModel';
-
-const VAULT_MODEL_FIELDS: Record<VaultModelKey, string> = {
-  chatModel: 'Chat con el corpus',
-  deepResearchModel: 'Deep Research',
-  immersionModel: 'Inmersión',
-  writingModel: 'Espacio de trabajo',
-  argumentMapModel: 'Mapa argumental',
-  authorModel: 'Autores y biografías',
-  dictionaryModel: 'Diccionario',
-  studyModel: 'Guías de estudio',
-  tutorModel: 'Tutor',
-  hypothesisModel: 'Laboratorio de hipótesis',
-};
-
-const VAULT_MODEL_HINTS: Record<VaultModelKey, string> = {
-  chatModel: 'Responde preguntas sobre el corpus y cita la evidencia utilizada.',
-  deepResearchModel: 'Planifica y redacta informes extensos a partir de fuentes y relaciones.',
-  immersionModel: 'Genera sesiones guiadas de lectura y trabajo con las fuentes.',
-  writingModel: 'Revisa, amplía y transforma borradores en el Espacio de trabajo.',
-  argumentMapModel: 'Construye mapas de tesis, razones, objeciones y evidencias.',
-  authorModel: 'Sintetiza perfiles de autor y redacta biografías basadas en el corpus.',
-  dictionaryModel: 'Genera y actualiza definiciones del Diccionario desde la evidencia.',
-  studyModel: 'Prepara guías y materiales de repaso a partir del contenido del vault.',
-  tutorModel: 'Adapta explicaciones, preguntas y rutas de aprendizaje en el Tutor.',
-  hypothesisModel: 'Propone, contrasta y desarrolla hipótesis de investigación.',
-};
-
-function vaultModelKeys(type: VaultType): VaultModelKey[] {
-  if (type === 'genealogy') return ['chatModel', 'deepResearchModel', 'authorModel'];
-  if (type === 'databases') return ['chatModel'];
-  if (type === 'estudio') return [];
-  return Object.keys(VAULT_MODEL_FIELDS) as VaultModelKey[];
-}
-
-function VaultModelOverrides({ settings, vaultType, vaultName, patch }: {
-  settings: AppSettings;
-  vaultType: VaultType;
-  vaultName: string;
-  patch: (value: Partial<AppSettings>) => Promise<void>;
-}) {
-  const keys = vaultModelKeys(vaultType);
-  return <div className="mt-5 border-t border-neutral-800 pt-4" data-testid="vault-model-overrides">
-    <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{tx('Ajustes avanzados del vault {vault}', { vault: vaultName })}</h3>
-    <p className="mb-3 mt-1 text-xs text-neutral-600">{t('Estos cambios no modifican los demás vaults.')}</p>
-    {vaultType === 'estudio' ? <StudyVaultModelOverrides settings={settings} patch={patch} /> : <div className="space-y-3">
-      {keys.map((key) => <Row key={key} label={t(VAULT_MODEL_FIELDS[key])} hint={t(VAULT_MODEL_HINTS[key])}>
-        <ModelWithReasoning allowEmpty={false} settings={settings} value={settings[key] ?? null} onChange={(model) => void patch({ [key]: model })} emptyLabel="Seleccionar modelo" menu />
-      </Row>)}
-    </div>}
-  </div>;
-}
-
-const STUDY_VAULT_MODEL_FIELDS = [
-  { task: 'chat', label: 'Chat con el corpus', hint: 'Responde preguntas sobre el corpus y cita la evidencia utilizada.', key: 'chatModel' },
-  { task: 'improve', label: 'Mejora de texto', hint: 'Revisa, amplía y transforma borradores en el Taller de escritura.', key: 'improveModel' },
-  { task: 'questions', label: 'Generación de preguntas', hint: 'Adapta explicaciones, preguntas y rutas de aprendizaje en el Tutor.', key: 'questionGenModel' },
-  { task: 'flashcards', label: 'Generación de flashcards', hint: 'Prepara guías y materiales de repaso a partir del contenido del vault.', key: 'flashcardModel' },
-] as const;
-
-function StudyVaultModelOverrides({ settings, patch }: {
-  settings: AppSettings;
-  patch: (value: Partial<AppSettings>) => Promise<void>;
-}) {
-  return <div className="grid grid-cols-[minmax(9rem,1fr)_minmax(11rem,1fr)_minmax(11rem,1fr)] gap-x-4 gap-y-3 text-xs">
-    <b className="text-neutral-600">{t('Tarea')}</b>
-    <b className="text-neutral-600">{t('Principal')}</b>
-    <b className="text-neutral-600">{t('Alternativo ante error')}</b>
-    {STUDY_VAULT_MODEL_FIELDS.map((item) => <div key={item.task} className="contents">
-      <span className="self-center text-neutral-300">
-        {t(item.label)}
-        <span className="mt-0.5 block text-[10px] leading-4 text-neutral-500">{t(item.hint)}</span>
-      </span>
-      <ModelWithReasoning compact allowEmpty={false} settings={settings} value={settings[item.key]} onChange={(model) => void patch({ [item.key]: model })} emptyLabel="Seleccionar modelo" menu />
-      <ModelWithReasoning compact settings={settings} value={settings.studyAiFallbackModels[item.task] ?? null} onChange={(model) => void patch({ studyAiFallbackModels: { ...settings.studyAiFallbackModels, [item.task]: model } })} emptyLabel="Sin modelo alternativo" menu />
-    </div>)}
-  </div>;
 }
 
 function formatDataBytes(bytes: number): string {
@@ -4145,40 +3813,11 @@ function StudyDataAdministration() {
   </div>;
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="card p-4 mb-4">
-      <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wide mb-3">{title}</h2>
-      <div className="space-y-3">{children}</div>
-    </section>
-  );
+function Section({ title, description, icon, children, id }: { title: string; description?: string; icon?: string; children: React.ReactNode; id?: string }) {
+  return <SettingsPanel id={id} title={title} description={description} icon={icon}>{children}</SettingsPanel>;
 }
 
-function Row({ label, children, hint, stacked = false }: { label: string; children: React.ReactNode; hint?: string; stacked?: boolean }) {
-  // A control that is itself a grid of options reads better under its own label
-  // than beside it: the two-column shape would leave the label column empty for
-  // the height of the grid and push the options into the narrow right side.
-  if (stacked) {
-    return (
-      <div className="grid gap-3">
-        <label className="text-sm text-neutral-300">
-          {label}
-          {hint && <span className="mt-0.5 block text-xs text-neutral-500">{hint}</span>}
-        </label>
-        <div className="min-w-0">{children}</div>
-      </div>
-    );
-  }
-  return (
-    <div className="grid gap-3 md:grid-cols-[minmax(13rem,0.85fr)_minmax(0,1.55fr)] md:items-start">
-      <label className="pt-2 text-sm text-neutral-300">
-        {label}
-        {hint && <span className="mt-0.5 block text-xs text-neutral-500">{hint}</span>}
-      </label>
-      <div className="min-w-0 md:flex md:justify-end">{children}</div>
-    </div>
-  );
-}
+const Row = SettingsRow;
 
 function SettingsTabButton({
   active,
@@ -4193,14 +3832,15 @@ function SettingsTabButton({
 }) {
   return (
     <button
-      className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors ${
+      className={`inline-flex shrink-0 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm leading-5 transition-colors lg:w-full ${
         active
-          ? 'border-indigo-500 bg-indigo-600 text-white shadow-sm shadow-indigo-950/20'
-          : 'border-neutral-800 bg-neutral-900/40 text-neutral-400 hover:border-neutral-700 hover:text-neutral-200'
+          ? 'bg-indigo-50 font-medium text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-200'
+          : 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-900 dark:hover:text-neutral-100'
       }`}
+      aria-current={active ? 'page' : undefined}
       onClick={onClick}
     >
-      <Icon name={icon} size={14} />
+      <Icon name={icon} size={16} className="shrink-0" />
       {children}
     </button>
   );

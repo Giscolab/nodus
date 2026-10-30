@@ -34,7 +34,7 @@ function parseBase() {
   if (arg) return arg.slice('--base='.length);
   const i = process.argv.indexOf('--base');
   if (i >= 0 && process.argv[i + 1]) return process.argv[i + 1];
-  return process.env.ZOTERO_XPI_BASE || 'https://github.com/Drakonis96/nodus/releases/latest/download/';
+  return process.env.ZOTERO_XPI_BASE || 'https://github.com/jorgepb96/nodus/releases/latest/download/';
 }
 
 // Files to include: the whole plugin tree, minus junk. manifest.json lands at
@@ -85,8 +85,8 @@ export function buildXpi() {
       define: { 'process.env.NODE_ENV': '"production"' },
       logLevel: 'warning',
     });
-    for (const name of ['ort-wasm-simd-threaded.jsep.mjs', 'ort-wasm-simd-threaded.jsep.wasm']) {
-      cpSync(path.join(repoRoot, 'node_modules', '@huggingface', 'transformers', 'dist', name), path.join(runtimeDir, name));
+    for (const name of ['ort-wasm-simd-threaded.jsep.mjs', 'ort-wasm-simd-threaded.jsep.wasm', 'ort-wasm-simd-threaded.asyncify.mjs', 'ort-wasm-simd-threaded.asyncify.wasm', 'ort-wasm-simd-threaded.jspi.mjs', 'ort-wasm-simd-threaded.jspi.wasm']) {
+      cpSync(path.join(repoRoot, 'node_modules', '@nodus', 'embeddinggemma-transformers', 'node_modules', 'onnxruntime-web', 'dist', name), path.join(runtimeDir, name));
     }
 
     files = collectFiles(staging);
@@ -94,6 +94,13 @@ export function buildXpi() {
     for (const required of [
       'content/evidence-db.sys.mjs',
       'content/local-embeddings.js',
+      'content/embedding-models.js',
+      'content/models/harrier-270m-q8-wasm.onnx',
+      'content/models/NOTICE.md',
+      'content/runtime/ort-wasm-simd-threaded.asyncify.mjs',
+      'content/runtime/ort-wasm-simd-threaded.asyncify.wasm',
+      'content/runtime/ort-wasm-simd-threaded.jspi.mjs',
+      'content/runtime/ort-wasm-simd-threaded.jspi.wasm',
       'content/runtime/local-embedding-worker.js',
       'content/runtime/ort-wasm-simd-threaded.jsep.mjs',
       'content/runtime/ort-wasm-simd-threaded.jsep.wasm',

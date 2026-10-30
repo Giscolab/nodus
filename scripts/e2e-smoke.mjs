@@ -23,6 +23,16 @@ import { buildTextPdf } from './toolkit-fixtures.mjs';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const appVersion = require(path.join(repoRoot, 'package.json')).version;
+const RETIRED_STARTUP_ANNOUNCEMENTS = [
+  { testId: 'pdf-presenter-tutorial-announcement', seenKey: 'nodus.pdfPresenterTutorialSeen.e2js_u-05OA' },
+  { testId: 'mobile-teaser-guide', seenKey: 'nodus.mobileTeaserSeen.3.2.4' },
+  { testId: 'platform-highlights-update-tour', seenKey: 'nodus.platformHighlightsSeen.2026-07' },
+  { testId: 'toolkit-beta-update-tour', seenKey: 'nodus.toolkitBetaGuideSeen.2.4.0' },
+  { testId: 'tutorial-videos-update-tour', seenKey: 'nodus.tutorialVideosAnnouncementSeen.2026-07' },
+];
+// Mesa provides real WebGL on CPU; retain software UI compositing and sandboxing.
+const ciGpuArgs = process.env.CI && process.platform === 'linux'
+  ? ['--use-gl=angle', '--use-angle=gl', '--ignore-gpu-blocklist', '--disable-gpu-compositing'] : [];
 
 // Re-exec under Electron-as-Node so the final better-sqlite3 check matches the
 // app ABI (same pattern as every other script in this suite). Playwright then
@@ -91,6 +101,24 @@ setTimeout(() => {
 }, 30);
 `, 'utf8');
   await chmod(fakeWhisperPath, 0o755);
+  // Live dictation uses a resident loopback server rather than the recording
+  // CLI. Keep recognition synthetic while exercising real IPC and capture.
+  const fakeWhisperServer = path.join(userData, 'whisper-server');
+  await writeFile(fakeWhisperServer, `#!/usr/bin/env node
+import { createServer } from 'node:http';
+const option = name => process.argv[process.argv.indexOf(name) + 1];
+const route = option('--request-path');
+createServer((request, response) => {
+  request.resume();
+  request.on('end', () => {
+    response.setHeader('Content-Type', 'application/json');
+    if (request.url === route + '/health') response.end('{"status":"ok"}');
+    else if (request.method === 'POST' && request.url === route + '/inference') response.end('{"text":"Hola mundo."}');
+    else { response.statusCode = 404; response.end('{}'); }
+  });
+}).listen(Number(option('--port')), option('--host'));
+`, 'utf8');
+  await chmod(fakeWhisperServer, 0o755);
   const modelDir = path.join(userData, 'whisper.cpp', 'models');
   await mkdir(modelDir, { recursive: true });
   await writeFile(path.join(modelDir, 'ggml-base.bin'), 'e2e-placeholder');
@@ -109,6 +137,9 @@ async function closeElectronApp(instance) {
 }
 
 let app = null;
+let page = null;
+const pageErrors = [];
+const consoleMessages = [];
 try {
   // The child must run as a real GUI app: strip the runner's as-Node flag.
   const childEnv = {
@@ -126,6 +157,7 @@ try {
   app = await electron.launch({
     executablePath: packagedExecutable || require('electron'),
     args: [
+      ...ciGpuArgs,
       '--use-fake-device-for-media-stream',
       '--use-fake-ui-for-media-stream',
       ...(packagedExecutable ? [] : [repoRoot]),
@@ -135,16 +167,14 @@ try {
   if (packagedExecutable) console.log(`[e2e] packaged executable: ${packagedExecutable}`);
 
   // ── Window + renderer mount ─────────────────────────────────────────────────
-  const page = await app.firstWindow();
+  page = await app.firstWindow();
   page.setDefaultTimeout(30_000);
-  const pageErrors = [];
   page.on('pageerror', (err) => {
     pageErrors.push(err);
     process.stderr.write(`[e2e][pageerror] ${err?.stack ?? err}\n`);
   });
   // Kept so the tutorial walk can prove the CSP actually admits the video embed: a
   // blocked frame never attaches, it only logs "Refused to frame …".
-  const consoleMessages = [];
   page.on('console', (message) => { consoleMessages.push(message.text()); });
   await page.waitForLoadState('domcontentloaded');
   await page.waitForFunction(() => {
@@ -152,15 +182,24 @@ try {
     return !!root && root.children.length > 0;
   }, { timeout: 30_000 });
   console.log('[e2e] renderer mounted');
+  if (process.env.CI && process.platform === 'linux') {
+    const graphics = await page.evaluate(() => {
+      const gl = document.createElement('canvas').getContext('webgl2');
+      if (!gl) return null;
+      const debug = gl.getExtension('WEBGL_debug_renderer_info');
+      const renderer = gl.getParameter(debug ? debug.UNMASKED_RENDERER_WEBGL : gl.RENDERER);
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      return { renderer };
+    });
+    assert.ok(graphics, 'the Linux runner supplies a real WebGL2 context');
+    console.log('[e2e] Linux graphics:', graphics);
+  }
 
   // Suppress the "what's new" modal: a fresh profile has no last-seen version, so it
   // would otherwise overlay the app and intercept later clicks. localStorage persists
   // across the reloads below (same origin).
   await page.evaluate((version) => {
     localStorage.setItem('nodus.lastSeenVersion', version);
-    localStorage.setItem('nodus.pdfPresenterTutorialSeen.e2js_u-05OA', '1');
-    // The mobile teaser sits between release notes and everything behind it.
-    localStorage.setItem(`nodus.mobileTeaserSeen.${version}`, '1');
   }, appVersion);
 
   // ── Preload bridge ──────────────────────────────────────────────────────────
@@ -222,9 +261,19 @@ try {
   assert.equal(signedOutChatGpt.available, true, `official Codex runtime is available: ${signedOutChatGpt.error ?? 'ok'}`);
   assert.equal(signedOutChatGpt.connected, false, 'throwaway profile starts without a ChatGPT account');
   assert.equal(signedOutChatGpt.loginPending, false, 'throwaway profile has no pending OAuth flow');
+  // Installers no longer carry the Codex and Copilot CLIs: a packaged app downloads them at
+  // first use, and reading the status must never be that use (every visit to Providers reads it).
+  if (process.env.NODUS_E2E_EXECUTABLE) {
+    assert.equal(signedOutChatGpt.runtime?.state, 'missing', 'a packaged app does not carry the Codex CLI and reading the status does not fetch it');
+    const signedOutCopilot = await page.evaluate(() => window.nodus.getGitHubCopilotSubscriptionStatus());
+    assert.equal(signedOutCopilot.runtime?.state, 'missing', 'a packaged app does not carry the Copilot CLI and reading the status does not fetch it');
+  }
   console.log('[e2e] preload bridge ok');
 
-  // ── Essential tutorial: first screen, language preferences, seen-once gate ──
+  // Fresh academic setup is covered by e2e-academic-learning. Exercise the optional
+  // full essential guide here, as an existing vault replay, without recreating it.
+  await page.evaluate(() => window.nodus.updateSettings({firstVaultVersion:1,academicInterfaceProfile:'advanced'}));
+  // ── Essential tutorial: language preferences, seen-once gate ──
   await page.getByTestId('basics-tutorial-language').waitFor({ timeout: 30_000 });
   const languageButtonSizes = await page.locator('.tutorial-language-option').evaluateAll((buttons) =>
     buttons.map((button) => { const box = button.getBoundingClientRect(); return `${Math.round(box.width)}x${Math.round(box.height)}`; }));
@@ -296,7 +345,7 @@ try {
     const settings = await window.nodus.getSettings();
     return settings.uiLanguage === 'fr' && settings.promptLanguage === 'fr';
   }));
-  assert.equal(await page.locator('.tutorial-progress button').count(), 19, 'essential guide exposes thirteen core chapters plus three model-guidance and three connected-workflow chapters');
+  assert.equal(await page.locator('.tutorial-progress button').count(), 20, 'essential guide includes the interface profiles chapter alongside the existing chapters');
   await page.locator('.tutorial-topbar button').click();
   // The skip dialog follows the (now French) UI language, proving the French table
   // is actually wired into a real render.
@@ -332,21 +381,23 @@ try {
   }
   console.log(`[e2e] ${Object.keys(SIDEBAR_BY_LANGUAGE).length} translated UIs render on the real shell (sidebar + document lang)`);
 
-  // Existing users (tutorial v4) receive the new three-part connected-workflows
-  // summary immediately after release notes. This profile is throwaway, so the
-  // seen key exercised here never touches the developer's real Nodus profile.
-  await page.evaluate(async (version) => {
+  async function assertRetiredAnnouncementsAbsent(profile) {
+    for (const { testId } of RETIRED_STARTUP_ANNOUNCEMENTS) {
+      assert.equal(await page.getByTestId(testId).count(), 0, `${profile}: ${testId} stays retired`);
+    }
+    const markers = await page.evaluate((keys) => keys.map((key) => localStorage.getItem(key)),
+      RETIRED_STARTUP_ANNOUNCEMENTS.map(({ seenKey }) => seenKey));
+    assert.deepEqual(markers, Array(RETIRED_STARTUP_ANNOUNCEMENTS.length).fill(null), `${profile}: obsolete seen markers are not written`);
+  }
+  await assertRetiredAnnouncementsAbsent('fresh installation');
+
+  // Existing users with an older tutorial and no historical seen markers still get
+  // release notes, but none of the retired feature announcements can follow them.
+  await page.evaluate(async (seenKeys) => {
     localStorage.removeItem('nodus.lastSeenVersion');
-    localStorage.removeItem('nodus.pdfPresenterTutorialSeen.e2js_u-05OA');
-    localStorage.removeItem('nodus.platformHighlightsSeen.2026-07');
-    // Walking the tutorial above marked the videos announcement seen, exactly as it
-    // does for a real first run. Clear it here so the announcement this existing user
-    // never got is exercised too — it must be cleared BEFORE the render, since
-    // eligibility is read once, when the modal mounts.
-    localStorage.removeItem('nodus.tutorialVideosAnnouncementSeen.2026-07');
-    localStorage.removeItem(`nodus.mobileTeaserSeen.${version}`);
+    for (const key of seenKeys) localStorage.removeItem(key);
     await window.nodus.updateSettings({ uiLanguage: 'es', promptLanguage: 'es', basicsTutorialVersion: 4 });
-  }, appVersion);
+  }, RETIRED_STARTUP_ANNOUNCEMENTS.map(({ seenKey }) => seenKey));
   await page.reload();
   const whatsNewForExistingUser = page.getByTestId('whats-new-cinematic-modal');
   await whatsNewForExistingUser.waitFor();
@@ -383,57 +434,9 @@ try {
   await page.evaluate((className) => { document.documentElement.className = className; }, releaseOriginalClasses);
   await whatsNewForExistingUser.getByRole('button', { name: 'Explorar las novedades', exact: true }).click();
 
-  const pdfPresenterAnnouncement = page.getByTestId('pdf-presenter-tutorial-announcement');
-  await pdfPresenterAnnouncement.waitFor();
-  assert.match(await pdfPresenterAnnouncement.locator('iframe').getAttribute('src'), /e2js_u-05OA/);
-  await pdfPresenterAnnouncement.getByRole('button', { name: 'Cerrar', exact: true }).click();
-  await pdfPresenterAnnouncement.waitFor({ state: 'detached' });
-  assert.equal(await page.evaluate(() => localStorage.getItem('nodus.pdfPresenterTutorialSeen.e2js_u-05OA')), '1');
-
-  // First behind release notes sat the look at the mobile app, and it was a 3.2.4
-  // one-off: it presents only on the version it names, and its seen-key carries that
-  // version, so pointing the constant at a later release would show the gallery again to
-  // everyone who already met it. Past 3.2.4 the step must retire WITHOUT stalling the
-  // chain it holds — it sits between release notes and the connected-workflows summary,
-  // so a retired modal that forgets to settle strands everything behind it. Reaching the
-  // summary at all is the proof; the carousel itself is covered by
-  // scripts/test-mobile-teaser-guide.mjs, which still pins all nine shipped screenshots.
-  const platformTour = page.getByTestId('platform-highlights-update-tour');
-  await platformTour.waitFor();
-  assert.equal(
-    await page.getByTestId('mobile-teaser-guide').count(),
-    0,
-    'the 3.2.4 teaser must not come back on a later release',
-  );
-  console.log('[e2e] the retired mobile teaser hands the chain straight to the summary');
-
-  assert.equal(await platformTour.locator('.toolkit-guide-progress button').count(), 3, 'existing-user summary has three ordered chapters');
-  await platformTour.getByRole('heading', { name: 'MCP local y Nodus Server', exact: true }).waitFor();
-  await platformTour.getByRole('button', { name: 'Siguiente', exact: true }).click();
-  await platformTour.getByRole('heading', { name: 'Nodus para Zotero', exact: true }).waitFor();
-  assert.equal(await platformTour.locator('img[alt="Zotero"]').count(), 1, 'the Zotero chapter renders the official Zotero mark');
-  await platformTour.getByRole('button', { name: 'Siguiente', exact: true }).click();
-  await platformTour.getByRole('heading', { name: 'El Toolkit completo', exact: true }).waitFor();
-  await platformTour.getByTestId('platform-highlights-tour-complete').click();
-  await platformTour.waitFor({ state: 'detached' });
-  assert.equal(await page.evaluate(() => localStorage.getItem('nodus.platformHighlightsSeen.2026-07')), '1', 'the summary is marked seen only after its final action');
-  console.log('[e2e] release notes hand off to the translated three-part connected-workflows summary');
-
-  // …and behind that, the videos announcement: the one modal that embeds the catalogue
-  // instead of describing it, for users who completed the guide when it was text-only.
-  const videosTour = page.getByTestId('tutorial-videos-update-tour');
-  await videosTour.waitFor();
-  await videosTour.getByRole('heading', { name: 'Tutoriales en vídeo', exact: true }).waitFor();
-  // The WHOLE catalogue, arranged on its shelves — the announcement's claim is that it
-  // shows the tutorials rather than describing them. Asserted by shape, not by a count
-  // that has to be edited every time a tutorial is published.
-  assert.ok(await videosTour.locator('.tutorial-video-card').count() >= 4, 'the announcement embeds the published catalogue');
-  assert.equal(await videosTour.locator('.tutorial-videos-shelf-title').count(), 4, 'introduction, vaults, features, integrations');
-  assert.equal(await videosTour.locator('iframe').count(), 0, 'nothing is framed until a card is opened');
-  await videosTour.getByTestId('tutorial-videos-tour-complete').click();
-  await videosTour.waitFor({ state: 'detached' });
-  assert.equal(await page.evaluate(() => localStorage.getItem('nodus.tutorialVideosAnnouncementSeen.2026-07')), '1', 'the announcement is marked seen only when dismissed');
-  console.log('[e2e] the video tutorials announcement shows the catalogue in-modal, once');
+  await whatsNewForExistingUser.waitFor({ state: 'detached' });
+  await assertRetiredAnnouncementsAbsent('existing installation after release notes');
+  console.log('[e2e] all five retired startup announcements stay absent without seen markers');
 
   // Back to Spanish for the rest of the suite, which asserts on Spanish copy. The
   // reload above already consumed the once-per-session startup update check, so reset
@@ -451,6 +454,7 @@ try {
   ));
   await page.getByTestId('update-ready-notice').waitFor({ state: 'detached' });
   assert.equal(await page.getByTestId('startup-update-modal').count(), 0);
+  await assertRetiredAnnouncementsAbsent('existing installation after restart');
   console.log('[e2e] essential tutorial language preferences + persistent seen-once gate ok');
 
   // No startup dialog offers document understanding any more: it is opted into from
@@ -566,6 +570,10 @@ try {
     assert.ok(!/nodus|ollama|lm studio/i.test(triggerText), `${role} does not open on a local model (shows "${triggerText.trim()}")`);
   }
   assert.equal(await startButton.isEnabled(), false, 'nothing is preselected, so starting stays disabled');
+  // Simple recommends cloud first. This offline fixture deliberately enables the
+  // advanced local choices instead of expecting them in the initial discovery.
+  const localChoice=modelStep.getByRole('button',{name:'Local: opción avanzada',exact:true});
+  if(await localChoice.count())await localChoice.click();
 
   // Choosing one per role is what enables it.
   for (const role of ['onboarding-ai-model', 'onboarding-embedding-model']) {
@@ -637,6 +645,12 @@ try {
   await chatGptProvider.waitFor();
   await chatGptProvider.locator('button').first().click();
   await chatGptProvider.getByRole('button', { name: 'Conectar suscripción de ChatGPT', exact: true }).waitFor();
+  // Until the Codex CLI is on this machine, the card says that connecting downloads it first.
+  assert.equal(
+    await chatGptProvider.getByTestId('agent-runtime-download').count(),
+    process.env.NODUS_E2E_EXECUTABLE ? 1 : 0,
+    'the first-download notice shows exactly when the CLI is missing',
+  );
   await chatGptProvider.getByText('El uso consume la cuota o los créditos de Codex incluidos en tu plan de ChatGPT; no consume saldo de la API de OpenAI.', { exact: true }).waitFor();
   const githubCopilotProvider = page.getByTestId('github-copilot-subscription-provider');
   await githubCopilotProvider.waitFor();
@@ -766,18 +780,30 @@ try {
   console.log('[e2e] ChatGPT MCP connector has readable light/dark surfaces');
 
   await page.getByRole('button', { name: 'Modelos IA', exact: true }).click();
+  // Models opens on its essentials: one card with the main, extraction and vision pickers,
+  // embeddings and the reranker. Every other kind of model sits behind an icon tab.
+  const essentialModels = page.getByTestId('essential-models');
+  await essentialModels.waitFor({ timeout: 30_000 });
+  assert.equal(await page.getByTestId('model-type-tabs').getByRole('tab').count(), 7, 'every model type has its own tab');
+  assert.ok(await essentialModels.locator('button[aria-haspopup="listbox"]').count() >= 3, 'the essentials card offers the main, extraction and vision pickers');
+  await essentialModels.getByTestId('embedding-model-input').waitFor();
+  await essentialModels.getByTestId('essential-reranker').waitFor();
+  assert.equal(await page.getByTestId('model-settings-mode').count(), 0, 'there is no basic/advanced switch any more');
+  await page.getByTestId('settings-tab-image').click();
   await page.getByText('Generación de imágenes', { exact: true }).waitFor({ timeout: 30_000 });
   assert.equal(await page.getByText('gemini-3.1-flash-lite-image', { exact: false }).count() > 0, true, 'image settings render selected verified model');
+  await page.getByTestId('settings-tab-advanced').click();
   const advancedPickers = page.getByTestId('common-model-overrides').locator('button[aria-haspopup="listbox"]');
+  await advancedPickers.first().waitFor();
   const advancedPickerBoxes = await advancedPickers.evaluateAll((triggers) => triggers.map((trigger) => {
     const box = trigger.getBoundingClientRect();
     return { width: box.width, height: box.height };
   }));
-  assert.ok(advancedPickerBoxes.length >= 5, 'advanced model settings render a common selector for every task, including Nodi');
+  assert.ok(advancedPickerBoxes.length >= 3, 'the corpus analysis tasks without a picker of their own keep one here');
   const advancedPickerHeights = advancedPickerBoxes.map((box) => box.height);
   const advancedPickerWidths = advancedPickerBoxes.map((box) => box.width);
-  assert.ok(Math.max(...advancedPickerHeights) - Math.min(...advancedPickerHeights) <= 1, 'the Nodi model selector has the same height as adjacent advanced selectors');
-  assert.ok(Math.max(...advancedPickerWidths) - Math.min(...advancedPickerWidths) <= 1, 'all common advanced model selectors have the same width');
+  assert.ok(Math.max(...advancedPickerHeights) - Math.min(...advancedPickerHeights) <= 1, 'the per-task selectors share one height');
+  assert.ok(Math.max(...advancedPickerWidths) - Math.min(...advancedPickerWidths) <= 1, 'the per-task selectors share one width');
   for (let i = 0; i < advancedPickerBoxes.length; i++) {
     const trigger = advancedPickers.nth(i);
     await trigger.click();
@@ -789,13 +815,13 @@ try {
     await search.press('Escape');
     assert.equal(await trigger.evaluate((element) => document.activeElement === element), true, 'Escape restores focus to the model trigger');
   }
-  const nodiPicker = page.getByTestId('common-model-overrides').locator('div.grid').filter({ has: page.locator('label').filter({ hasText: 'Asistente Nodi' }) }).locator('button[aria-haspopup="listbox"]');
-  await nodiPicker.click();
+  const relationPicker = page.getByTestId('common-model-overrides').locator('div.grid').filter({ has: page.locator('label').filter({ hasText: 'Relaciones semánticas' }) }).locator('button[aria-haspopup="listbox"]');
+  await relationPicker.click();
   await page.getByTestId('model-picker-search').fill('flash gemini');
   await page.locator('.model-picker-list').getByRole('option', { name: /gemini-flash-lite/ }).click();
   await page.waitForFunction(() => document.querySelector('[data-testid="common-model-overrides"]')?.textContent.includes('gemini-flash-lite'));
-  assert.deepEqual((await page.evaluate(() => window.nodus.getSettings())).nodiModel, searchableModel, 'selecting a search result persists the Nodi model through real IPC');
-  await nodiPicker.click();
+  assert.deepEqual((await page.evaluate(() => window.nodus.getSettings())).relationModel, searchableModel, 'selecting a search result persists the relation model through real IPC');
+  await relationPicker.click();
   await page.getByTestId('model-picker-search').fill('openai smoke');
   await page.locator('.model-picker-list').getByRole('option', { name: /smoke-model/ }).click();
   console.log('[e2e] all advanced model pickers search without strict separators, preserve layout and save selections');
@@ -891,9 +917,23 @@ try {
   await page.getByTestId('whats-new-cinematic-modal').getByRole('button', { name: 'Cerrar', exact: true }).click();
   await page.getByTestId('whats-new-cinematic-modal').waitFor({ state: 'detached' });
   await page.getByRole('button', { name: 'Modelos IA', exact: true }).click();
+  await page.getByTestId('settings-tab-local').click();
   await page.getByTestId('nodus-local-ai-models').waitFor({ timeout: 30_000 });
   const localAiStatus = await page.evaluate(() => window.nodus.getNodusLocalAiStatus());
-  assert.equal(localAiStatus.models.length, 7, 'integrated local AI catalog is available over the real preload bridge');
+  assert.equal(localAiStatus.models.length, 12, 'integrated local AI catalog is available over the real preload bridge');
+  for (const legacyId of ['bge-m3-q8_0', 'gte-multilingual-base-int8']) {
+    const [cls, legacy] = [`${legacyId}-cls`, legacyId].map(id => localAiStatus.models.find(model => model.id === id));
+    assert.ok(cls && legacy, `${legacyId} is offered with its CLS profile`);
+    assert.equal(cls.path, legacy.path, 'the CLS and mean profiles share the historical asset directory');
+  }
+  assert.ok(localAiStatus.models.some(model => model.id === 'harrier-oss-v1-0.6b-q8_0'), 'Harrier is offered as a built-in embedding model');
+  const embeddingGemmaProfiles = localAiStatus.models.filter(model => model.id.startsWith('embeddinggemma'));
+  assert.deepEqual(embeddingGemmaProfiles.map(model => model.id), ['embeddinggemma-2-text-q8-512-v1', 'embeddinggemma-2-text-q8-256-v1']);
+  assert.equal(embeddingGemmaProfiles[0].path, embeddingGemmaProfiles[1].path, 'both profiles share one asset directory');
+  const embeddingGemmaCard = page.getByTestId('local-model-embeddinggemma-2-text-q8-512-v1');
+  assert.equal(await page.getByTestId('nodus-local-embedding-list').locator('[data-testid^="local-model-embeddinggemma-"]').count(), 1, 'shared weights render as a single download');
+  await embeddingGemmaCard.getByText('Experimental', { exact: true }).waitFor();
+  assert.match(await embeddingGemmaCard.innerText(), /Eliminarla afecta a ambos/);
   assert.equal(await page.getByText('BGE-M3 Q8_0', { exact: true }).count(), 1, 'local embedding catalog renders');
   assert.equal(await page.getByText('Qwen3.5-0.8B Q4', { exact: true }).count(), 1, 'local multimodal chat catalog renders');
   for (const assignmentAction of ['Seleccionado', 'Usar para embeddings', 'Modelo general', 'Usar como general', 'Modelo de visión', 'Usar para visión']) {
@@ -909,6 +949,7 @@ try {
     assert.equal(installedRuntime.status.runtime.ready, true, 'Nodus downloads and extracts a working llama.cpp runtime');
     assert.ok(installedRuntime.progress.some((fraction) => fraction >= 1), 'local runtime installation reports completion progress');
   }
+  await page.getByTestId('settings-tab-image').click();
   await page.getByTestId('nodus-local-image-models').waitFor({ timeout: 30_000 });
   const localImageStatus = await page.evaluate(() => window.nodus.getNodusLocalImageStatus());
   assert.equal(localImageStatus.model.id, 'flux-2-klein-4b-q4', 'native FLUX.2 image model is available over the real preload bridge');
@@ -916,6 +957,7 @@ try {
   assert.equal(await page.getByText('FLUX.2 Klein 4B Q4', { exact: true }).count(), 2, 'native model appears in its download section and the shared image selector');
   assert.deepEqual(await page.getByTestId('nodus-image-quality').locator('option').evaluateAll((options) => options.map((option) => option.value)), ['draft', 'balanced', 'high'], 'native image quality exposes all three resolution presets');
   assert.equal(await page.getByText('Licencia: esta integración usa FLUX.2 Klein 4B bajo Apache 2.0. La variante 9B tiene términos no comerciales diferentes y no se descarga.', { exact: true }).count(), 1, 'the 4B license distinction is visible before download');
+  await page.getByTestId('settings-tab-stt').click();
   await page.getByTestId('stt-settings').waitFor({ timeout: 30_000 });
   assert.deepEqual(await page.getByTestId('stt-provider').locator('option').evaluateAll((options) => options.map((option) => option.value)), ['transformers', 'whisper_cpp', 'openai'], 'Settings owns all STT engines');
   const whisperCppStatus = await page.evaluate(() => window.nodus.getWhisperCppStatus());
@@ -946,7 +988,7 @@ try {
   }
   await page.locator('header').getByRole('button', { name: 'Research chat', exact: true }).click();
   await page.getByTestId('research-chat-view').waitFor({ timeout: 30_000 });
-  assert.equal(await page.locator('select[title="Modelo del chat"]').inputValue(), 'openrouter::smoke-chat-model');
+  assert.match(await page.getByTestId('research-chat-model').locator('.model-picker-trigger').getAttribute('aria-label'), /^Modelo del chat: .*smoke-chat-model/);
   await page.locator('[data-tour="nav-settings"]').click();
   console.log('[e2e] header has no global model selector');
 
@@ -1147,8 +1189,8 @@ try {
   // measured on the real rendered shell rather than trusted from the classes.
   await page.locator('[data-tour="toolkit"]').click();
   await page.getByTestId('toolkit-home').waitFor({ timeout: 30_000 });
-  const toolCards = ['toolkit-card-apps', 'toolkit-card-browser', 'toolkit-card-compass', 'toolkit-card-convert', 'toolkit-card-drift', 'toolkit-card-protect', 'toolkit-card-radar', 'toolkit-card-translate', 'toolkit-card-aiocr', 'toolkit-card-presenter'];
-  assert.deepEqual(await page.locator('.toolkit-card').evaluateAll((cards) => cards.map((card) => card.dataset.testid)), toolCards, 'the shared catalogue shows all ten tools in alphabetical order');
+  const toolCards = ['toolkit-card-backups', 'toolkit-card-apps', 'toolkit-card-browser', 'toolkit-card-compass', 'toolkit-card-convert', 'toolkit-card-drift', 'toolkit-card-focus', 'toolkit-card-presenter', 'toolkit-card-protect', 'toolkit-card-radar', 'toolkit-card-scriptor', 'toolkit-card-sign', 'toolkit-card-translate', 'toolkit-card-aiocr'];
+  assert.deepEqual(await page.locator('.toolkit-card').evaluateAll((cards) => cards.map((card) => card.dataset.testid)), toolCards, 'the shared catalogue shows all fourteen tools in alphabetical order');
   const cardBoxes = [];
   for (const testId of toolCards) {
     const box = await page.getByTestId(testId).boundingBox();
@@ -1221,12 +1263,16 @@ try {
   await page.getByTestId('toolkit-app-fullscreen').locator('[data-testid="toolkit-app-iframe"]').waitFor();
   await page.getByTestId('toolkit-app-fullscreen-close').click();
   assert.equal(await page.getByTestId('toolkit-app-fullscreen').count(), 0, 'bundled apps can enter and leave the full-screen view');
+  // Leaving fullscreen mounts a new iframe. Its heading renders before the
+  // asynchronous storage hydration; wait for the restored setup before editing.
+  await distributorFrame.getByText('Hay 0 temas activos para 4 grupos. Añade o activa 4 más.', { exact: true }).waitFor();
   assert.equal(await distributorFrame.getByRole('button', { name: 'Generar asignaciones' }).isDisabled(), true, 'assignments require enough active topics');
   await distributorFrame.locator('#group-count').fill('4');
   await distributorFrame.locator('#group-count').press('Tab');
   for (const topic of ['Tema uno', 'Tema dos', 'Tema tres']) {
     await distributorFrame.getByPlaceholder('Ej. Energías renovables').fill(topic);
     await distributorFrame.getByRole('button', { name: 'Añadir', exact: true }).click();
+    await distributorFrame.getByRole('button', { name: `Eliminar ${topic}`, exact: true }).waitFor();
   }
   await distributorFrame.getByPlaceholder('Ej. Tema de recuperación').fill('Tema excepcional');
   await distributorFrame.getByRole('button', { name: 'Añadir excepcional', exact: true }).click();
@@ -1474,45 +1520,54 @@ try {
   await page.getByTestId('presenter-import').waitFor({ timeout: 10_000 });
   await page.getByTestId('presenter-back').click();
   await page.getByTestId('toolkit-home').waitFor();
-  // Tags: seed a shelf through the same IPC the view writes to, then drive the
-  // chips. A tag is only worth having if clicking it actually narrows the list,
-  // and deleting one must ask first and must not take its presentations with it.
+  // A legacy tagged shelf migrates to folder navigation over the real IPC.
   await page.evaluate(() => window.nodus.savePresenterLibrary({
-    tags: [{ id: 'tag_smoke', name: 'Seminario', createdAt: '2026-01-01T00:00:00Z' }],
+    tags: [{ id: 'folder_smoke', name: 'Seminario', createdAt: '2026-01-01T00:00:00Z' }],
     presentations: [
-      { id: 'pres_tagged', name: 'Clase etiquetada', fileName: 'a.pdf', createdAt: '2026-01-02T00:00:00Z', tag: 'tag_smoke', totalPages: 2, notes: {}, videos: {} },
+      { id: 'pres_filed', name: 'Clase organizada', fileName: 'a.pdf', createdAt: '2026-01-02T00:00:00Z', tag: 'folder_smoke', totalPages: 2, notes: {}, videos: {} },
       { id: 'pres_loose', name: 'Clase suelta', fileName: 'b.pdf', createdAt: '2026-01-03T00:00:00Z', tag: '', totalPages: 2, notes: {}, videos: {} },
     ],
   }));
   await page.getByTestId('toolkit-card-presenter').click();
   await page.getByTestId('presenter-import').waitFor({ timeout: 10_000 });
-  assert.equal(await page.getByTestId('presenter-row').count(), 2, 'the seeded shelf lists both presentations');
-  const smokeTagChip = page.getByTestId('presenter-tag-chip').filter({ hasText: 'Seminario' });
-  await smokeTagChip.waitFor();
-  await smokeTagChip.click();
-  await waitForCondition('la etiqueta filtra a una sola presentación', async () => (await page.getByTestId('presenter-row').count()) === 1, { timeout: 5_000 });
-  assert.match(await page.getByTestId('presenter-row').first().innerText(), /Clase etiquetada/, 'the tag filter keeps only its own presentations');
-  await smokeTagChip.click(); // clicking the active tag clears the filter
-  await waitForCondition('al quitar el filtro vuelven las dos presentaciones', async () => (await page.getByTestId('presenter-row').count()) === 2, { timeout: 5_000 });
-  // Deleting a tag is confirmed, and cancelling really cancels.
-  assert.equal(await page.getByTestId('presenter-delete-tag-modal').count(), 0, 'no confirmation is showing yet');
-  await page.getByTestId('presenter-delete-tag').first().click();
-  await page.getByTestId('presenter-delete-tag-modal').waitFor({ timeout: 5_000 });
-  await page.getByTestId('presenter-delete-tag-modal').getByRole('button', { name: /cancel|cancelar/i }).click();
-  await page.getByTestId('presenter-delete-tag-modal').waitFor({ state: 'detached', timeout: 5_000 });
-  assert.equal(await page.getByTestId('presenter-tag-chip').filter({ hasText: 'Seminario' }).count(), 1, 'cancelling the confirmation keeps the tag');
-  await page.getByTestId('presenter-delete-tag').first().click();
-  await page.getByTestId('presenter-delete-tag-confirm').click();
-  await page.getByTestId('presenter-tags').getByText('Seminario', { exact: true }).waitFor({ state: 'detached', timeout: 5_000 });
-  assert.equal(await page.getByTestId('presenter-row').count(), 2, 'deleting a tag unties it, it does not delete presentations');
-  // Downloading the deck's PDF is offered on the selected presentation.
+  await waitForCondition('la biblioteca principal muestra solo sus presentaciones', async () => (await page.getByTestId('presenter-row').count()) === 1, { timeout: 5_000 });
+  assert.match(await page.getByTestId('presenter-row').first().innerText(), /Clase suelta/);
+  const presenterSearch = page.locator('.presenter-library-rail input[type="search"]');
+  await presenterSearch.fill('Clase');
+  await waitForCondition('la búsqueda principal incluye las carpetas', async () => (await page.getByTestId('presenter-row').count()) === 2, { timeout: 5_000 });
+  assert.match(await page.getByTestId('presenter-row').filter({ hasText: 'Clase organizada' }).locator('.presenter-row-location').innerText(), /Seminario/);
+  await presenterSearch.fill('');
+  const smokeFolder = page.getByTestId('presenter-folder-nav').filter({ hasText: 'Seminario' });
+  await page.getByTestId('presenter-row').first().locator('.presenter-row-select').dragTo(smokeFolder);
+  await waitForCondition('arrastrar mueve la presentación a la carpeta', async () => (await page.evaluate(() => window.nodus.getPresenterLibrary())).presentations.find(p => p.id === 'pres_loose')?.folderId === 'folder_smoke', { timeout: 5_000 });
+  const looseRow = page.locator('[data-presentation-id="pres_loose"]');
+  await looseRow.getByTestId('presenter-row-menu').click();
+  assert.equal(await page.getByRole('menuitem').count(), 3, 'each presentation has rename, move and delete in one menu');
+  await page.getByTestId('presenter-row-move').click();
+  await page.getByTestId('presenter-move-folder-select').selectOption('');
+  await page.getByTestId('presenter-move-confirm').click();
+  await waitForCondition('el menú permite volver a la biblioteca principal', async () => (await page.evaluate(() => window.nodus.getPresenterLibrary())).presentations.find(p => p.id === 'pres_loose')?.folderId === null, { timeout: 5_000 });
+  await smokeFolder.click();
+  await waitForCondition('la carpeta muestra su presentación', async () => /Clase organizada/.test(await page.getByTestId('presenter-row').first().innerText()), { timeout: 5_000 });
+  await page.getByTestId('presenter-folder-root').click();
+  await page.getByTestId('presenter-folder-menu').first().click();
+  await page.getByTestId('presenter-delete-folder').click();
+  await page.getByTestId('presenter-delete-folder-modal').waitFor();
+  await page.getByTestId('presenter-delete-folder-modal').getByRole('button', { name: /cancel|cancelar/i }).click();
+  await page.getByTestId('presenter-delete-folder-modal').waitFor({ state: 'detached' });
+  assert.equal(await smokeFolder.count(), 1, 'cancel keeps the folder');
+  await page.getByTestId('presenter-folder-menu').first().click();
+  await page.getByTestId('presenter-delete-folder').click();
+  await page.getByTestId('presenter-delete-folder-confirm').click();
+  await smokeFolder.waitFor({ state: 'detached' });
+  await waitForCondition('las presentaciones conservadas vuelven a la biblioteca principal', async () => (await page.getByTestId('presenter-row').count()) === 2, { timeout: 5_000 });
   await page.getByTestId('presenter-row').first().click();
   await page.getByTestId('presenter-download-pdf').waitFor({ timeout: 5_000 });
-  assert.equal(await page.getByTestId('presenter-download-pdf').isDisabled(), false, 'the PDF download button is offered for a selected deck');
-  await page.evaluate(() => window.nodus.savePresenterLibrary({ tags: [], presentations: [] }));
+  assert.equal(await page.getByTestId('presenter-download-pdf').isDisabled(), false);
+  await page.evaluate(() => window.nodus.savePresenterLibrary({ folders: [], presentations: [] }));
   await page.getByTestId('presenter-back').click();
   await page.getByTestId('toolkit-home').waitFor();
-  console.log('[e2e] PDF Presenter tags filter the shelf, deleting one is confirmed and spares its presentations, and the deck offers its PDF');
+  console.log('[e2e] PDF Presenter folders migrate tags, search recursively, move by dragging or menu and confirm deletion while keeping decks.');
   // Nodus Convert opens on its empty state: the dropzone plus the catalogue of
   // formats it accepts, so the drop is never a blind guess.
   await page.getByTestId('toolkit-card-convert').click();
@@ -1689,9 +1744,11 @@ try {
   console.log('[e2e] workspace: a legacy project reads as a collection with its document inside');
 
   // Una nota y una idea, cada una con su icono, abiertas a la vez en pestañas.
+  if (await page.locator('.editorial-workspace .editorial-options').getAttribute('open') === null) await page.locator('.editorial-workspace .editorial-options > summary').click();
   await page.getByTestId('workspace-create-note').click();
   await page.getByTestId('editor-title').waitFor({ timeout: 20_000 });
   await page.getByTestId('workspace-tab-home').click();
+  if (await page.locator('.editorial-workspace .editorial-options').getAttribute('open') === null) await page.locator('.editorial-workspace .editorial-options > summary').click();
   await page.getByTestId('workspace-create-idea').click();
   await page.getByTestId('editor-title').waitFor({ timeout: 20_000 });
   assert.equal(
@@ -1699,8 +1756,8 @@ try {
     2,
     'a note and an idea stay open side by side in tabs'
   );
-  // El editor es el de Estudio: su barra de inserción y su estado de guardado están ahí.
-  await page.getByTestId('study-insert-toolbar').waitFor({ timeout: 10_000 });
+  // Notes and ideas use the same native canvas and save-status contract as Study.
+  await page.locator('.nodus-blocknote .bn-editor').first().waitFor({ timeout: 10_000 });
   await page.getByTestId('study-editor-save-state').waitFor({ timeout: 10_000 });
   console.log('[e2e] workspace: notes and ideas open in tabs with the full Study editor');
 
@@ -2054,32 +2111,81 @@ try {
   assert.match(await page.locator('body').innerText(), /Cursos y asignaturas/, 'study-specific sidebar is rendered');
   console.log('[e2e] study logo, search padding, sidebar flow and creation dialogs ok');
 
+  const openEditorOptions = async () => {
+    const options = page.locator('.editorial-editor-header .editorial-options');
+    if (await options.getAttribute('open') === null) await options.locator('summary').click();
+  };
+  const clickEditorAction = async button => {
+    if (!await button.isVisible()) await openEditorOptions();
+    await button.click();
+  };
   if (process.env.NODUS_E2E_MATERIAL_ANNOTATIONS_ONLY !== '1') {
-  await page.locator('.study-milkdown .ProseMirror').first().waitFor({ timeout: 30_000 });
-  await page.getByTestId('study-dictation-toggle').click();
+  await page.locator('.nodus-blocknote .bn-editor').first().waitFor({ timeout: 30_000 });
+  await clickEditorAction(page.getByTestId('study-dictation-toggle'));
   await page.getByTestId('study-dictation').waitFor({ timeout: 30_000 });
-  assert.match(await page.getByTestId('study-dictation').innerText(), /ONNX|Local|offline/i, 'dictation panel defaults to the offline ONNX backend');
-  await page.getByTestId('study-dictation').getByRole('button', { name: 'Dictado', exact: true }).click();
-  const dictationLanguage = page.getByTestId('study-dictation-language');
-  await dictationLanguage.waitFor();
-  assert.equal(await dictationLanguage.locator('option').first().getAttribute('value'), 'auto', 'dictation supports automatic language detection');
-  assert.ok(await dictationLanguage.locator('option').count() >= 100, 'dictation exposes every language supported by multilingual Whisper');
-  await dictationLanguage.selectOption('es');
-  await page.getByTestId('study-dictation').getByRole('button', { name: 'Dictado', exact: true }).click();
-  await page.getByTestId('study-dictation-start').click();
+  const dictationPanel = page.getByTestId('study-dictation');
+  assert.match(await dictationPanel.innerText(), /Local/i, 'live dictation stays local');
   const microphonePrivacyDialog = page.getByRole('dialog', { name: 'Antes de activar el micrófono' });
   await microphonePrivacyDialog.waitFor({ timeout: 30_000 });
   assert.match(
     await microphonePrivacyDialog.innerText(),
     /localmente|base jurídica|no sustituye el consentimiento/i,
-    'the recording privacy notice blocks microphone access and explains the local/controller boundary',
+    'opening dictation automatically requests microphone consent',
   );
+  await microphonePrivacyDialog.getByRole('button', { name: 'Rechazar', exact: true }).click();
+  await page.getByTestId('study-dictation-start').waitFor();
+  await page.evaluate(() => {
+    window.__e2eDictationStreams = [];
+    const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = async constraints => {
+      const stream = await getUserMedia(constraints);
+      window.__e2eDictationStreams.push(stream);
+      return stream;
+    };
+  });
+  await dictationPanel.getByRole('button', { name: 'Opciones de dictado', exact: true }).click();
+  const dictationSettings = page.getByTestId('study-dictation-settings');
+  await dictationSettings.waitFor();
+  assert.equal(await dictationSettings.evaluate(element => !!element.closest('[data-testid="study-dictation"]')), false, 'settings render in an independent popover outside the dictation bar');
+  assert.equal(await page.getByTestId('study-dictation-model').inputValue(), 'whisper_cpp:base', 'dictation falls back to an installed local model when the preferred ONNX model is unavailable');
+  const dictationLanguage = page.getByTestId('study-dictation-language');
+  await dictationLanguage.waitFor();
+  assert.equal(await dictationLanguage.locator('option').first().getAttribute('value'), 'auto', 'dictation supports automatic language detection');
+  assert.ok(await dictationLanguage.locator('option').count() >= 100, 'dictation exposes every language supported by multilingual Whisper');
+  await dictationLanguage.selectOption('es');
+  await page.keyboard.press('Escape');
+  await dictationSettings.waitFor({ state: 'hidden' });
+  await page.getByTestId('study-dictation-start').click();
+  await microphonePrivacyDialog.waitFor({ timeout: 30_000 });
+  assert.equal(await page.evaluate(() => window.__e2eDictationStreams.length), 0, 'the privacy notice blocks microphone access');
   await microphonePrivacyDialog.getByRole('button', { name: 'Aceptar', exact: true }).click();
-  await page.getByTestId('study-dictation-discard').waitFor({ timeout: 30_000 });
+  const dictationStatus = page.getByTestId('study-dictation-status');
+  await dictationStatus.filter({ hasText: 'Escuchando' }).waitFor();
+  assert.equal(await page.evaluate(() => window.__e2eDictationStreams.length), 1, 'consent starts real fake-device microphone capture');
+  await waitForCondition('live dictation inserts recognized text before stopping', async () =>
+    (await page.locator('.nodus-blocknote .bn-editor').first().innerText()).includes('Hola mundo'));
+  await page.getByTestId('study-dictation-pause').click();
+  await dictationStatus.filter({ hasText: 'Pausado' }).waitFor();
+  await dictationPanel.getByRole('button', { name: 'Opciones de dictado', exact: true }).click();
+  await dictationSettings.waitFor();
+  assert.equal(await dictationLanguage.isDisabled(), true, 'the language is fixed while capture is active');
+  await page.keyboard.press('Escape');
+  await dictationSettings.waitFor({ state: 'hidden' });
+  await page.getByTestId('study-dictation-pause').click();
+  await dictationStatus.filter({ hasText: 'Escuchando' }).waitFor();
   await page.getByTestId('study-dictation-discard').click();
   await page.getByTestId('study-dictation-start').waitFor({ timeout: 30_000 });
-  await page.getByTestId('study-dictation-toggle').click();
-  console.log('[e2e] study dictation panel + fake microphone capture ok');
+  assert.equal(await page.evaluate(() => window.__e2eDictationStreams.every(stream => stream.getTracks().every(track => track.readyState === 'ended'))), true, 'cancel releases the microphone');
+  await page.getByTestId('study-dictation-start').click();
+  await microphonePrivacyDialog.getByRole('button', { name: 'Aceptar', exact: true }).click();
+  await dictationStatus.filter({ hasText: 'Escuchando' }).waitFor();
+  await page.getByTestId('study-dictation-stop').click();
+  await page.getByTestId('study-dictation-start').waitFor();
+  assert.equal(await page.evaluate(() => window.__e2eDictationStreams.length), 2, 'dictation can restart after cancellation');
+  assert.equal(await page.evaluate(() => window.__e2eDictationStreams.every(stream => stream.getTracks().every(track => track.readyState === 'ended'))), true, 'stop releases the restarted microphone');
+  await dictationPanel.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  await dictationPanel.waitFor({ state: 'hidden' });
+  console.log('[e2e] live dictation consent, independent settings, pause/resume, cancel/stop and fake microphone capture ok');
   if (process.env.NODUS_E2E_STT_UI_ONLY === '1') {
     const recordingId = await page.evaluate(async () => (await window.nodus.createStudyRecording({
       fileName: 'idioma-smoke.wav', mimeType: 'audio/wav', bytes: new Uint8Array([82, 73, 70, 70]), language: 'auto',
@@ -2097,8 +2203,8 @@ try {
     console.log('[e2e] focused dictation + recording language UI smoke passed');
     process.exit(0);
   }
-  await page.getByTestId('study-doc-favorite').click();
-  await page.getByTestId('study-doc-style').click();
+  await clickEditorAction(page.getByTestId('study-doc-favorite'));
+  await clickEditorAction(page.getByTestId('study-doc-style'));
   await page.getByTestId('study-doc-kind').selectOption('manual');
   await page.getByTestId('study-doc-color').fill('#22c55e');
   await waitForCondition('metadatos del editor de estudio', () => page.evaluate(async () => {
@@ -2107,9 +2213,9 @@ try {
     return document?.favorite === true && document.kind === 'manual' && document.color === '#22c55e';
   }));
   console.log('[e2e] study editor metadata controls ok');
-  await page.getByRole('button', { name: /Markdown crudo/ }).click();
+  await clickEditorAction(page.getByRole('button', { name: 'Markdown crudo', exact: true }));
   const editorMarkdown = '# Tema smoke\n\nTexto **importante** con $x^2$.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |';
-  await page.locator('.study-editor-shell textarea').fill(editorMarkdown);
+  await page.getByTestId('study-markdown-editor').fill(editorMarkdown);
   // Exercise the editor's real autosave and poll the persisted state directly;
   // dispatching a second manual save would make this smoke assertion depend on
   // runner timing instead of the durability contract it is meant to verify.
@@ -2135,14 +2241,14 @@ try {
   console.log('[e2e] study editor raw Markdown autosave + version ok');
 
   if (process.env.NODUS_E2E_MATERIAL_ANNOTATIONS_ONLY !== '1') {
-  // Compact prompt manager + contextual streaming actions. The smoke profile
-  // intentionally has no usable provider, so the direct action must restore
-  // the original selection after the streamed request fails.
+  // The prompt manager stays in place; contextual Polish opens the shared
+  // composer. This profile has no usable provider, so failures preserve text.
   await page.getByTestId('study-improve-toggle').click();
   await page.getByTestId('study-improve-dialog').waitFor();
   const improveDialogBox = await page.getByTestId('study-improve-dialog').locator('section').first().boundingBox();
-  assert.ok(improveDialogBox && improveDialogBox.width <= 680, `prompt manager stays compact (${improveDialogBox?.width}px)`);
+  assert.ok(improveDialogBox && improveDialogBox.width <= 960, `prompt manager fits its responsive two-column surface (${improveDialogBox?.width}px)`);
   assert.equal(await page.locator('[data-testid^="study-style-builtin-"]').count(), 13, 'all predefined improvement styles are visible');
+  assert.ok(await page.getByTestId('study-prompt-search').isVisible(), 'the prompt library exposes search');
   await page.getByTestId('study-style-builtin-academic').click();
   await page.getByText('Registro académico preciso y argumentación ordenada.', { exact: true }).waitFor();
   assert.equal(await page.getByText('Conservar significado', { exact: true }).count(), 0);
@@ -2156,11 +2262,12 @@ try {
   await page.getByRole('button', { name: 'flask', exact: true }).click();
   await page.getByTestId('study-prompt-save').click();
   await page.getByText('Prompt guardado.', { exact: true }).waitFor();
-  await page.getByTestId('study-improve-dialog').locator('header button').last().click();
+  await page.getByTestId('study-improve-dialog').getByRole('button', { name: 'Cerrar', exact: true }).click();
 
-  await page.getByRole('button', { name: /Markdown crudo/ }).click();
-    await page.locator('.study-milkdown .ProseMirror').first().waitFor({ timeout: 30_000 });
-  await page.locator('.study-milkdown .ProseMirror').evaluate((root) => {
+  await clickEditorAction(page.getByRole('button', { name: 'Markdown crudo', exact: true }));
+    await page.locator('.nodus-blocknote .bn-editor').first().waitFor({ timeout: 30_000 });
+  await page.locator('.nodus-blocknote .bn-editor').evaluate((root) => {
+    root.focus();
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
@@ -2173,7 +2280,7 @@ try {
     throw new Error('Improvement selection fixture not found');
   });
   await page.getByTestId('study-selection-text-color').waitFor();
-  assert.equal(await page.locator('[data-testid^="study-quick-improve-"]').count(), 4, 'the selection exposes exactly the four configured prompt shortcuts');
+  assert.equal(await page.getByTestId('study-selection-improve').count(), 1, 'the selection exposes one Polish action');
   assert.equal(await page.getByTestId('study-synonyms-toggle').count(), 1, 'the selection exposes the contextual synonyms action');
   await page.getByTestId('study-synonyms-toggle').click();
   await page.getByTestId('study-synonyms-panel').waitFor();
@@ -2205,55 +2312,75 @@ try {
     }
   });
   assert.equal(failedImprovement, true, 'the deterministic provider failure reaches the renderer bridge');
+  await page.getByTestId('study-selection-improve').click();
+  const polishComposer = page.getByTestId('scriptor-ai-panel');
+  await polishComposer.waitFor();
+  assert.equal(await polishComposer.locator('.scriptor-ai-quick').count(), 4, 'the four configured prompt shortcuts belong to the composer');
+  await page.getByTestId('scriptor-ai-style').click();
+  await page.getByTestId('scriptor-ai-style-search').waitFor();
+  await page.keyboard.press('Escape');
+  await polishComposer.locator('.model-picker-trigger').click();
+  await polishComposer.getByTestId('model-picker-search').waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByTestId('scriptor-ai-send').click();
+  await page.getByTestId('scriptor-ai-error').waitFor();
+  assert.equal(await page.getByTestId('scriptor-ai-added').count(), 0, 'failed generation leaves no temporary native changes');
+  await page.getByTestId('scriptor-ai-close').click();
   const unchangedAfterImprovement = await page.evaluate(async () => (await window.nodus.getStudyWorkspace()).documents.find((item) => item.title === 'Apunte smoke')?.contentMarkdown);
-  // Milkdown may canonicalize equivalent table separators when leaving raw
+  // The native canvas can normalize equivalent table separators when leaving raw
   // mode; the selected source phrase itself must remain byte-for-byte intact.
   assert.match(unchangedAfterImprovement ?? '', /Texto \*\*importante\*\* con \$x\^2\$\./, 'failed improvement leaves the selected Markdown untouched');
-  console.log('[e2e] compact prompt manager + four contextual streaming shortcuts + failure preservation ok');
+  console.log('[e2e] prompt manager + searchable Polish composer + four pinned prompts + failure preservation ok');
 
-  await page.locator('.study-milkdown .ProseMirror').first().waitFor({ timeout: 30_000 });
-  await page.locator('.study-milkdown .katex').first().waitFor({ timeout: 30_000 });
-  await page.locator('.study-milkdown table.children').first().waitFor({ timeout: 30_000 });
-  await page.locator('.study-milkdown .ProseMirror').evaluate((root) => {
+  await page.locator('.nodus-blocknote .bn-editor').first().waitFor({ timeout: 30_000 });
+  await page.locator('.nodus-blocknote .katex').first().waitFor({ timeout: 30_000 });
+  await page.locator('.nodus-blocknote table').first().waitFor({ timeout: 30_000 });
+  await page.locator('.nodus-blocknote .bn-editor').evaluate((root) => {
+    root.focus();
     const range = document.createRange();
     range.selectNodeContents(root); range.collapse(false);
     const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range);
   });
+  await openEditorOptions();
   await page.getByTestId('study-heading-level').selectOption('2');
-  await page.locator('.study-milkdown .ProseMirror h2').first().waitFor({ timeout: 30_000 });
-  assert.equal(await page.locator('.study-milkdown .ProseMirror').getByText('## Título', { exact: true }).count(), 0, 'visual heading insertion creates a heading node rather than literal Markdown');
-  await page.locator('.study-milkdown .ProseMirror').evaluate((root) => {
+  await page.keyboard.press('Escape');
+  await page.locator('.nodus-blocknote .bn-editor h2').first().waitFor({ timeout: 30_000 });
+  assert.equal(await page.locator('.nodus-blocknote .bn-editor').getByText('## Título', { exact: true }).count(), 0, 'visual heading insertion creates a heading node rather than literal Markdown');
+  await page.locator('.nodus-blocknote .bn-editor').evaluate((root) => {
+    root.focus();
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
       const index = node.textContent?.indexOf('Texto') ?? -1;
       if (index < 0) continue;
       const range = document.createRange(); range.setStart(node, index); range.setEnd(node, index + 5);
-      const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); return;
+      const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); document.dispatchEvent(new Event('selectionchange')); root.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); return;
     }
     throw new Error('Text selection fixture not found');
   });
-  await page.getByTestId('study-inline-code').click();
-  assert.ok(await page.locator('.study-milkdown .ProseMirror code').count() > 0, 'inline-code button formats the visual selection');
-  await page.locator('.study-milkdown .ProseMirror').evaluate((root) => {
+  await page.waitForTimeout(120);
+  await clickEditorAction(page.getByTestId('study-inline-code'));
+  assert.ok(await page.locator('.nodus-blocknote .bn-editor code').count() > 0, 'inline-code button formats the visual selection');
+  await page.locator('.nodus-blocknote .bn-editor').evaluate((root) => {
+    root.focus();
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
       const index = node.textContent?.indexOf('importante') ?? -1;
       if (index < 0) continue;
       const range = document.createRange(); range.setStart(node, index); range.setEnd(node, index + 10);
-      const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); return;
+      const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); document.dispatchEvent(new Event('selectionchange')); root.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); return;
     }
     throw new Error('Formula selection fixture not found');
   });
-  await page.getByTestId('study-inline-formula').click();
-  assert.ok(await page.locator('.study-milkdown .ProseMirror [data-type="math_inline"]').count() > 0, 'formula button converts selected visual text into inline math');
+  await page.waitForTimeout(120);
+  await clickEditorAction(page.getByTestId('study-inline-formula'));
+  assert.ok(await page.locator('.nodus-blocknote .bn-editor [data-inline-content-type="nodusFormula"]').count() > 0, 'formula button converts selected visual text into inline math');
   // The floating selection ribbon: out of sight while the pointer is still down,
   // and placed over the point where the selection was released rather than over
   // the box of the whole selection, which starts wherever the drag began.
-  const floatingRibbon = page.locator('.milkdown-toolbar');
-  await floatingRibbon.waitFor({ state: 'attached', timeout: 10_000 });
-  const measureEditorLine = () => page.getByRole('textbox', { name: 'Editor del apunte', exact: true }).evaluate((root) => {
+  const floatingRibbon = page.locator('.bn-formatting-toolbar');
+  const measureEditorLine = () => page.locator('.nodus-blocknote .bn-editor').evaluate((root) => {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     const candidates = [];
     let node;
@@ -2288,42 +2415,25 @@ try {
   // The arithmetic itself is covered by scripts/test-selection-ribbon-position.mjs.
   if (!editorDrag) console.log('[e2e] editor selection ribbon geometry skipped: no editor line to drag over');
   else {
-    await page.waitForFunction(() => document.querySelector('.milkdown-toolbar')?.style.visibility === 'hidden', undefined, { timeout: 10_000 });
     await page.mouse.up();
     await floatingRibbon.waitFor({ state: 'visible', timeout: 10_000 });
-    // This toolbar can be nearly as wide as the editor column it is positioned in,
-    // so it is centred on the pointer only where that column leaves room.
-    const measureRibbon = async () => {
-      const box = await floatingRibbon.boundingBox();
-      const column = await floatingRibbon.evaluate((node) => {
-        const parent = node.offsetParent instanceof HTMLElement ? node.offsetParent.getBoundingClientRect() : null;
-        return { left: Math.max(8, parent?.left ?? 8), right: Math.min(window.innerWidth - 8, parent?.right ?? window.innerWidth - 8) };
-      });
-      return { box, wanted: Math.min(Math.max(editorDrag.to.x - box.width / 2, column.left), column.right - box.width) };
-    };
-    // floating-ui can move the toolbar again after it turns visible; the pointer anchor
-    // re-applies its correction on a 30 ms timer (rAF does not run in the CI window), so
-    // one early read can land between the two. Wait for the placement to settle.
-    let placement = await measureRibbon();
-    for (let attempt = 0; attempt < 20 && Math.abs(placement.box.x - placement.wanted) > 2; attempt += 1) {
-      await page.waitForTimeout(50);
-      placement = await measureRibbon();
-    }
-    const ribbonBox = placement.box;
-    const wanted = placement.wanted;
-    assert.ok(Math.abs(ribbonBox.x - wanted) <= 2, `the editor ribbon follows the pointer inside its column (${ribbonBox.x} vs ${wanted})`);
-    assert.ok(ribbonBox.y + ribbonBox.height <= editorDrag.to.y, 'the editor ribbon sits above the pointer');
-    assert.ok(ribbonBox.y + ribbonBox.height >= editorDrag.to.y - 90, 'the editor ribbon hugs the released line rather than the first one');
+    const ribbonBox = await floatingRibbon.boundingBox();
+    const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+    assert.ok(ribbonBox.x >= 0 && ribbonBox.x + ribbonBox.width <= viewport.width, 'the native selection toolbar fits horizontally');
+    assert.ok(ribbonBox.y >= 0 && ribbonBox.y + ribbonBox.height <= viewport.height, 'the native selection toolbar fits vertically');
+    assert.ok((await page.evaluate(() => getSelection()?.toString() ?? '')).trim(), 'opening the native toolbar preserves the selected text');
     await page.keyboard.press('ArrowRight');
     await floatingRibbon.waitFor({ state: 'hidden', timeout: 10_000 });
   }
 
   const splitButton = page.getByRole('button', { name: 'Dividir vista', exact: true });
-  await splitButton.click();
-  assert.match(await splitButton.getAttribute('class'), /bg-indigo-100/, 'active split-view control uses its light-theme state');
+  await clickEditorAction(splitButton);
+  await openEditorOptions();
+  assert.equal(await splitButton.getAttribute('aria-pressed'), 'true', 'the split-view control exposes its active state');
+  await page.keyboard.press('Escape');
   await page.locator('.study-editor-shell .md .katex').first().waitFor({ timeout: 30_000 });
   assert.match(await page.locator('body').innerText(), /Tema smoke/, 'document outline and WYSIWYG content render');
-  console.log('[e2e] study Milkdown editor + metadata + raw Markdown + versioning ok');
+  console.log('[e2e] study BlockNote editor + metadata + raw Markdown + versioning ok');
   }
   }
 
@@ -2549,18 +2659,18 @@ try {
     await page.getByText(label, { exact: true }).last().click();
   }
   await page.getByText('Apunte smoke', { exact: true }).last().click();
-  await page.locator('.study-milkdown .ProseMirror').first().waitFor({ timeout: 30_000 });
+  await page.locator('.nodus-blocknote .bn-editor').first().waitFor({ timeout: 30_000 });
 
   // ── Study narration: selection/cursor modes, formula speech and dictionary ─
-  await page.getByRole('button', { name: /Markdown crudo/ }).click();
-  const narrationTextarea = page.locator('.study-editor-shell textarea').first();
+  await clickEditorAction(page.getByRole('button', { name: 'Markdown crudo', exact: true }));
+  const narrationTextarea = page.getByTestId('study-markdown-editor').first();
   await narrationTextarea.evaluate((element) => {
     const text = element.value;
     const from = Math.max(0, text.indexOf('Texto'));
     element.focus(); element.setSelectionRange(from, Math.min(text.length, from + 18));
     element.dispatchEvent(new Event('select', { bubbles: true }));
   });
-  await page.getByTestId('study-audio-toggle').click();
+  await clickEditorAction(page.getByTestId('study-audio-toggle'));
   await page.getByTestId('study-audio-panel').waitFor({ timeout: 30_000 });
   await page.getByTestId('study-audio-mode').selectOption('selection');
   const narrationSegments = await page.evaluate(async () => window.nodus.getAudioSegments('study_document', (await window.nodus.getStudyWorkspace()).documents.find((document) => document.title === 'Apunte smoke').id, {
@@ -2581,7 +2691,7 @@ try {
     return subjectId ? (await window.nodus.getStudyPronunciations(subjectId)).some((entry) => entry.written === 'TCC' && entry.spoken === 'te ce ce') : false;
   }));
   await page.getByRole('button', { name: 'Generar audio', exact: true }).click();
-  await page.getByText('La lectura de estudio requiere una voz local de Piper o Kokoro.', { exact: true }).waitFor({ timeout: 30_000 });
+  await page.getByText('Descarga el motor de voz y un modelo en Ajustes → Modelos → Voz y narración.', { exact: true }).waitFor({ timeout: 30_000 });
   console.log('[e2e] local study narration modes + formula speech + pronunciation dictionary ok');
 
   // These flows remain ready for reactivation, but the corresponding renderer
@@ -2910,7 +3020,7 @@ try {
   const primarySourcesTour = page.getByTestId('tour-card');
   await primarySourcesTour.getByText('Recorrido de fuentes primarias · 1/6', { exact: true }).waitFor({ timeout: 30_000 });
   await page.getByTestId('primary-sources-home').waitFor({ timeout: 30_000 });
-  assert.equal(await page.getByTestId('tour-spotlight').count(), 0, 'la invitación inicial no apunta ni navega antes del consentimiento');
+  assert.equal(await page.getByTestId('learning-control-highlight').count(), 0, 'la invitación inicial no apunta ni navega antes del consentimiento');
   const unavailablePrimarySourcesVideo = primarySourcesTour.getByRole('button', {
     name: 'Ver el tutorial en vídeo (Próximamente)',
     exact: true,
@@ -2931,12 +3041,11 @@ try {
     await primarySourcesTour.getByText(`Recorrido de fuentes primarias · ${step.number}/6`, { exact: true }).waitFor({ timeout: 30_000 });
     const target = page.locator(`[data-tour="${step.target}"]`);
     await target.waitFor({ state: 'visible', timeout: 30_000 });
-    // The spotlight deliberately animates between anchors. The step copy updates at
-    // the start of that 200 ms transition, so measuring immediately can observe the
-    // rectangle halfway between the previous and current targets on a busy runner.
+    // Shared guide highlights track the visible control without animating across
+    // unrelated anchors. Wait until this step's highlight has settled.
     await page.waitForFunction((targetName) => {
       const anchor = document.querySelector(`[data-tour="${targetName}"]`);
-      const focus = document.querySelector('[data-testid="tour-spotlight"]');
+      const focus = document.querySelector('[data-testid="learning-control-highlight"]');
       if (!(anchor instanceof HTMLElement) || !(focus instanceof HTMLElement)) return false;
       const targetRect = anchor.getBoundingClientRect();
       const focusRect = focus.getBoundingClientRect();
@@ -2947,7 +3056,7 @@ try {
     }, step.target, { timeout: 5_000 });
     const [targetBox, spotlightBox] = await Promise.all([
       target.boundingBox(),
-      page.getByTestId('tour-spotlight').boundingBox(),
+      page.getByTestId('learning-control-highlight').boundingBox(),
     ]);
     assert.ok(targetBox && spotlightBox, `el paso ${step.number}/6 conserva un ancla y un foco visibles`);
     assert.ok(
@@ -3036,12 +3145,18 @@ try {
   await page.getByRole('button', { name: 'Tabla accesible', exact: true }).click();
   await page.getByTestId('primary-sources-map-table').waitFor({ timeout: 30_000 });
   await page.getByTestId('primary-sources-nav-relations').click();
-  await page.getByRole('button', { name: 'Tabla accesible', exact: true }).click();
+  const relationsView = page.getByTestId('primary-sources-relations-view');
+  await relationsView.waitFor({ timeout: 30_000 }).catch(async (error) => {
+    console.error('[e2e] relations render diagnostics', consoleMessages.slice(-12), pageErrors.map((entry) => entry.stack));
+    console.error(await page.evaluate(() => document.body.innerText.slice(-2000)).catch(() => 'No renderer DOM'));
+    throw error;
+  });
+  await relationsView.getByRole('button', { name: 'Tabla accesible', exact: true }).click();
   await page.getByTestId('primary-sources-relations-table').waitFor({ timeout: 30_000 });
   await page.getByTestId('primary-sources-nav-search').click();
   await page.getByTestId('primary-sources-search-input').fill('San Martín');
   await page.getByTestId('primary-sources-search-result').first().waitFor({ timeout: 30_000 });
-  await page.getByTestId('primary-sources-nav-notes').click();
+  await page.locator('[data-tour="nav-notes"]').click();
   await page.getByTestId('primary-sources-notes').waitFor({ timeout: 30_000 });
 
   // Primary Sources reuses the universal Toolkit catalogue. Its old dedicated
@@ -3152,10 +3267,10 @@ try {
   await teachingTourLabel.waitFor({ timeout: 30_000 });
   // Step 1 is target-less and centres; step 2 spotlights the courses nav entry.
   await tourCard.getByRole('button', { name: 'Sí, enséñame', exact: true }).click();
-  const spotlight = page.getByTestId('tour-spotlight');
+  const spotlight = page.getByTestId('learning-control-highlight');
   await spotlight.waitFor({ timeout: 30_000 });
   assert.equal(
-    await spotlight.evaluate((node) => getComputedStyle(node).outlineColor),
+    await spotlight.evaluate((node) => getComputedStyle(node).borderTopColor),
     'rgb(234, 88, 12)',
     'the teaching tutorial spotlights in the vault accent (orange), not the default indigo',
   );
@@ -4568,6 +4683,19 @@ try {
   console.log(`[e2e] database at schema v${version}`);
 
   console.log('e2e smoke test passed');
+} catch (error) {
+  if (page && !page.isClosed()) {
+    console.error('[e2e] recent renderer console:', consoleMessages.slice(-20));
+    for (const frame of page.frames()) {
+      console.error('[e2e] failure frame state:', await frame.evaluate(() => ({
+        text: document.body?.innerText.slice(-9000),
+        inputs: Array.from(document.querySelectorAll('input')).map(input => ({
+          id: input.id, value: input.value, valid: input.validity.valid,
+        })),
+      })).catch(() => 'frame detached'));
+    }
+  }
+  throw error;
 } finally {
   if (app) await closeElectronApp(app);
   await rm(userData, { recursive: true, force: true });

@@ -4,7 +4,10 @@ export interface ResearchClaimRecord {
   sentence: string;
   kind: 'fact' | 'attributed' | 'inference' | 'nonfactual';
   status: 'supported' | 'removed' | 'unverified';
-  evidence: Array<{ id: string; quote: string }>;
+  evidence: Array<{ id: string; quote: string; originalQuote?: string }>;
+  /** Direct proofs in this paragraph; inherited proofs remain in evidence for
+   * dependency validation but need not create a repeated citation inventory. */
+  citationEvidenceIds?: string[];
   reason: string;
   /** Deterministic cause of a removal. The judge's prose reason is diagnostic
    * only and never decides acceptance. */
@@ -15,8 +18,38 @@ export type ResearchClaimFailure = 'judge_rejected' | 'no_premises' | 'premise_n
   | 'inference_without_supported_premises' | 'unqualified_inference' | 'unsupported_parts' | 'inconsistent_verdict'
   | 'nonfactual_with_content' | 'restates_rejected_claim' | 'internal_contradiction';
 export interface ResearchProseAudit { markdown: string; claims: ResearchClaimRecord[] }
-export interface ResearchAuditSource { id: string; text: string; label: string; citation: string }
-interface Premise { text: string; type: ResearchPremiseType; entailed: boolean; evidence: Array<{ id: string; quote: string }>; from: number[] }
+export interface ResearchAuditSource { proseSupport?: boolean; id: string; text: string; label: string; citation: string; attributionOnly?: boolean; workId?: string; collectiveCredits?: boolean; citationLabel?: string; locator?: string; title?: string }
+
+/** Request-local routing labels avoid asking a judge to reproduce long opaque
+ * storage identities. Only an exact supplied alias is expanded; unknown IDs,
+ * quotes, verdicts and all other content are left for the normal validators. */
+export function researchAuditSourceTransport(sources: readonly ResearchAuditSource[]) {
+  const originalIds = new Set(sources.map(source => source.id));
+  let prefix = 'source-';
+  while (sources.some((_source, index) => originalIds.has(`${prefix}${index + 1}`))) prefix = `_${prefix}`;
+  const aliases = new Map(sources.map((source, index) => [`${prefix}${index + 1}`, source.id]));
+  const restoreEvidence = (evidence: unknown) => {
+    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return evidence;
+    const row = evidence as Record<string, unknown>;
+    return typeof row.id === 'string' && aliases.has(row.id) ? { ...row, id: aliases.get(row.id)! } : evidence;
+  };
+  return {
+    sources: sources.map((source, index) => ({ ...source, id: `${prefix}${index + 1}` })),
+    bindings: [...aliases].map(([alias, sourceId]) => ({ alias, sourceId })),
+    restore<T extends { claims: unknown[] }>(input: T): T {
+      return { ...input, claims: input.claims.map(claim => {
+        if (!claim || typeof claim !== 'object' || Array.isArray(claim)) return claim;
+        const row = claim as Record<string, unknown>;
+        return { ...row, ...(Array.isArray(row.premises) ? { premises: row.premises.map(premise => {
+          if (!premise || typeof premise !== 'object' || Array.isArray(premise)) return premise;
+          const atom = premise as Record<string, unknown>;
+          return { ...atom, ...(Array.isArray(atom.evidence) ? { evidence: atom.evidence.map(restoreEvidence) } : {}) };
+        }) } : {}) };
+      }) };
+    },
+  };
+}
+interface Premise { text: string; type: ResearchPremiseType; entailed: boolean; evidence: Array<{ id: string; quote: string; originalQuote?: string }>; from: number[] }
 interface Verdict {
   index: number; kind: ResearchClaimRecord['kind']; premises: Premise[]; unsupportedParts: string[];
   explicitInference: boolean; supported: boolean; reason: string;
@@ -53,7 +86,66 @@ function validClaim(item: unknown): item is Verdict {
  * then fails; other premise types never read it), a missing explicitInference
  * becomes false, long diagnostics are clipped. Any other malformed claim, or an
  * index claimed twice, yields no verdict; `malformed` says why, for review. */
-export function normalizeResearchProseVerdicts(input: { claims: unknown[] }, size: number): Array<Verdict | undefined> & { malformed?: Map<number, string> } {
+function isSafeSentencePeriod(text: string, index: number): boolean {
+  let next = index + 1;
+  if (text[index] === '.' && /\d/u.test(text[index - 1] ?? '') && /\d/u.test(text[next] ?? '')) return false;
+  if (!/[.!?。！？]/u.test(text[index])) return false;
+  while (/["'”’»)]/u.test(text[next] ?? '')) next++;
+  if (next < text.length && !/\s/u.test(text[next])) return false;
+  if (text[index] === '.') {
+    const prefix = text.slice(0, index + 1);
+    const token = /(?:^|\s)([\p{L}.]+\.)$/u.exec(prefix)?.[1]?.toLowerCase();
+    if (token && (token.length === 2 || /^(?:mr|mrs|ms|dr|prof|sr|sra|jr|st|vs|etc|e\.g|i\.e)\.$/u.test(token))) return false;
+    const after = text.slice(next).trimStart();
+    if (after && !/[\p{Lu}¿¡“«([]/u.test(after[0])) return false;
+  }
+  return true;
+}
+
+/** Short evidence is expanded only inside its uniquely matching authorized
+ * excerpt and only when a complete, safely bounded source sentence can be copied. */
+function expandShortEvidence(evidence: unknown, sources: readonly ResearchAuditSource[]): unknown {
+  if (!evidence || typeof evidence !== 'object') return evidence;
+  const candidate = evidence as { id?: unknown; quote?: unknown; [key: string]: unknown };
+  // Never honor model-supplied trace metadata.
+  const clean = { ...candidate };
+  delete clean.originalQuote;
+  if (typeof candidate.id !== 'string' || typeof candidate.quote !== 'string'
+      || candidate.quote.length < 8 || candidate.quote.length >= 12) return clean;
+  const normalizeText = (text: string) => text.normalize('NFC').replace(/\s+/gu, ' ').trim();
+  const quote = normalizeText(candidate.quote);
+  if (quote.length < 8 || !/\p{L}/u.test(quote)) return clean;
+  const matches = sources.filter(source => source.id === candidate.id);
+  if (matches.length !== 1) return clean;
+  const marker = 'Verbatim excerpt:\n';
+  const markerAt = matches[0].text.lastIndexOf(marker);
+  if (markerAt < 0) return clean;
+  const excerpt = normalizeText(matches[0].text.slice(markerAt + marker.length));
+  const start = excerpt.indexOf(quote);
+  if (start < 0 || excerpt.indexOf(quote, start + quote.length) >= 0) return clean;
+  const word = (character: string | undefined) => Boolean(character && /[\p{L}\p{N}_]/u.test(character));
+  if ((word(excerpt[start - 1]) && word(quote[0]))
+      || (word(excerpt[start + quote.length]) && word(quote.at(-1)))) return clean;
+  let left = 0;
+  for (let index = start - 1; index >= 0; index--) {
+    if (isSafeSentencePeriod(excerpt, index)) { left = index + 1; break; }
+  }
+  // An excerpt start is usable only when it visibly starts a sentence, rather
+  // than an ellipsis or a lower-case mid-sentence fragment.
+  const first = excerpt.slice(left).trimStart()[0];
+  if (left === 0 && first && !/[\p{Lu}¿¡“«"']/u.test(first)) return clean;
+  let right = -1;
+  for (let index = start + quote.length; index < excerpt.length; index++) {
+    if (isSafeSentencePeriod(excerpt, index)) { right = index + 1; break; }
+  }
+  if (right < 0) return clean;
+  const expanded = excerpt.slice(left, right).trim();
+  if (expanded.length < 12 || expanded.length > 400 || !expanded.includes(quote)) return clean;
+  return { ...clean, quote: expanded, originalQuote: candidate.quote };
+}
+
+export function normalizeResearchProseVerdicts(input: { claims: unknown[] }, size: number,
+  sources: readonly ResearchAuditSource[] = []): Array<Verdict | undefined> & { malformed?: Map<number, string> } {
   const verdicts: Array<Verdict | undefined> & { malformed?: Map<number, string> } = [];
   const malformed = new Map<number, string>();
   const seen = new Map<number, number>();
@@ -62,7 +154,11 @@ export function normalizeResearchProseVerdicts(input: { claims: unknown[] }, siz
     const item = raw as Verdict;
     const premises = Array.isArray(item.premises) ? item.premises.map(premise => premise && typeof premise === 'object' ? {
       ...premise, from: premise.from === undefined ? [] : premise.from,
-      evidence: premise.evidence === undefined ? [] : Array.isArray(premise.evidence) ? premise.evidence.filter(evidence => typeof evidence?.quote !== 'string' || evidence.quote.length >= 12) : premise.evidence,
+      evidence: premise.evidence === undefined ? [] : Array.isArray(premise.evidence) ? premise.evidence
+        .map(evidence => expandShortEvidence(evidence, sources))
+        .filter(evidence => !evidence || typeof evidence !== 'object'
+          || typeof (evidence as { quote?: unknown }).quote !== 'string'
+          || ((evidence as { quote: string }).quote.length >= 12)) as Premise['evidence'] : premise.evidence,
     } : premise) : item.premises;
     const claim = { ...item, premises, explicitInference: item.explicitInference ?? false, reason: typeof item.reason === 'string' ? item.reason.slice(0, 600) : item.reason };
     if (Number.isInteger(item.index)) seen.set(item.index, (seen.get(item.index) ?? 0) + 1);
@@ -168,6 +264,15 @@ export function dropResearchSentences(markdown: string, drop: (plain: string) =>
   return { markdown: tidy(result), dropped: dropped.reverse() };
 }
 const HAS_CONTENT_MARKER = /\p{N}|nodus:\/\//u;
+/** Topic headings are presentation. Quantities remain factual even in a heading;
+ * actual prose assertions still receive the independent whole-field veto. */
+export function researchEditorialHeading(text: string): boolean {
+  const plain = text.replace(/\[[^\]\n]*\]\(nodus:\/\/[^)\s]+\)/gu, '').replace(/\(\s*\)/gu, '').trim();
+  const heading = /^#{1,6}\s+[^\n]+$/u.test(plain) || /^(?:\*\*[^*\n]+\*\*|__[^_\n]+__)\s*:?$/u.test(plain);
+  const label = plain.replace(/^#{1,6}\s*|[*_]/gu, '').replace(/^\d{1,2}[.)]\s*/u, '');
+  return heading && /\p{L}/u.test(label) && !/\p{N}/u.test(label);
+}
+
 /** The acceptance decision is derived here from the judge's atomic premises. Its
  * `supported` boolean, its unsupported parts and its premises must all agree:
  * a verdict whose parts disagree is not a reliable approval and fails closed. */
@@ -176,7 +281,7 @@ export function decideResearchVerdict(span: string, verdict: Verdict, sources: R
 } {
   const literal = (evidence: { id: string; quote: string }) => sources.some(source => source.id === evidence.id && normalize(source.text).includes(normalize(evidence.quote)));
   if (verdict.kind === 'nonfactual') {
-    if (verdict.premises.length || verdict.unsupportedParts.length || HAS_CONTENT_MARKER.test(span)) return { valid: false, failure: 'nonfactual_with_content', evidence: [] };
+    if (verdict.premises.length || verdict.unsupportedParts.length || HAS_CONTENT_MARKER.test(span) && !researchEditorialHeading(span)) return { valid: false, failure: 'nonfactual_with_content', evidence: [] };
     return verdict.supported ? { valid: true, evidence: [] } : { valid: false, failure: 'judge_rejected', evidence: [] };
   }
   if (!verdict.premises.length) return { valid: false, failure: 'no_premises', evidence: [] };
@@ -190,7 +295,8 @@ export function decideResearchVerdict(span: string, verdict: Verdict, sources: R
       if (!ok) failure ??= 'inference_without_supported_premises';
     } else {
       // An absence, like any fact, needs a source that states it: silence is not a quote.
-      ok = premise.evidence.length > 0 && premise.evidence.every(literal);
+      ok = premise.evidence.length > 0 && premise.evidence.every(evidence => literal(evidence)
+        && sources.some(source => source.id === evidence.id && (!source.attributionOnly || premise.type === 'attribution')));
       if (!ok) failure ??= 'premise_without_literal_evidence';
     }
     premiseValid.push(ok);
@@ -207,7 +313,8 @@ export function decideResearchVerdict(span: string, verdict: Verdict, sources: R
     const key = `${item.id}\u0000${normalize(item.quote)}`;
     if (seen.has(key)) return false;
     seen.add(key); return true;
-  });
+  }).map(item => item.originalQuote === undefined ? { id: item.id, quote: item.quote }
+    : { id: item.id, quote: item.quote, originalQuote: item.originalQuote });
   return { valid: true, evidence };
 }
 /** Existence of an evidence ID and literal supporting text are separate gates
@@ -237,7 +344,10 @@ export function applyResearchProseVerdicts(markdown: string, sources: ResearchAu
     const cited = sources.filter(source => sourceIds.has(source.id));
     const text = span.text.replace(PARENTHESIZED_CITATIONS, '').replace(CITATION, '').trimEnd();
     // Headings keep their evidence in the ledger; links would make them body text.
-    const links = /^\s*#{1,6}\s/u.test(span.text) ? '' : cited.map(source => `[${source.label.replace(/[[\]\\]/g, '')}](${source.citation})`).join(' ');
+    const links = /^\s*#{1,6}\s/u.test(span.text) ? '' : cited.map(source => {
+      const label = source.label.replace(/[[\]\\]/g, '');
+      return source.citation ? `[${label}](${source.citation})` : `(${label})`;
+    }).join(' ');
     edits.push({ ...span, text: links ? `${text} ${links}` : text });
   }
   let result = markdown;
@@ -343,4 +453,32 @@ export async function reconcileResearchReport(parts: ResearchReportParts, ledger
   const conflicting = new Set(conflicts.flatMap(item => [researchSentenceKey(statements[item.a]), researchSentenceKey(statements[item.b])]));
   if (conflicting.size) map(plain => conflicting.has(researchSentenceKey(plain)), 'internal_contradiction');
   return finish(conflicts.length, true);
+}
+
+
+/** Short request-local citation destinations reduce opaque-ID transcription and
+ * source/locator drift during whole-answer revision. Only supplied destinations
+ * are expanded. Unknown aliases remain unknown for the normal authority checks. */
+export function researchWriterCitationTransport(sources: readonly ResearchAuditSource[]) {
+  const original = new Set(sources.map(source => source.citation).filter(Boolean));
+  let prefix = 'nr-';
+  while ([...original].some(url => /^nodus:\/\/[^/]+\//u.test(url) && url.split('/').at(-1)?.startsWith(prefix))) prefix = '_' + prefix;
+  const short = new Map<string, string>(), long = new Map<string, string>();
+  for (const citation of original) {
+    const kind = /^nodus:\/\/([^/]+)\//u.exec(citation)?.[1];
+    if (!kind) continue;
+    const alias = `nodus://${kind}/${prefix}${short.size + 1}`;
+    short.set(citation, alias); long.set(alias, citation);
+  }
+  const replace = (text: string, bindings: Map<string, string>) => text.replace(/\]\((nodus:\/\/[^)\s]+)\)/gu,
+    (full, url: string) => bindings.has(url) ? `](${bindings.get(url)})` : full);
+  const project = (text: string) => replace(text, short);
+  const projectValue = <T>(value: T): T => {
+    if (typeof value === 'string') return project(value) as T;
+    if (Array.isArray(value)) return value.map(item => projectValue(item)) as T;
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, projectValue(item)])) as T;
+    return value;
+  };
+  return { project, projectValue, restore: (text: string) => replace(text, long),
+    sources: researchAuditSourceTransport(sources).sources.map(source => ({ ...source, citation: short.get(source.citation) ?? source.citation })) };
 }

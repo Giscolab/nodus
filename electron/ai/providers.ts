@@ -1,3 +1,5 @@
+import { rememberEmbeddingModelRevisions } from './embeddingModelRevisions';
+import { fetchModelResource } from '../network/modelResource';
 import type {
   AiProvider,
   EmbeddingProvider,
@@ -13,6 +15,7 @@ import { listNodusLocalChatModels, listNodusLocalEmbeddingModels } from './nodus
 import { nodusUserAgent, openCodeGoSessionId } from './clientIdentity';
 import { researchTestProviderBase, researchTestProviderModels } from '../qa/researchProviderProxy';
 import { cachedModelContextWindow as cachedCatalogueWindow, rememberModelContextWindows } from './modelContextCache';
+import { rememberThinkingCatalog } from './thinkingCompatibility';
 
 export { AI_PROVIDERS, PROVIDER_LABELS, LOCAL_PROVIDERS, isLocalProvider } from '@shared/providers';
 export { normalizeCustomBaseUrl, normalizeCustomModels, normalizeCustomProviderConfig } from '@shared/providers';
@@ -285,7 +288,7 @@ export function openRouterRoutingBody(sortByThroughput: boolean): Record<string,
 
 /** Attribution headers OpenRouter uses for ranking/rate-limit identity. */
 export const OPENROUTER_HEADERS: Record<string, string> = {
-  'HTTP-Referer': 'https://github.com/Drakonis96/nodus',
+  'HTTP-Referer': 'https://github.com/jorgepb96/nodus',
   'X-Title': 'Nodus',
 };
 
@@ -375,6 +378,7 @@ export async function listModels(provider: AiProvider, key: string | null, signa
   // Custom discovery can fall back to manual IDs on failure. Only its successful
   // remote catalogue may replace known windows; listCustom records that snapshot.
   if (provider !== 'custom' || testModels) rememberModelContextWindows(provider, models, endpoint);
+  rememberThinkingCatalog(provider, models, openAiCompatBase(provider));
   return models;
 }
 /** Full listing evidence. Manual IDs never prove that a remote catalogue was read. */
@@ -396,6 +400,7 @@ export async function listProviderModelCatalog(provider: AiProvider, key: string
     // Even after a successful read, manual aliases are selections, not listing evidence.
     selectableModels = mergeCustomModels(models);
   }
+  rememberThinkingCatalog(provider, models, openAiCompatBase(provider));
   return { models, selectableModels };
 }
 
@@ -412,9 +417,9 @@ async function fetchModels(provider: AiProvider, key: string | null, signal?: Ab
     case 'opencode-go':
       return listOpenCodeGo(signal, fullCatalog);
     case 'deepseek':
-      return listOpenAiStyle(`${researchTestProviderBase(provider) ?? 'https://api.deepseek.com'}/models`, key, false, { signal, fullCatalog });
+      return withDeepSeekThinkingOff(await listOpenAiStyle(`${researchTestProviderBase(provider) ?? 'https://api.deepseek.com'}/models`, key, false, { signal, fullCatalog }));
     case 'openrouter':
-      return listOpenRouter(signal, fullCatalog);
+      return listOpenRouter(signal, fullCatalog, key);
     case 'groq':
       return listOpenAiStyle('https://api.groq.com/openai/v1/models', key, !fullCatalog, { signal, fullCatalog });
     case 'cerebras':
@@ -541,7 +546,7 @@ async function listOpenCodeGo(signal?: AbortSignal, fullCatalog = false): Promis
   // Unauthenticated, but still an OpenCode Go request: it needs the session
   // header like any other or it may start being rejected, which would empty the
   // model picker in Settings before a key is even pasted.
-  const res = await fetch('https://opencode.ai/zen/go/v1/models', {
+  const res = await fetchModelResource('https://opencode.ai/zen/go/v1/models', {
     headers: { 'User-Agent': nodusUserAgent(), 'x-opencode-session': openCodeGoSessionId() },
     signal,
   });
@@ -556,6 +561,12 @@ async function listOpenCodeGo(signal?: AbortSignal, fullCatalog = false): Promis
 
 /** Fetch embedding-capable models for the configured embedding provider. */
 export async function listEmbeddingModels(provider: EmbeddingProvider, key: string | null): Promise<ModelInfo[]> {
+  const models = await listEmbeddingModelsNow(provider, key);
+  const endpoint = openAiCompatBase(provider);
+  if (endpoint) rememberEmbeddingModelRevisions(provider, endpoint, models);
+  return models;
+}
+async function listEmbeddingModelsNow(provider: EmbeddingProvider, key: string | null): Promise<ModelInfo[]> {
   const testModels = researchTestProviderModels(provider, 'embedding');
   if (testModels) return testModels;
   switch (provider) {
@@ -576,7 +587,7 @@ export async function listEmbeddingModels(provider: EmbeddingProvider, key: stri
 
 async function listAnthropic(key: string | null, signal?: AbortSignal, fullCatalog = false): Promise<ModelInfo[]> {
   if (!key) throw new Error('Falta la clave de Anthropic.');
-  const res = await fetch('https://api.anthropic.com/v1/models?limit=1000', {
+  const res = await fetchModelResource('https://api.anthropic.com/v1/models?limit=1000', {
     headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, signal,
   });
   if (!res.ok) throw new Error(`Anthropic /models HTTP ${res.status}`);
@@ -599,6 +610,21 @@ async function listAnthropic(key: string | null, signal?: AbortSignal, fullCatal
  * likewise, so a mistyped host fails fast instead of hanging the Settings button
  * the way an untimed fetch against a black-holed IP would.
  */
+/**
+ * DeepSeek publishes `effort.supported_levels` (low/high/max for Flash) but leaves out the
+ * separate switch that turns thinking off (`thinking.type: disabled`), which its API accepts
+ * and the rest of Nodus already sends. A model that publishes levels gets an Off stop first,
+ * so the research composer can run it without thinking.
+ */
+function withDeepSeekThinkingOff(models: ModelInfo[]): ModelInfo[] {
+  return models.map((model) => {
+    const levels = model.researchReasoningLevels ?? [];
+    return levels.length && !levels.includes('none') && !levels.includes('off')
+      ? { ...model, researchReasoningLevels: ['none', ...levels] }
+      : model;
+  });
+}
+
 async function listOpenAiStyle(
   url: string,
   key: string | null,
@@ -610,7 +636,7 @@ async function listOpenAiStyle(
   const timer = options.timeoutMs ? setTimeout(() => controller.abort(), options.timeoutMs) : null;
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await fetchModelResource(url, {
       headers: key ? { Authorization: `Bearer ${key}` } : {},
       signal: options.signal && timer ? AbortSignal.any([options.signal, controller.signal]) : options.signal ?? (timer ? controller.signal : undefined),
     });
@@ -629,6 +655,7 @@ async function listOpenAiStyle(
       capabilities?: { vision?: boolean; reasoning?: boolean };
       supported_parameters?: string[];
       effort?: { supported_levels?: ModelInfo['researchReasoningLevels'] };
+      reasoning?: { mandatory?: boolean; supported_efforts?: ModelInfo['researchReasoningLevels'] };
     }[];
   };
   if (options.fullCatalog) requireCompleteCatalog(data);
@@ -637,7 +664,8 @@ async function listOpenAiStyle(
     name: m.name,
     contextLength: [m.context_window, m.max_context_length, m.context_length, m.max_model_len]
       .find(limit => Number.isSafeInteger(limit) && limit! >= 1024),
-    researchReasoningLevels: researchAdvertisedEfforts({ id: m.id, researchReasoningLevels: m.effort?.supported_levels }),
+    researchReasoningLevels: researchAdvertisedEfforts({ id: m.id, researchReasoningLevels: m.effort?.supported_levels ?? m.reasoning?.supported_efforts, reasoningMandatory: m.reasoning?.mandatory }),
+    ...(typeof m.reasoning?.mandatory === 'boolean' ? { reasoningMandatory: m.reasoning.mandatory } : {}),
     vision: m.capabilities?.vision,
     reasoning: m.capabilities?.reasoning ?? (m.supported_parameters ?? []).includes('reasoning'),
   }) as ModelInfo);
@@ -656,7 +684,7 @@ async function listCerebras(key: string | null, signal?: AbortSignal, fullCatalo
   const models = await listOpenAiStyle('https://api.cerebras.ai/v1/models', key, !fullCatalog, { signal, fullCatalog });
   try {
     const deadline = AbortSignal.timeout(5000);
-    const res = await fetch('https://api.cerebras.ai/public/v1/models', {
+    const res = await fetchModelResource('https://api.cerebras.ai/public/v1/models', {
       signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
     });
     if (!res.ok) return models;
@@ -675,7 +703,7 @@ async function listCerebras(key: string | null, signal?: AbortSignal, fullCatalo
 
 async function listOpenAiEmbeddingModels(key: string | null): Promise<ModelInfo[]> {
   if (!key) throw new Error('Falta la clave de OpenAI.');
-  const res = await fetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${key}` } });
+  const res = await fetchModelResource('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${key}` } });
   if (!res.ok) throw new Error(`OpenAI /models HTTP ${res.status}`);
   const data = (await res.json()) as { data?: { id: string }[] };
   return (data.data ?? [])
@@ -684,12 +712,14 @@ async function listOpenAiEmbeddingModels(key: string | null): Promise<ModelInfo[
     .sort(byId);
 }
 
-async function listOpenRouter(signal?: AbortSignal, fullCatalog = false): Promise<ModelInfo[]> {
+async function listOpenRouter(signal?: AbortSignal, fullCatalog = false, qaKey?: string | null): Promise<ModelInfo[]> {
   // OpenRouter's model list is public (no key required).
-  const res = await fetch('https://openrouter.ai/api/v1/models', signal ? { signal } : undefined);
+  const qaBase = researchTestProviderBase('openrouter');
+  const res = await fetchModelResource(qaBase ? `${qaBase}/models` : 'https://openrouter.ai/api/v1/models',
+    { ...(signal ? { signal } : {}), ...(qaBase ? { headers: { Authorization: `Bearer ${qaKey ?? ''}` } } : {}) });
   if (!res.ok) throw new Error(`OpenRouter /models HTTP ${res.status}`);
   const data = (await res.json()) as {
-    data?: { id: string; name?: string; context_length?: number; top_provider?: { context_length?: number }; reasoning?: { supported_efforts?: ModelInfo['researchReasoningLevels'] }; supported_parameters?: string[]; architecture?: { input_modalities?: string[] } }[];
+    data?: { id: string; name?: string; context_length?: number; top_provider?: { context_length?: number }; reasoning?: { mandatory?: boolean; supported_efforts?: ModelInfo['researchReasoningLevels'] }; supported_parameters?: string[]; architecture?: { input_modalities?: string[] } }[];
   };
   if (fullCatalog) requireCompleteCatalog(data);
   const models: ModelInfo[] = catalogRows<NonNullable<typeof data.data>[number]>(data, 'data', fullCatalog).map((m) => ({
@@ -698,7 +728,8 @@ async function listOpenRouter(signal?: AbortSignal, fullCatalog = false): Promis
     group: m.id.includes('/') ? m.id.split('/')[0] : 'other',
     contextLength: Math.min(m.context_length ?? Infinity, m.top_provider?.context_length ?? Infinity) < Infinity ? Math.min(m.context_length ?? Infinity, m.top_provider?.context_length ?? Infinity) : undefined,
     // OpenRouter publishes highest first; the slider runs from lowest to highest.
-    researchReasoningLevels: researchAdvertisedEfforts({ id: m.id, researchReasoningLevels: m.reasoning?.supported_efforts }).reverse(),
+    researchReasoningLevels: researchAdvertisedEfforts({ id: m.id, researchReasoningLevels: m.reasoning?.supported_efforts, reasoningMandatory: m.reasoning?.mandatory }).reverse(),
+    ...(typeof m.reasoning?.mandatory === 'boolean' ? { reasoningMandatory: m.reasoning.mandatory } : {}),
     // Flag reasoning models so the picker can warn they are slower for scanning.
     reasoning: (m.supported_parameters ?? []).includes('reasoning'),
     // Modalities let us filter the vision-model picker to image-capable models.
@@ -710,7 +741,7 @@ async function listOpenRouter(signal?: AbortSignal, fullCatalog = false): Promis
 
 async function listOpenRouterEmbeddingModels(key: string | null): Promise<ModelInfo[]> {
   if (!key) throw new Error('Falta la clave de OpenRouter.');
-  const res = await fetch('https://openrouter.ai/api/v1/embeddings/models', {
+  const res = await fetchModelResource('https://openrouter.ai/api/v1/embeddings/models', {
     headers: { Authorization: `Bearer ${key}` },
   });
   if (!res.ok) throw new Error(`OpenRouter /embeddings/models HTTP ${res.status}`);
@@ -726,7 +757,7 @@ async function listOpenRouterEmbeddingModels(key: string | null): Promise<ModelI
 
 async function listGemini(key: string | null, fullCatalog = false, signal?: AbortSignal): Promise<ModelInfo[]> {
   if (!key) throw new Error('Falta la clave de Gemini.');
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}&pageSize=1000`, { signal });
+  const res = await fetchModelResource(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}&pageSize=1000`, { signal });
   if (!res.ok) throw new Error(`Gemini /models HTTP ${res.status}`);
   const data = (await res.json()) as {
     models?: { name: string; displayName?: string; inputTokenLimit?: number; supportedGenerationMethods?: string[] }[];
@@ -743,7 +774,7 @@ async function listGemini(key: string | null, fullCatalog = false, signal?: Abor
 
 async function listGeminiEmbeddingModels(key: string | null): Promise<ModelInfo[]> {
   if (!key) throw new Error('Falta la clave de Gemini.');
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}&pageSize=1000`);
+  const res = await fetchModelResource(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}&pageSize=1000`);
   if (!res.ok) throw new Error(`Gemini /models HTTP ${res.status}`);
   const data = (await res.json()) as {
     models?: { name: string; displayName?: string; supportedGenerationMethods?: string[] }[];
@@ -783,6 +814,7 @@ function localError(provider: LocalProvider, base: string, detail: string): Erro
 }
 
 interface OllamaTag {
+  digest?: string;
   name?: string;
   model?: string;
   size?: number;
@@ -808,6 +840,7 @@ async function listOllama(key: string | null, fullCatalog = false): Promise<Mode
       const id = m.model ?? m.name ?? '';
       return {
         id,
+        revision: m.digest,
         sizeBytes: typeof m.size === 'number' ? m.size : undefined,
         paramSize: m.details?.parameter_size,
         quantization: m.details?.quantization_level,
@@ -826,6 +859,7 @@ async function listOllamaEmbeddingModels(key: string | null): Promise<ModelInfo[
 }
 
 interface LmStudioModel {
+  sha256?: string;
   id?: string;
   type?: string;
   arch?: string;
@@ -859,6 +893,7 @@ async function listLmStudio(key: string | null, embeddingsOnly: boolean, fullCat
       return {
         id: m.id ?? '',
         name: m.publisher ? `${m.arch ?? m.id} · ${m.publisher}` : m.arch,
+        revision: m.sha256,
         quantization: m.quantization,
         contextLength: typeof m.max_context_length === 'number' ? m.max_context_length : undefined,
         trainedContextLength: typeof m.max_context_length === 'number' ? m.max_context_length : undefined,

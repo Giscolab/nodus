@@ -5,6 +5,13 @@ import { ipcRenderer } from 'electron';
 import type { PlatformApi } from '@shared/api/platform';
 
 export const platformApi: PlatformApi = {
+  openNodusSupport: () => ipcRenderer.invoke('support:open'),
+  supportDistributionState:()=>ipcRenderer.invoke('support:distributionState'),
+  checkSupportDownload:()=>ipcRenderer.invoke('support:checkDownload'),
+  installSupportDownload:()=>ipcRenderer.invoke('support:installDownload'),
+  saveSupportInstaller:()=>ipcRenderer.invoke('support:saveInstaller'),
+  cancelSupportDownload:()=>ipcRenderer.invoke('support:cancelDownload'),
+  revealSupportInstallation:()=>ipcRenderer.invoke('support:revealInstallation'),
   getMcpStatus: () => ipcRenderer.invoke('mcp:status'),
   regenerateMcpToken: () => ipcRenderer.invoke('mcp:regenerateToken'),
   getMcpTunnelStatus: () => ipcRenderer.invoke('mcp:tunnel:status'),
@@ -82,6 +89,7 @@ export const platformApi: PlatformApi = {
   },
 
   getChatGptSubscriptionStatus: () => ipcRenderer.invoke('ai:chatgptSubscription:status'),
+  installChatGptSubscriptionRuntime: () => ipcRenderer.invoke('ai:chatgptSubscription:installRuntime'),
   startChatGptSubscriptionLogin: () => ipcRenderer.invoke('ai:chatgptSubscription:login'),
   cancelChatGptSubscriptionLogin: (loginId) => ipcRenderer.invoke('ai:chatgptSubscription:cancelLogin', loginId),
   logoutChatGptSubscription: () => ipcRenderer.invoke('ai:chatgptSubscription:logout'),
@@ -91,6 +99,7 @@ export const platformApi: PlatformApi = {
     return () => ipcRenderer.removeListener('ai:chatgptSubscription:statusChanged', listener);
   },
   getGitHubCopilotSubscriptionStatus: () => ipcRenderer.invoke('ai:githubCopilotSubscription:status'),
+  installGitHubCopilotSubscriptionRuntime: () => ipcRenderer.invoke('ai:githubCopilotSubscription:installRuntime'),
   startGitHubCopilotSubscriptionLogin: () => ipcRenderer.invoke('ai:githubCopilotSubscription:login'),
   cancelGitHubCopilotSubscriptionLogin: () => ipcRenderer.invoke('ai:githubCopilotSubscription:cancelLogin'),
   logoutGitHubCopilotSubscription: () => ipcRenderer.invoke('ai:githubCopilotSubscription:logout'),
@@ -113,6 +122,8 @@ export const platformApi: PlatformApi = {
   testCustomProvider: () => ipcRenderer.invoke('ai:testCustomProvider'),
   getLocalAiDiagnostics: () => ipcRenderer.invoke('ai:localDiagnostics'),
   listImageModels: () => ipcRenderer.invoke('ai:listImageModels'),
+  generateEditorImage: (request) => ipcRenderer.invoke('ai:editorImage:generate', request),
+  cancelEditorImage: (requestId) => ipcRenderer.invoke('ai:editorImage:cancel', requestId).then(() => undefined),
   getNodusLocalAiStatus: () => ipcRenderer.invoke('ai:nodusLocal:status'),
   installNodusLocalRuntime: async (onProgress) => {
     const requestId = `nodus-local-runtime-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -176,23 +187,17 @@ export const platformApi: PlatformApi = {
   clearAudioClips: (entityKind, entityId) =>
     ipcRenderer.invoke('audio:clearClips', entityKind, entityId).then(() => undefined),
   saveAudioClip: (entityKind, entityId, input) => ipcRenderer.invoke('audio:saveClip', entityKind, entityId, input),
-  getAudioClipDataUrl: (clipId) => ipcRenderer.invoke('audio:clipData', clipId),
   deleteAudioClip: (clipId) => ipcRenderer.invoke('audio:deleteClip', clipId).then(() => undefined),
   deleteEntityAudioClips: (entityKind, entityId) =>
     ipcRenderer.invoke('audio:deleteEntityClips', entityKind, entityId).then(() => undefined),
   exportAudioClip: (clipId) => ipcRenderer.invoke('audio:exportClip', clipId),
+  getAudioClipSync: (clipId) => ipcRenderer.invoke('audio:clipSync', clipId),
   listStudyAudioBookmarks: (entityKind, entityId) => ipcRenderer.invoke('audio:study:bookmarks', entityKind, entityId),
   createStudyAudioBookmark: (entityKind, entityId, segmentIndex, label) => ipcRenderer.invoke('audio:study:bookmark:create', entityKind, entityId, segmentIndex, label),
   deleteStudyAudioBookmark: (id) => ipcRenderer.invoke('audio:study:bookmark:delete', id).then(() => undefined),
   getStudyPronunciations: (subjectId) => ipcRenderer.invoke('audio:study:pronunciations', subjectId),
   setStudyPronunciations: (subjectId, entries) => ipcRenderer.invoke('audio:study:pronunciations:set', subjectId, entries),
   listStudyAudioPlaylist: (subjectId) => ipcRenderer.invoke('audio:study:playlist', subjectId),
-  humeStatus: () => ipcRenderer.invoke('audio:humeStatus'),
-  humeSetKey: (key) => ipcRenderer.invoke('audio:humeSetKey', key),
-  humeClearKey: () => ipcRenderer.invoke('audio:humeClearKey'),
-  humeVoices: (language) => ipcRenderer.invoke('audio:humeVoices', language),
-  humeSynthesize: (voiceId, provider, text) =>
-    ipcRenderer.invoke('audio:humeSynthesize', voiceId, provider, text),
 
   listContentTranslations: (entityKind, entityId) =>
     ipcRenderer.invoke('translations:list', entityKind, entityId),

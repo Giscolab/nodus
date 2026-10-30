@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { build } from 'esbuild';
 import { chromium } from 'playwright-core';
+import { launchComponentBrowser } from './lib/component-test-browser.mjs';
 import { componentStyles } from './lib/component-test-styles.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -33,7 +34,7 @@ const focusedText = page => page.evaluate(() => document.activeElement?.textCont
 test('research chat history: sections, search, pins, menu and projects', { timeout: 300_000 }, async (t) => {
   if (!chrome) { t.skip('Chrome/Chromium not installed'); return; }
   const dir = await mkdtemp(path.join(os.tmpdir(), 'nodus-chat-sidebar-'));
-  const browser = await chromium.launch({ executablePath: chrome, headless: true });
+  const { browser, close: closeBrowser } = await launchComponentBrowser(chromium, { executablePath: chrome, headless: true });
   try {
     const bundle = await build({ entryPoints: [path.join(root, 'scripts/fixtures/research-chat-sidebar/renderer.tsx')], bundle: true, write: false, platform: 'browser', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"' }, loader: { '.css': 'empty', '.svg': 'dataurl' } });
     const css = componentStyles();
@@ -180,6 +181,47 @@ test('research chat history: sections, search, pins, menu and projects', { timeo
       await sidebar.getByTestId('research-folder-f-3').getByRole('button', { name: 'Notas', exact: true }).click();
       assert.deepEqual(await home.getByTestId('research-project-chats').locator('li').allTextContents(), ['Regadío del Tormeral']);
       assert.equal(await home.getByTestId('research-project-tree').count(), 0);
+    });
+
+    await t.test('valid destinations stand out in both themes and clear after leaving or cancelling', async () => {
+      const source = home.getByTestId('home-chat-c2');
+      const target = sidebar.getByTestId('research-folder-f-3');
+      const currentFolder = sidebar.getByTestId('research-folder-f-2');
+      const project = sidebar.getByTestId('research-project-p-a');
+      const unfiled = sidebar.getByTestId('research-folder-unfiled-p-a');
+      const transfer = await page.evaluateHandle(() => new DataTransfer());
+      const highlighted = async row => page.waitForFunction(element => element.classList.contains('is-drop-inside'), await row.elementHandle());
+      const cleared = async () => page.waitForFunction(() => !document.querySelector('.is-drop-inside'));
+      for (const theme of ['dark', 'light']) {
+        await page.evaluate(theme => document.documentElement.className = theme, theme);
+        await source.dispatchEvent('dragstart', { dataTransfer: transfer });
+        await target.hover();
+        const resting = await target.evaluate(element => getComputedStyle(element).backgroundColor);
+        await target.dispatchEvent('dragenter', { dataTransfer: transfer });
+        await highlighted(target);
+        await page.waitForFunction(element => getComputedStyle(element).boxShadow.includes('2px'), await target.elementHandle());
+        const feedback = await target.evaluate(element => ({ background: getComputedStyle(element).backgroundColor, border: getComputedStyle(element).boxShadow, weight: getComputedStyle(element.querySelector('.research-history-main')).fontWeight }));
+        assert.notEqual(feedback.background, resting, `${theme}: drag feedback takes precedence over hover`);
+        assert.match(feedback.border, /2px.*inset|inset.*2px/, `${theme}: destination has a visible outline`);
+        assert.equal(feedback.weight, '600');
+        await sidebar.screenshot({ path: path.join(os.tmpdir(), `nodus-research-drop-${theme}.png`) });
+        await target.evaluate(element => element.dispatchEvent(new DragEvent('dragleave', { bubbles: true, relatedTarget: element.querySelector('button') })));
+        await highlighted(target);
+        await target.dispatchEvent('dragleave', { dataTransfer: transfer });
+        await cleared();
+        await currentFolder.dispatchEvent('dragover', { dataTransfer: transfer });
+        assert.equal(await currentFolder.evaluate(element => element.classList.contains('is-drop-inside')), false, 'the current folder rejects the chat');
+        for (const destination of [target, project, unfiled]) {
+          await destination.dispatchEvent('dragover', { dataTransfer: transfer });
+          await highlighted(destination);
+          await source.dispatchEvent('dragend', { dataTransfer: transfer });
+          await cleared();
+          await source.dispatchEvent('dragstart', { dataTransfer: transfer });
+        }
+        await source.dispatchEvent('dragend', { dataTransfer: transfer });
+      }
+      await page.evaluate(() => document.documentElement.className = 'dark');
+      await transfer.dispose();
     });
 
     await t.test('a chat dropped on a folder is filed there; dropped outside every folder it leaves it, in both places', async () => {
@@ -449,7 +491,7 @@ test('research chat history: sections, search, pins, menu and projects', { timeo
     await page.screenshot({ path: path.join(os.tmpdir(), 'nodus-research-chat-sidebar.png') });
     assert.deepEqual(errors, []);
   } finally {
-    await browser.close();
+    await closeBrowser();
     await rm(dir, { recursive: true, force: true });
   }
 });

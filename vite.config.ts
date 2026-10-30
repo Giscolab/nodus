@@ -27,50 +27,12 @@ const databaseComputeWorkerAliases = () => ({
   },
 });
 
-// Native node modules and Electron-only deps must stay external in the main process bundle.
-const mainExternals = [
-  'better-sqlite3',
-  'electron',
-  'pdfjs-dist',
-  'mammoth',
-  'word-extractor',
-  'xlsx',
-  'adm-zip',
-  'tesseract.js',
-  '@napi-rs/canvas',
-  'sharp',
-  'heic-decode',
-  '@anthropic-ai/sdk',
-  '@google/genai',
-  '@huggingface/transformers',
-  // ws (pulled in by the SDKs above) optionally requires these native addons via
-  // try/catch; keep them external so that fallback works instead of the bundler
-  // hard-failing to resolve an uninstalled optional dependency.
-  'ws',
-  'bufferutil',
-  'utf-8-validate',
-  '@modelcontextprotocol/sdk',
-  '@modelcontextprotocol/sdk/server/mcp.js',
-  '@modelcontextprotocol/sdk/server/streamableHttp.js',
-  '@modelcontextprotocol/sdk/types.js',
-  '@github/copilot-sdk',
-  'openai',
-  'electron-updater',
-  // Turndown picks its HTML parser at module-evaluation time: with no `window` — i.e.
-  // in the main process — it takes the Node branch, which is a bare
-  // `require('@mixmark-io/domino')`. Bundled into an ESM chunk that call throws
-  // "require is not defined in ES module scope" the moment the chunk is imported,
-  // which took down the whole Zotero note-mirroring step. Kept external so it loads
-  // as the real CommonJS package, where the require resolves normally.
-  'turndown',
-  '@mixmark-io/domino',
-  // Chemistry Studio loads node-tikzjax's WASM and TeX tree from the package at
-  // runtime. Keeping both chemistry dependencies external preserves those paths
-  // and avoids embedding OpenChemLib's large pure-JS bundle in the main chunk.
-  'node-tikzjax',
-  'openchemlib',
-  '@rdkit/rdkit',
-];
+// Native node modules and Electron-only deps must stay external in the main process
+// bundle. The list lives with the packager, which ships exactly these packages (and
+// what they need) in the app's node_modules: see build/packagedNodeModules.cjs.
+const { MAIN_PROCESS_EXTERNALS: mainExternals } = require('./build/packagedNodeModules.cjs') as {
+  MAIN_PROCESS_EXTERNALS: string[];
+};
 
 /**
  * One preload build, emitting `<name>.cjs` into dist-electron.
@@ -249,17 +211,11 @@ export default defineConfig({
     alias: {
       '@shared': path.resolve(__dirname, 'shared'),
       events: eventsPolyfill,
-      // Use kokoro-js's self-contained browser bundle for local TTS. Its default
-      // entry pulls in @huggingface/transformers, which vite-plugin-electron-
-      // renderer resolves to a Node build that `require('path')` — unsupported in
-      // the sandboxed renderer. The web bundle inlines the WASM transformers build
-      // and has no node-builtin requires.
-      'kokoro-js': path.resolve(__dirname, 'node_modules/kokoro-js/dist/kokoro.web.js'),
     },
   },
-  // The TTS worker (src/lib/audio/tts.worker.ts) lazy-imports vits-web / kokoro-js,
-  // so its bundle is code-split — which Rollup only allows with the ES output
-  // format. This also matches the `{ type: 'module' }` worker we instantiate.
+  // Renderer workers (speech-to-text, diarization) lazy-import their engines, so their
+  // bundles are code-split — which Rollup only allows with the ES output format. This
+  // also matches the `{ type: 'module' }` workers we instantiate.
   worker: {
     format: 'es',
   },
@@ -286,6 +242,7 @@ export default defineConfig({
         // worker entries that share most of their Library dependency graph.
         entry: {
           main: 'electron/bootstrap.ts',
+          supportProbe: 'electron/support/probe.ts',
           application: 'electron/main.ts',
           documentaryChunkWorker: 'electron/workers/documentaryChunkWorker.ts',
           backgroundUtility: 'electron/workers/backgroundUtility.ts',
@@ -293,6 +250,7 @@ export default defineConfig({
           documentaryMaintenanceWorker: 'electron/workers/documentaryMaintenanceWorker.ts',
           computeWorker: 'electron/workers/computeWorker.ts',
           libraryExtractionWorker: 'electron/workers/libraryExtractionWorker.ts',
+          textExtractionWorker: 'electron/workers/textExtractionWorker.ts',
           libraryOperationWorker: 'electron/workers/libraryOperationWorker.ts',
           libraryReaderWorker: 'electron/workers/libraryReaderWorker.ts',
           compassWorker: 'electron/workers/compassWorker.ts',
@@ -351,12 +309,20 @@ export default defineConfig({
       databaseAggregateWorkerBuild,
       databaseDeepResearchWorkerBuild,
       vectorScanWorkerBuild,
+      { ...vectorScanWorkerBuild, vite: { ...vectorScanWorkerBuild.vite, build: { ...vectorScanWorkerBuild.vite.build,
+        rollupOptions: { ...vectorScanWorkerBuild.vite.build.rollupOptions,
+          input: path.join(__dirname, 'electron/workers/embeddingGemma2Worker.ts'),
+          output: { format: 'cjs' as const, entryFileNames: 'embeddingGemma2Worker.cjs', inlineDynamicImports: true },
+        },
+      } } },
       utilityBuild('backupUtilityWorker', 'electron/export/backupUtilityWorker.ts'),
+      utilityBuild('openBackupWorker', 'electron/export/openBackupWorker.ts'),
       // One bootstrap for every trusted capability: a plugin ships a module, not a process.
       utilityBuild('capabilityWorkerBootstrap', 'electron/capabilities/workerBootstrap.ts'),
       utilityBuild('recoveryProbeUtilityWorker', 'electron/recovery/recoveryProbeUtilityWorker.ts'),
       utilityBuild('migrationRecoveryUtilityWorker', 'electron/db/migrationRecoveryUtilityWorker.ts'),
       utilityBuild('serverPublishWorker', 'electron/serverSync/serverPublishWorker.ts'),
+      utilityBuild('serverReplicaWorker', 'electron/serverSync/serverReplicaWorker.ts'),
     ]),
     renderer(),
   ],

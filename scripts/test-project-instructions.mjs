@@ -22,14 +22,14 @@ try {
   for (const table of tables.slice(1)) db.exec(`ALTER TABLE ${table.projects} DROP COLUMN instructions`);
   db.pragma('user_version = 192'); runMigrations(db); runMigrations(db);
   assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
-  assert.equal(SCHEMA_VERSION, 197);
+  assert.ok(SCHEMA_VERSION >= 193, 'the schema includes project instructions');
   assert.deepEqual(db.pragma('foreign_key_check'), []);
   const custom = load('electron/db/researchSystemPromptsRepo.ts').saveResearchSystemPrompt({ name: 'Chat style', instructions: 'CHAT_STYLE: use two paragraphs.' });
   const model = { provider: 'deepseek', model: 'deepseek-flash' };
   load('electron/db/settingsRepo.ts').updateSettings({ chatModel: model, synthesisModel: model, researchWebSearch: 'off' });
   const ai = load('electron/ai/aiClient.ts');
   const captured = [];
-  ai.embed = async () => null;
+  ai.embedQuery = async () => null;
   ai.completeTextStream = async (options, onDelta) => { captured.push(options.system); onDelta('Synthetic response.'); return 'Synthetic response.'; };
   const database = load('electron/db/databasesRepo.ts').createDatabase('Synthetic measurements');
   const article = load('electron/db/worldEncyclopediaRepo.ts').createWorldArticle({ title: 'Synthetic tower', body: 'Three windows.' });

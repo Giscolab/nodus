@@ -1,4 +1,7 @@
 import { initializeChatSkillDefaults } from './chatSkills';
+import {initializeLearningWorkspace,isLearningWorkspace,closeLearningWorkspace} from './learning/learningWorkspace';
+import { flushWindowEditors, installEditorCloseGuard } from './editorFlush';
+import { claimSupportProfile } from './support/instanceLock';
 import { claimIsolatedProfile } from './qa/isolatedProfile';
 import { initializePluginStore } from './skillPlugins';
 import { initializeCapabilityPluginStore } from './capabilities/pluginStoreV2';
@@ -27,6 +30,7 @@ import {
 import { registerIpc } from './ipc';
 import { flushPipelineLogs } from './logging/pipelineLogHost';
 import { scanQueue } from './pipeline/scanQueue';
+import { disposeTextExtractionWorkers } from './extraction/textExtractionWorkerHost';
 import { getSettings } from './db/settingsRepo';
 import { runDueDatabaseRowTemplates } from './db/databaseTasksRepo';
 import { runDueAutomationRules } from './db/databaseAutomationsRepo';
@@ -38,7 +42,7 @@ import {
 } from './db/migrationRecoveryUtilityHost';
 import { generateDemoPortraits, hasDemoPortraitKey, demoPortraitsPending } from './ai/genealogyDemoPortraits';
 import { interruptDecorativeImageGenerations } from './ai/decorativeImages';
-import { startRealtimeSync, stopRealtimeSync } from './sync/syncService';
+import { startZoteroSync, stopZoteroSync } from './sync/syncService';
 import { startNodusServerSync, stopNodusServerSync } from './serverSync/serverSyncService';
 import { startInboxPolling, stopInboxPolling } from './serverSync/inboxPoller';
 import { startReplicaSync, stopReplicaSync } from './serverSync/replicaService';
@@ -61,14 +65,22 @@ import { stopAllWhisperCpp } from './stt/whisperCpp';
 import { recoverLegacyApiKeys } from './secrets/legacySecretRecovery';
 import { hasBackupPassword } from './secrets/secretStore';
 import type { UpdateCheckResponse, UpdateProgressEvent } from '@shared/types';
-import { TUTORIAL_VIDEO_EMBED_ORIGIN } from '@shared/tutorialVideos';
+import { installMediaRequestHeaders } from './mediaRequestHeaders';
+import { installDefaultWindowGuards } from './windowGuards';
 import { killChatGptSubscriptionServer } from './ai/codexSubscription';
+import { prefetchAgentRuntimesInUse } from './ai/agentRuntime';
 import { killGitHubCopilotSubscriptionServer } from './ai/githubCopilotSubscription';
 import { killNodusLocalServerSync } from './ai/nodusLocalAi';
 import { killSearxngSync } from './websearch/searxngService';
+import { registerAudioProtocol, registerAudioSchemePrivileges } from './tts/audioProtocol';
+import { killTtsSync, ttsService } from './tts/service';
+import { scheduleNarrationRetention } from './tts/retention';
+import { audioClipPath } from './audio/audioService';
+import { ttsLiveDir } from './tts/paths';
 import { ensureDatabaseDeepResearchLane } from './ai/databaseDeepResearchLane';
 import { installProcessSafetyNet } from './util/processSafety';
 import { restoreAppWindows } from './windowLifecycle';
+import { startEventLoopBlockWatch, instrumentIntervalCallbacks } from './perf';
 import { registerImageProtocol, registerImageSchemePrivileges } from './imageProtocol';
 import { registerArchiveProtocol, registerArchiveSchemePrivileges } from './archiveProtocol';
 import { registerLibraryProtocol, registerLibrarySchemePrivileges } from './libraryProtocol';
@@ -114,6 +126,7 @@ if (!process.env.NODUS_USERDATA && !app.isDefaultProtocolClient('nodus')) {
 registerImageSchemePrivileges();
 registerArchiveSchemePrivileges();
 registerLibrarySchemePrivileges();
+registerAudioSchemePrivileges();
 registerCapabilitySchemePrivileges();
 
 if (process.platform === 'linux') {
@@ -149,7 +162,7 @@ if (process.env.NODUS_USERDATA) {
  * process to exit (`while kill -0 "$PID"`) before it replaces the bundle and
  * runs `open -n`, so the lock is already released by then.
  */
-const isolatedUnlock = process.env.NODUS_ISOLATED_ROOT ? claimIsolatedProfile(process.env.NODUS_ISOLATED_ROOT) : null;
+const isolatedUnlock = process.env.NODUS_ISOLATED_ROOT ? (process.env.NODUS_SUPPORT_INTERACTIVE==='1'?claimSupportProfile(process.env.NODUS_ISOLATED_ROOT):claimIsolatedProfile(process.env.NODUS_ISOLATED_ROOT)) : null;
 const hasSingleInstanceLock = process.env.NODUS_ISOLATED_ROOT ? Boolean(isolatedUnlock) : app.requestSingleInstanceLock();
 if (isolatedUnlock) app.on('will-quit', isolatedUnlock);
 if (!hasSingleInstanceLock) {
@@ -574,6 +587,8 @@ function createWindow(): void {
     },
   });
   protectMainWindowNavigation(mainWindow);
+  installEditorCloseGuard(mainWindow, () => quitting);
+  if(isLearningWorkspace())mainWindow.on('close',()=>closeLearningWorkspace());
 
   // Right-clicking any text field in Nodus — the browser's address bar above all
   // — offers Cut, Copy and Paste. Views that draw their own HTML context menu
@@ -996,12 +1011,20 @@ app.on('second-instance', (_event, argv) => {
 app.whenReady().then(async () => {
   // Losing the lock queues a quit; do not open the database or a window.
   if (!hasSingleInstanceLock) return;
+  const supportInteractive = process.env.NODUS_SUPPORT_INTERACTIVE === '1' && Boolean(process.env.NODUS_ISOLATED_ROOT);
+  // NODUS_PERF_JSONL turns this on: any synchronous stretch that holds the main
+  // loop for >50 ms lands in the same local JSONL as the pipeline timings.
+  startEventLoopBlockWatch();
+  // NODUS_PERF_TRACE_TIMERS=1 adds the slow recurring callbacks and where they were registered.
+  instrumentIntervalCallbacks();
   // Which capabilities exist has to be settled before the skill library is read: a skill
   // that depends on one cannot be judged available until its provider has registered.
-  initializeCapabilityPluginStore();
-  rebuildCapabilityRegistry();
-  initializeChatSkillDefaults();
-  initializePluginStore();
+  if (!supportInteractive) {
+    initializeCapabilityPluginStore();
+    rebuildCapabilityRegistry();
+    initializeChatSkillDefaults();
+    initializePluginStore();
+  }
   // The three disciplines that became packages are adopted in the background. A profile
   // that needs one keeps the skill it already had until the package is in place, and a
   // migration that cannot finish must never hold up the window or turn a skill off: it
@@ -1014,6 +1037,9 @@ app.whenReady().then(async () => {
   // its handshake and is torn down in the same millisecond — reported either way as a
   // capability that would not start, for a worker that comes up in about 100 ms on a free
   // loop. Nothing here is urgent, and 5.4.0 shipped this in the contended window.
+  // A profile that already used Codex or Copilot gets its CLI back in the background
+  // after updating to an installer that no longer carries it (./ai/agentRuntime).
+  if (!supportInteractive) void afterFirstPaint(() => prefetchAgentRuntimesInUse(getSettings()));
   if (!process.env.NODUS_ISOLATED_ROOT) void afterFirstPaint(() => {
     void settleInstalledPluginMigrations()
       .then(settled => { if (settled.length) rebuildCapabilityRegistry(); })
@@ -1033,34 +1059,14 @@ app.whenReady().then(async () => {
     .trim();
   session.defaultSession.setUserAgent(cleanUa);
   // Same embeds, second obstacle: a packaged renderer is served from file://, so the
-  // frame request carries no http(s) referer and YouTube answers with its "error 153 —
-  // video player configuration error" card instead of the video. Only in packaged
-  // builds; from the dev server it works, which is exactly how this ships broken.
-  // Naming Nodus's own site as the embedding page is enough, and it is where these
-  // tutorials are published. Scoped to the one host Nodus ever frames.
-  session.defaultSession.webRequest.onBeforeSendHeaders(
-    { urls: [`${TUTORIAL_VIDEO_EMBED_ORIGIN}/*`] },
-    (details, callback) => {
-      callback({ requestHeaders: { ...details.requestHeaders, Referer: 'https://nodusresearch.com/' } });
-    },
-  );
-  // Third obstacle, the maps: OpenStreetMap's volunteer tile servers refuse a client
-  // they cannot identify, and the sanitized User-Agent above is exactly the shape their
-  // policy blocks, so every map in the app answered with "Access blocked" tiles. Naming
-  // Nodus, with a page to complain to, is what they ask for; scoped to the tile hosts,
-  // so nothing else sees a different agent or referer than it does today.
-  session.defaultSession.webRequest.onBeforeSendHeaders(
-    { urls: ['*://*.tile.openstreetmap.org/*'] },
-    (details, callback) => {
-      callback({
-        requestHeaders: {
-          ...details.requestHeaders,
-          'User-Agent': `Nodus/${app.getVersion()} (+https://nodusresearch.com)`,
-          Referer: 'https://nodusresearch.com/',
-        },
-      });
-    },
-  );
+  // frame request carries no http(s) referer and YouTube answers with error 153.
+  // OpenStreetMap also needs an identified client. A single scoped listener keeps
+  // both rules active: registering another listener would replace the first one.
+  installMediaRequestHeaders(session.defaultSession.webRequest, app.getVersion());
+  // Every window without its own guard (Nodi, the presenter windows) denies window.open and
+  // sends the link to the system browser; pages that are not Nodus's own get no device,
+  // location or external-protocol permission on this session.
+  installDefaultWindowGuards({ app, session: session.defaultSession, openExternal: openExternalSafely, devServerUrl: VITE_DEV_SERVER_URL });
   // Nodus Toolkit OCR caches its Tesseract language traineddata here (the one
   // opt-in network call), so downloads persist across sessions in userData.
   if (!process.env.NODUS_TESSDATA_CACHE) {
@@ -1069,25 +1075,29 @@ app.whenReady().then(async () => {
   // This must be the final operation before opening SQLite. Nodus 4 can rewrite
   // schemas and Library manifests that a 3.x binary does not understand, so the first
   // v4 launch takes and verifies one immutable copy while every database is closed.
-  const preV4 = await ensurePreV4Recovery({
+  const preV4 = supportInteractive ? { snapshotPath: null } : await ensurePreV4Recovery({
     userDataDirectory: app.getPath('userData'),
     targetVersion: app.getVersion(),
   });
   if (preV4.snapshotPath) console.log(`[recovery] pre-v4 snapshot: ${preV4.snapshotPath}`);
   getDb(); // open + migrate before anything touches data
+  initializeLearningWorkspace();
   const startupVault = getActiveVault();
   if (startupVault.type === 'databases') ensureDatabaseDeepResearchLane(startupVault.id);
   // Do this before creating either the main window or a browser tab: Chromium
   // then exposes the same effective preference to pages from their first frame.
   setBrowserTheme(getSettings().theme);
-  if (!process.env.NODUS_ISOLATED_ROOT && process.env.NODUS_STELLAR_PREVIEW !== '1') await startDatabaseFormServer(Number.parseInt(process.env.NODUS_DATABASE_FORM_PORT ?? '0', 10) || 0);
+  // A form server that cannot listen is a missing feature, not a failed launch: this await
+  // sits before the window exists, and a rejection here quit the app with a startup error.
+  if (!process.env.NODUS_ISOLATED_ROOT && process.env.NODUS_STELLAR_PREVIEW !== '1') await startDatabaseFormServer(Number.parseInt(process.env.NODUS_DATABASE_FORM_PORT ?? '0', 10) || 0)
+    .catch((error) => console.error(`[database-forms] server did not start: ${error instanceof Error ? error.message : String(error)}`));
+  if (!supportInteractive) {
   upgradeWorldbuildingDemoDynasties();
   upgradeWorldbuildingDemoImageQuality();
   upgradeWorldbuildingDemoNarrativeDepth();
   relocalizeWorldbuildingDemoData();
-  registerImageProtocol();
-  registerArchiveProtocol();
-  registerLibraryProtocol();
+  // Narration retention: unpinned clips older than each surface's rule go, in small batches.
+  scheduleNarrationRetention(() => ttsService().sweepNow());
   reconcileAuthorLayerOnce(); // one-time: collapse duplicate author nodes onto Zotero identity
   reconcileAuthorRolesOnce(); // one-time: stop crediting volume editors as authors
   repairGraphIntegrityOnce(); // one-time: drop links to deleted themes, put edge-only ideas back to sleep
@@ -1102,6 +1112,15 @@ app.whenReady().then(async () => {
     // Maintenance must never keep the app from opening.
     console.error(`[maintenance] dormant-idea prune failed: ${error instanceof Error ? error.message : String(error)}`);
   }
+  }
+  registerImageProtocol();
+  registerArchiveProtocol();
+  registerLibraryProtocol();
+  registerAudioProtocol({
+    liveDir: ttsLiveDir,
+    clipPath: (clipId) => audioClipPath(clipId),
+    voicePath: (voiceId) => ttsService().voices.referencePath(voiceId),
+  });
   setCopilotWindowProvider(() => mainWindow);
   setZoteroPluginWindowProvider(() => mainWindow);
   registerIpc(
@@ -1112,11 +1131,18 @@ app.whenReady().then(async () => {
     () => lastUpdateEvent,
   );
   createWindow();
+  if (supportInteractive) return;
   // The isolated graph review copy never resumes background jobs or connects integrations.
   const { initializeDocumentaryPreparation, closeDocumentaryPreparation } = await import('./ai/documentaryPreparation');
   stopDocumentaryPreparation = closeDocumentaryPreparation;
   stopResearchZotero = (await import('./mcp/researchZotero')).closeResearchZotero;
   await initializeDocumentaryPreparation();
+  // Isolated QA normally disables all integrations. This explicit opt-in exercises
+  // only the startup sync against the sandbox's disposable Zotero endpoint.
+  if ((!process.env.NODUS_ISOLATED_ROOT && process.env.NODUS_STELLAR_PREVIEW !== '1')
+    || (process.env.NODUS_ISOLATED_ROOT && process.env.NODUS_ISOLATED_ZOTERO_STARTUP === '1')) {
+    afterFirstPaint(() => { if (!quitting) startZoteroSync(); });
+  }
   if (process.env.NODUS_ISOLATED_ROOT || process.env.NODUS_STELLAR_PREVIEW === '1') return;
   // Existing installs may have one full database copy per historical schema update.
   // Queue every registered vault after the window exists; the utility worker applies
@@ -1219,7 +1245,6 @@ app.whenReady().then(async () => {
   databaseAutomationFirstTimer = setTimeout(databaseAutomationTick, 7_000);
   databaseAutomationTimer = setInterval(databaseAutomationTick, 60_000);
 
-  if (settings.syncMode === 'realtime') startRealtimeSync();
   startNodusServerSync();
   // And the other direction, on its own timer too: an incoming mutation dirties nothing,
   // so an idle desktop that only ever published would never collect what was sent to it.
@@ -1281,7 +1306,7 @@ app.on('window-all-closed', () => {
     if (databaseAutomationFirstTimer) clearTimeout(databaseAutomationFirstTimer);
     cancelScheduledMigrationRecoveryRetention();
     void stopDatabaseFormServer();
-    stopRealtimeSync();
+    stopZoteroSync();
     stopNodusServerSync();
     stopInboxPolling();
     stopPluginUpdates();
@@ -1295,15 +1320,31 @@ app.on('window-all-closed', () => {
     killNodusLocalServerSync();
   // Research Chat's search server: stdin closes too, so it would also exit on its own.
   killSearxngSync();
+  // Ming narration sidecar: its stdin closes too; the process group is killed regardless.
+  killTtsSync();
     documentIndexQueue.stop();
     closeDb();
     app.quit();
   }
 });
 
-app.on('before-quit', () => {
+let editorQuitApproved = false;
+let editorQuitPending = false;
+app.on('before-quit', event => {
+  if (!editorQuitApproved && mainWindow && !mainWindow.isDestroyed()) {
+    event.preventDefault();
+    if (!editorQuitPending) {
+      editorQuitPending = true;
+      void flushWindowEditors(mainWindow).then(saved => {
+        editorQuitPending = false;
+        if (saved) { editorQuitApproved = true; app.quit(); }
+      });
+    }
+    return;
+  }
   quitting = true;
   stopDocumentaryPreparation();
+  disposeTextExtractionWorkers();
   void stopResearchZotero();
   stopStudyCalendarReminders();
   stopAppleCalendarSync();
@@ -1321,7 +1362,7 @@ app.on('before-quit', () => {
   if (databaseAutomationFirstTimer) clearTimeout(databaseAutomationFirstTimer);
   cancelScheduledMigrationRecoveryRetention();
   void stopDatabaseFormServer();
-  stopRealtimeSync();
+  stopZoteroSync();
   stopNodusServerSync();
   stopInboxPolling();
   stopPluginUpdates();
@@ -1344,6 +1385,8 @@ app.on('before-quit', () => {
   killNodusLocalServerSync();
   // Research Chat's search server: stdin closes too, so it would also exit on its own.
   killSearxngSync();
+  // Ming narration sidecar: its stdin closes too; the process group is killed regardless.
+  killTtsSync();
   destroyBrowserSubsystem();
   closeGlobalLibraryRuntime();
   documentIndexQueue.stop();
@@ -1366,6 +1409,8 @@ updateAwareApp.on('before-quit-for-update', () => {
   killNodusLocalServerSync();
   // Research Chat's search server: stdin closes too, so it would also exit on its own.
   killSearxngSync();
+  // Ming narration sidecar: its stdin closes too; the process group is killed regardless.
+  killTtsSync();
   if (updateCheckTimer) clearInterval(updateCheckTimer);
   if (announcementsFirstTimer) clearTimeout(announcementsFirstTimer);
   if (autoBackupTimer) clearInterval(autoBackupTimer);
@@ -1376,7 +1421,7 @@ updateAwareApp.on('before-quit-for-update', () => {
   if (databaseAutomationFirstTimer) clearTimeout(databaseAutomationFirstTimer);
   cancelScheduledMigrationRecoveryRetention();
   void stopDatabaseFormServer();
-  stopRealtimeSync();
+  stopZoteroSync();
   stopNodusServerSync();
   stopInboxPolling();
   stopPluginUpdates();

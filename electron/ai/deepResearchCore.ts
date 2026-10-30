@@ -1,3 +1,5 @@
+import { researchAnswerReviewLimitation } from '@shared/researchAnswerReview';
+import { researchFailureRequiresStop } from '@shared/researchFailures';
 import { researchConsistencyUnverified, researchCoverageIncomplete, researchEvidenceLimitation } from '@shared/researchEvidenceMessages';
 import { reconcileResearchReport, researchProseSpans, researchSentenceKey, type ResearchConflict, type ResearchProseAudit, type ResearchClaimRecord } from '@shared/researchClaimAudit';
 // Citation naming lives in @shared/citationLabel so the reader that re-derives a
@@ -7,6 +9,7 @@ import {
   referenceEntry as sharedReferenceEntry,
   sourceLabelFromWork,
 } from '@shared/citationLabel';
+import { citationWords } from '@shared/citationWords';
 import type {
   DeepResearchMeta,
   DeepResearchProgress,
@@ -641,6 +644,8 @@ export interface FinalizeResult {
  * logic can be tested with fakes — no DB, no AI provider, no Electron.
  */
 export interface DeepResearchDeps {
+  continuousNarrative?: boolean;
+  finalDocumentReview?(parts: import('@shared/researchDocumentReview').ResearchDocumentPart[]): Promise<import('@shared/researchDocumentReview').ResearchDocumentReview & { passages?: import('@shared/types').WritingWorkshopPassageCandidate[] }>;
   strictDocumentaryGrounding?: boolean;
   /** One evidence-bounded addition before the final factual audit. */
   repairSectionCoverage?(input: SectionInput, draft: string): Promise<string>;
@@ -751,6 +756,8 @@ export interface SnapshotMaps {
   /** What each contradiction actually opposes, and who holds each side. */
   contradictionById: Map<string, { label: string; summary: string; sources: string[] }>;
   validIds: Set<string>;
+  /** Language the report is written in; names the citations that have no author-year. */
+  language?: PromptLanguage;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -811,12 +818,15 @@ export async function orchestrateDeepResearch(
       /* The original objective remains the complete coverage contract. */
     }
   }
-  const sectionPlan = resolveSectionPlan(snapshot, request.sectionLimit ?? 'auto', request.objective, coverageQuestions);
+  const sectionPlan = deps.continuousNarrative && request.sectionLimit === 'single'
+    ? { target: typeof request.sectionLength === 'number' ? Math.max(1, Math.ceil(request.sectionLength / 1500)) : 3, mode: 'user' as const }
+    : resolveSectionPlan(snapshot, request.sectionLimit ?? 'auto', request.objective, coverageQuestions);
   const sectionCount = sectionPlan.target;
   // Normalized once here so a legacy request, a persisted queue job and an MCP
   // payload all reach the writers — and the report metadata — as the same value.
   const requestedSectionLength = normalizeDeepResearchSectionLength(request.sectionLength);
-  const sectionLengthPlan = planDeepResearchSectionLength(requestedSectionLength);
+  const sectionLengthPlan = planDeepResearchSectionLength(deps.continuousNarrative && request.sectionLimit === 'single' && typeof requestedSectionLength === 'number'
+    ? Math.ceil(requestedSectionLength / sectionCount) : requestedSectionLength);
 
   emit({ phase: 'planning', message: L.planning(sectionCount) });
   // Ideas and their relationships still choose the thesis and progression. Atomic
@@ -825,6 +835,22 @@ export async function orchestrateDeepResearch(
   // institutional mechanisms even when the objective named them explicitly.
   const effectiveRequest: DeepResearchRequest = { ...request, coverageQuestions };
   const plan = await planWithFallback(deps, effectiveRequest, language, snapshot, sectionPlan);
+  if (deps.continuousNarrative) {
+    // A short continuous report is one argument, even if planning falls back.
+    // Framing and closing fragments must not each inherit the whole objective.
+    if (request.sectionLimit === 'single' && sectionPlan.target === 1) {
+      plan.sections = normalizePlan(plan, snapshot, 1, coverageQuestions).sections.map(section => ({ ...section,
+        role: 'body', title: request.objective, purpose: request.objective, dependsOn: [], coverageQuestions: [...coverageQuestions],
+        passageIds: [...new Set([...section.passageIds, ...snapshot.passages.map(passage => passage.id)])] }));
+    } else {
+      const body = plan.sections.filter(section => section.role === 'body');
+      if (body.length) {
+        plan.sections.filter(section => section.role !== 'body').forEach(section => { section.coverageQuestions = []; });
+        assignMissingCoverageQuestions(body, coverageQuestions);
+      }
+    }
+  }
+
 
   // A bounded diagnostic pass can add graph assignments and one primary owner per
   // question, but the reconciliation guard preserves every historical proposition.
@@ -1075,11 +1101,13 @@ export async function orchestrateDeepResearch(
     let raw = '';
     try {
       raw = await deps.writeSection(inputForSection);
-    } catch {
+    } catch (error) {
+      if (deps.finalDocumentReview && researchFailureRequiresStop(error)) throw error;
       // One retry, then a graceful degraded section — never fail the whole report.
       try {
         raw = await deps.writeSection(inputForSection);
-      } catch {
+      } catch (error) {
+        if (deps.finalDocumentReview && researchFailureRequiresStop(error)) throw error;
         raw = degradedSection(section, maps, L);
         if (!stoppedReason) stoppedReason = L.degraded;
       }
@@ -1602,6 +1630,42 @@ export async function orchestrateDeepResearch(
     if (!reconciled.consistencyChecked) finalize.limitations = dedupe([...finalize.limitations, researchConsistencyUnverified(language)]);
   }
 
+  if (deps.finalDocumentReview) {
+    const review = await deps.finalDocumentReview(written.map((item, index) => ({
+      id: `section:${index}`, text: stripInitialHeading(item.markdown),
+      remit: [written.length === 1 ? effectiveRequest.objective : item.section.purpose, ...(item.section.coverageQuestions ?? [])].join('\n'),
+      context: JSON.stringify({ title: item.section.title, investigationBackground: effectiveRequest.objective,
+        advisoryWordTarget: sectionLengthPlan.targetWords }),
+    })));
+    if (review.passages?.length) mergeRetrievedMaterial(maps, { passages: review.passages });
+    for (let index = written.length - 1; index >= 0; index--) {
+      const part = review.parts.find(part => part.id === `section:${index}`);
+      if (!part || part.status !== 'verified' || !part.claims.some(claim => claim.status === 'supported' && claim.kind !== 'nonfactual')) {
+        if (part) claimLedger.push(...part.claims.map(claim => ({ ...claim, status: 'unverified' as const })));
+        written.splice(index, 1); continue;
+      }
+      written[index].markdown = part.text;
+      written[index].section.keyClaims = part.claims.filter(claim => claim.status === 'supported').map(claim => claim.sentence);
+      written[index].section.coverageClaims = [];
+      claimLedger.push(...part.claims);
+    }
+    if (!written.length) throw new Error(researchAnswerReviewLimitation(language));
+    // Summaries copy a complete verified paragraph, never a new model claim.
+    finalize.abstract = written.length ? stripInitialHeading(written[0].markdown).split(/\n\s*\n/u)[0] : researchEvidenceLimitation(language);
+    finalize.nextSteps = [];
+    finalize.limitations = review.status === 'verified' ? [] : [researchAnswerReviewLimitation(language)];
+    if (review.status !== 'verified') stoppedReason = researchAnswerReviewLimitation(language);
+    coveredIdeaIds.clear(); Object.values(citedIds).forEach(set => set.clear());
+    for (const item of written) {
+      const { cited } = applyCitationPolicy(item.markdown, maps);
+      for (const key of Object.keys(citedIds) as Array<keyof typeof citedIds>) cited[key].forEach(id => citedIds[key].add(id));
+      cited.ideas.forEach(id => coveredIdeaIds.add(id));
+      cited.passages.forEach(id => { const work = maps.passageWorkId.get(id); if (work) citedIds.works.add(work); });
+    }
+    totalWords = written.reduce((sum, item) => sum + countWords(item.markdown), 0);
+    coverageEvidence.splice(0, coverageEvidence.length);
+  }
+
   if (deps.checkSectionCoverage) {
     for (const [item, input] of coverageInputs) {
       const finalText = written.includes(item) ? item.markdown : '';
@@ -1618,7 +1682,9 @@ export async function orchestrateDeepResearch(
   const references = buildReferences(citedWorkIds, maps, language);
   const singleNarrative = effectiveRequest.sectionLimit === 'single';
   const draftMarkdown = deps.strictDocumentaryGrounding && !written.length ? researchEvidenceLimitation(language)
-    : assembleMarkdown(written, references, finalize, language, effectiveRequest.sectionLimit);
+    : (deps.continuousNarrative || deps.finalDocumentReview) && singleNarrative ? written.map(item => stripInitialHeading(item.markdown)).join('\n\n')
+      : assembleMarkdown(written, references, deps.finalDocumentReview ? { ...finalize, abstract: '' } : finalize, language, effectiveRequest.sectionLimit);
+  if (deps.continuousNarrative && singleNarrative) totalWords = countWords(draftMarkdown);
   const worksCited = citedWorkIds.size;
 
   const outline: WritingWorkshopSection[] = singleNarrative ? [] : written.map((w, index) => ({
@@ -1646,7 +1712,7 @@ export async function orchestrateDeepResearch(
   });
 
   // Automated citation existence/entailment checks never constitute acceptance.
-  if (deps.auditFactualProse && qualityAssessment.grade !== 'weak') qualityAssessment.grade = 'needs_review';
+  if ((deps.auditFactualProse || deps.finalDocumentReview) && qualityAssessment.grade !== 'weak') qualityAssessment.grade = 'needs_review';
   const draft: WritingWorkshopDraft = {
     generatedAt: new Date().toISOString(),
     brief,
@@ -1667,7 +1733,7 @@ export async function orchestrateDeepResearch(
     bibliography: references,
     nextSteps: finalize.nextSteps,
     supportAudit,
-    ...(deps.auditFactualProse ? { claimLedger } : {}),
+    ...((deps.auditFactualProse || deps.finalDocumentReview) ? { claimLedger } : {}),
     qualityAssessment,
     limitations: [...finalize.limitations, ...(!deps.auditFactualProse ? coherenceIssues.map(issue => L.coherenceLimitation(issue)) : [])],
     deepResearchStructure: singleNarrative ? 'single' : 'sectioned',
@@ -1686,7 +1752,7 @@ export async function orchestrateDeepResearch(
   };
 
   const meta: DeepResearchMeta = {
-    ...(deps.auditFactualProse ? { factualAudit: { checked: claimLedger.length,
+    ...((deps.auditFactualProse || deps.finalDocumentReview) ? { factualAudit: { checked: claimLedger.length,
       supported: claimLedger.filter(claim => claim.status === 'supported').length,
       removed: claimLedger.filter(claim => claim.status === 'removed').length,
       unverified: claimLedger.filter(claim => claim.status === 'unverified').length,
@@ -1697,7 +1763,12 @@ export async function orchestrateDeepResearch(
     // Recorded per section rather than as one report total: the guidance is per
     // section, and a report where the corpus filled two sections and ran dry on
     // three is a different fact from one that simply came out short.
-    sectionLengthOutcome: sectionLengthPlan.targetWords === null ? null : {
+    sectionLengthOutcome: deps.continuousNarrative && singleNarrative && typeof requestedSectionLength === 'number' ? {
+      targetWords: requestedSectionLength,
+      sections: written.length ? 1 : 0,
+      reached: written.length && totalWords >= Math.round(requestedSectionLength * 0.92) ? 1 : 0,
+      short: written.length && totalWords < Math.round(requestedSectionLength * 0.92) ? 1 : 0,
+    } : sectionLengthPlan.targetWords === null ? null : {
       targetWords: sectionLengthPlan.targetWords,
       sections: written.length,
       reached: written.filter((item) => countWords(item.markdown) >= Math.round(sectionLengthPlan.targetWords! * 0.92)).length,
@@ -2017,7 +2088,7 @@ export function buildPlanInput(
       label: i.label,
       type: i.type,
       statement: clip(i.statement, 220),
-      works: i.works.map((w) => `${w.authors[0] ?? 'Autor'}${w.year ? ` (${w.year})` : ''}`).join('; '),
+      works: i.works.map((w) => `${w.authors[0] ?? citationWords(language).author}${w.year ? ` (${w.year})` : ''}`).join('; '),
     })),
     themes: snapshot.themes.slice(0, POOL_LIMITS.themes).map((t) => ({ id: t.id, label: t.label, summary: clip(t.summary, 160) })),
     gaps: snapshot.gaps.slice(0, POOL_LIMITS.gaps).map((g) => ({ id: g.id, label: g.label, summary: clip(g.summary, 160) })),
@@ -2028,7 +2099,7 @@ export function buildPlanInput(
     passages: passages.map((passage) => ({
         id: passage.id,
         workId: passage.nodus_id,
-        source: `${passage.authors[0] ?? 'Autor'}${passage.year ? ` (${passage.year})` : ''}`,
+        source: `${passage.authors[0] ?? citationWords(language).author}${passage.year ? ` (${passage.year})` : ''}`,
         page: passage.pageLabel,
         extract: excerpts.get(passage.id)!,
       })),
@@ -2059,6 +2130,11 @@ async function planWithFallback(
   }
   if (!plan || plan.sections.length === 0) {
     const fallback = fallbackPlan(request, snapshot, sectionPlan.target, labels(language));
+    if (deps.continuousNarrative) {
+      fallback.sections = fallback.sections.map((section, index) => ({ ...section,
+        role: fallback.sections.length === 1 ? 'body' : index === 0 ? 'intro' : index === fallback.sections.length - 1 ? 'synthesis' : 'body' }));
+      return normalizePlan(fallback, snapshot, sectionPlan.target, input.coverageQuestions);
+    }
     assignMissingCoverageQuestions(fallback.sections, input.coverageQuestions);
     return fallback;
   }
@@ -2736,7 +2812,7 @@ function degradedSection(section: DeepResearchPlanSection, maps: SnapshotMaps, L
     .filter((idea): idea is WritingWorkshopIdeaCandidate => !!idea)
     .slice(0, 8)
     .map((idea) => {
-      const token = ideaCitation(idea);
+      const token = ideaCitation(idea, maps.language);
       return `- ${clip(idea.statement || idea.label, 260)} ${token}`;
     });
   if (bullets.length > 0) lines.push(...bullets);
@@ -2804,6 +2880,7 @@ function normalizeCitationIdentity(value: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function buildSnapshotMaps(snapshot: WritingWorkshopSnapshot): SnapshotMaps {
+  const language = snapshot.brief?.language ?? 'es';
   const ideaById = new Map<string, WritingWorkshopIdeaCandidate>();
   const workInfoById = new Map<string, WorkInfo>();
   const passageWorkId = new Map<string, string>();
@@ -2838,7 +2915,7 @@ export function buildSnapshotMaps(snapshot: WritingWorkshopSnapshot): SnapshotMa
     }
   }
   for (const g of snapshot.gaps)
-    gapById.set(g.id, { label: g.label, summary: g.summary ?? '', source: sourceLabelFromWork(g.work) });
+    gapById.set(g.id, { label: g.label, summary: g.summary ?? '', source: sourceLabelFromWork(g.work, language) });
   for (const c of snapshot.contradictions)
     contradictionById.set(c.id, { label: c.label, summary: c.summary ?? '', sources: c.sources ?? [] });
   for (const p of snapshot.passages) {
@@ -2864,7 +2941,7 @@ export function buildSnapshotMaps(snapshot: WritingWorkshopSnapshot): SnapshotMa
   for (const id of contradictionById.keys()) validIds.add(`contradiction:${id}`);
   for (const id of passageWorkId.keys()) validIds.add(`passage:${id}`);
 
-  return { ideaById, workInfoById, passageWorkId, passagePage, passageText, gapById, contradictionById, validIds };
+  return { ideaById, workInfoById, passageWorkId, passagePage, passageText, gapById, contradictionById, validIds, language };
 }
 
 /**
@@ -3081,6 +3158,8 @@ export function applyCitationPolicy(
     contradictions: new Set<string>(),
     passages: new Set<string>(),
   };
+  const language = maps.language ?? 'es';
+  const words = citationWords(language);
   const out = repairLooseCitations(markdown).replace(CITATION_RE, (_full, label: string, type: string, rawId: string) => {
     let id = rawId;
     try {
@@ -3096,18 +3175,18 @@ export function applyCitationPolicy(
       case 'idea': {
         cited.ideas.add(id);
         const idea = maps.ideaById.get(id);
-        const canonical = idea ? sourceLabelFromWork(idea.works[0]) : label;
+        const canonical = idea ? sourceLabelFromWork(idea.works[0], language) : label;
         return `[${canonical || label}](nodus://idea/${encodeURIComponent(id)})`;
       }
       case 'work': {
         cited.works.add(id);
-        const canonical = sourceLabelFromWork(maps.workInfoById.get(id)) || label;
+        const canonical = sourceLabelFromWork(maps.workInfoById.get(id), language) || label;
         return `[${canonical}](nodus://work/${encodeURIComponent(id)})`;
       }
       case 'passage': {
         cited.passages.add(id);
         const workId = maps.passageWorkId.get(id);
-        const base = sourceLabelFromWork(workId ? maps.workInfoById.get(workId) : undefined) || label;
+        const base = sourceLabelFromWork(workId ? maps.workInfoById.get(workId) : undefined, language) || label;
         const page = maps.passagePage.get(id);
         const withPage = page ? `${base}, ${page}` : base;
         return `[${withPage}](nodus://passage/${encodeURIComponent(id)})`;
@@ -3118,10 +3197,10 @@ export function applyCitationPolicy(
       // not in the visible citation.
       case 'gap':
         cited.gaps.add(id);
-        return `[${maps.gapById.get(id)?.source || 'hueco'}](nodus://gap/${encodeURIComponent(id)})`;
+        return `[${maps.gapById.get(id)?.source || words.gap}](nodus://gap/${encodeURIComponent(id)})`;
       case 'contradiction':
         cited.contradictions.add(id);
-        return `[${maps.contradictionById.get(id)?.sources[0] || 'contradicción'}](nodus://contradiction/${encodeURIComponent(id)})`;
+        return `[${maps.contradictionById.get(id)?.sources[0] || words.contradiction}](nodus://contradiction/${encodeURIComponent(id)})`;
       default:
         return label || '';
     }
@@ -3378,7 +3457,7 @@ function buildMatrix(coveredIdeaIds: Set<string>, maps: SnapshotMaps, L: Labels)
     rows.push({
       claim: clip(idea.statement || idea.label, 240),
       role: matrixRole(idea.type),
-      sourceLabel: sourceLabelFromWork(idea.works[0]) || L.corpusSource,
+      sourceLabel: sourceLabelFromWork(idea.works[0], maps.language) || L.corpusSource,
       citation: `nodus://idea/${encodeURIComponent(id)}`,
       evidence: idea.evidenceCount > 0 ? L.anchoredEvidence(idea.evidenceCount) : L.derivedIdea,
       notes: idea.workCount > 1 ? L.supportedBy(idea.workCount) : L.singleSupport,
@@ -3471,7 +3550,7 @@ function sectionSources(section: DeepResearchPlanSection, maps: SnapshotMaps): s
     .map((id) => maps.ideaById.get(id))
     .filter((idea): idea is WritingWorkshopIdeaCandidate => !!idea)
     .slice(0, 8)
-    .map((idea) => ideaCitation(idea));
+    .map((idea) => ideaCitation(idea, maps.language));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3480,6 +3559,8 @@ function sectionSources(section: DeepResearchPlanSection, maps: SnapshotMaps): s
 
 export function buildCitationMenu(section: DeepResearchPlanSection, maps: SnapshotMaps): CitationMenuItem[] {
   const items: CitationMenuItem[] = [];
+  const language = maps.language ?? 'es';
+  const words = citationWords(language);
   const excerpts = passageExcerpts(section.passageIds.flatMap(id => {
     const text = maps.passageText.get(id);
     return text?.trim() && maps.passageWorkId.has(id) ? [{ id, text }] : [];
@@ -3492,10 +3573,10 @@ export function buildCitationMenu(section: DeepResearchPlanSection, maps: Snapsh
     const idea = maps.ideaById.get(id);
     if (!idea) continue;
     items.push({
-      token: ideaCitation(idea),
+      token: ideaCitation(idea, language),
       kind: 'idea',
       note: clip(idea.statement || idea.label, IDEA_NOTE_CHARS),
-      source: ideaSupportLabel(idea),
+      source: ideaSupportLabel(idea, language),
     });
   }
   for (const id of section.workIds) {
@@ -3504,17 +3585,17 @@ export function buildCitationMenu(section: DeepResearchPlanSection, maps: Snapsh
     // claim. Scoped documentary runs must cite their actual passages or Ideas.
     if (!work || work.metadataOnly) continue;
     items.push({
-      token: `[${sourceLabelFromWork(work)}](nodus://work/${encodeURIComponent(id)})`,
+      token: `[${sourceLabelFromWork(work, language)}](nodus://work/${encodeURIComponent(id)})`,
       kind: 'work',
       note: clip(work.title, 200),
-      source: sourceLabelFromWork(work),
+      source: sourceLabelFromWork(work, language),
     });
   }
   for (const id of section.gapIds) {
     const gap = maps.gapById.get(id);
     if (!gap) continue;
     items.push({
-      token: `[${gap.source || 'hueco'}](nodus://gap/${encodeURIComponent(id)})`,
+      token: `[${gap.source || words.gap}](nodus://gap/${encodeURIComponent(id)})`,
       kind: 'gap',
       note: clip(gap.summary || gap.label, IDEA_NOTE_CHARS),
     });
@@ -3525,7 +3606,7 @@ export function buildCitationMenu(section: DeepResearchPlanSection, maps: Snapsh
     const sides = contradiction.label ? `Posturas enfrentadas: ${contradiction.label}. ` : '';
     const who = contradiction.sources.length ? ` Lo sostienen ${contradiction.sources.join('; ')}.` : '';
     items.push({
-      token: `[${contradiction.sources[0] || 'contradicción'}](nodus://contradiction/${encodeURIComponent(id)})`,
+      token: `[${contradiction.sources[0] || words.contradiction}](nodus://contradiction/${encodeURIComponent(id)})`,
       kind: 'contradiction',
       note: `${sides}${clip(contradiction.summary, IDEA_NOTE_CHARS)}${who}`.trim(),
       source: contradiction.sources.join('; ') || undefined,
@@ -3538,7 +3619,7 @@ export function buildCitationMenu(section: DeepResearchPlanSection, maps: Snapsh
     // number attached to words the writer never saw.
     if (!workId || !text) continue;
     const page = maps.passagePage.get(id);
-    const label = `${sourceLabelFromWork(maps.workInfoById.get(workId))}${page ? `, ${page}` : ''}`;
+    const label = `${sourceLabelFromWork(maps.workInfoById.get(workId), language)}${page ? `, ${page}` : ''}`;
     items.push({
       token: `[${label}](nodus://passage/${encodeURIComponent(id)})`,
       kind: 'passage',
@@ -3611,11 +3692,11 @@ function citationUrlsFromMenu(menu: CitationMenuItem[]): Set<string> {
 function sourceLabelForClaim(claim: CitationClaim, maps: SnapshotMaps): string {
   switch (claim.kind) {
     case 'idea':
-      return sourceLabelFromWork(maps.ideaById.get(claim.id)?.works[0]) || '';
+      return sourceLabelFromWork(maps.ideaById.get(claim.id)?.works[0], maps.language) || '';
     case 'passage': {
       const workId = maps.passageWorkId.get(claim.id);
       const page = maps.passagePage.get(claim.id);
-      const base = sourceLabelFromWork(workId ? maps.workInfoById.get(workId) : undefined);
+      const base = sourceLabelFromWork(workId ? maps.workInfoById.get(workId) : undefined, maps.language);
       return page ? `${base}, ${page}` : base;
     }
     case 'gap':
@@ -3628,16 +3709,16 @@ function sourceLabelForClaim(claim: CitationClaim, maps: SnapshotMaps): string {
 }
 
 /** Which works back an idea, so the writer can name them in prose. */
-function ideaSupportLabel(idea: WritingWorkshopIdeaCandidate): string {
+function ideaSupportLabel(idea: WritingWorkshopIdeaCandidate, language?: PromptLanguage): string {
   return idea.works
     .slice(0, 3)
-    .map((w) => sourceLabelFromWork(w))
+    .map((w) => sourceLabelFromWork(w, language))
     .filter(Boolean)
     .join('; ');
 }
 
-function ideaCitation(idea: WritingWorkshopIdeaCandidate): string {
-  const label = sourceLabelFromWork(idea.works[0]) || idea.label;
+function ideaCitation(idea: WritingWorkshopIdeaCandidate, language?: PromptLanguage): string {
+  const label = sourceLabelFromWork(idea.works[0], language) || idea.label;
   return `[${label}](nodus://idea/${encodeURIComponent(idea.id)})`;
 }
 
@@ -3661,31 +3742,33 @@ export interface CitationCatalog {
 }
 
 export function buildCitationCatalog(snapshot: WritingWorkshopSnapshot): CitationCatalog {
+  const language = snapshot.brief?.language ?? 'es';
+  const words = citationWords(language);
   const passages = snapshot.passages.filter(passage => passage.summary?.trim()).slice(0, POOL_LIMITS.passages);
   const excerpts = passageExcerpts(passages.map(passage => ({ id: passage.id, text: passage.summary })));
   return {
     ideas: snapshot.ideas.slice(0, POOL_LIMITS.ideas).map((i) => ({
-      token: ideaCitation(i),
+      token: ideaCitation(i, language),
       note: clip(i.statement || i.label, 200),
       type: i.type,
-      works: i.works.map((w) => `${w.authors[0] ?? 'Autor'}${w.year ? ` (${w.year})` : ''}`).join('; '),
+      works: i.works.map((w) => `${w.authors[0] ?? citationWords(language).author}${w.year ? ` (${w.year})` : ''}`).join('; '),
     })),
     works: snapshot.works.slice(0, POOL_LIMITS.works).map((w) => ({
-      token: `[${sourceLabelFromWork(w) || w.label}](nodus://work/${encodeURIComponent(w.id)})`,
+      token: `[${sourceLabelFromWork(w, language) || w.label}](nodus://work/${encodeURIComponent(w.id)})`,
       note: clip(w.title || w.label, 160),
     })),
     gaps: snapshot.gaps.slice(0, POOL_LIMITS.gaps).map((g) => ({
-      token: `[${sourceLabelFromWork(g.work) || 'hueco'}](nodus://gap/${encodeURIComponent(g.id)})`,
+      token: `[${sourceLabelFromWork(g.work, language) || words.gap}](nodus://gap/${encodeURIComponent(g.id)})`,
       note: clip(g.summary || g.label, 160),
     })),
     contradictions: snapshot.contradictions.slice(0, POOL_LIMITS.contradictions).map((c) => ({
-      token: `[${c.sources?.[0] || 'contradicción'}](nodus://contradiction/${encodeURIComponent(c.id)})`,
+      token: `[${c.sources?.[0] || words.contradiction}](nodus://contradiction/${encodeURIComponent(c.id)})`,
       note: `Posturas enfrentadas: ${c.label}. ${clip(c.summary, 200)}${c.sources?.length ? ` Lo sostienen ${c.sources.join('; ')}.` : ''}`.trim(),
     })),
     // Only passages whose text is actually present; a page number the writer cannot
     // read is an invitation to invent what the source says.
     passages: passages.map((p) => {
-        const label = `${authorYearLabel(p.authors[0], p.year)}${p.pageLabel ? `, ${p.pageLabel}` : ''}`;
+        const label = `${authorYearLabel(p.authors[0], p.year, undefined, language)}${p.pageLabel ? `, ${p.pageLabel}` : ''}`;
         return {
           token: `[${label}](nodus://passage/${encodeURIComponent(p.id)})`,
           note: `«${excerpts.get(p.id)!}»`,

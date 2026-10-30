@@ -1,6 +1,7 @@
+import type { SignApi } from '../signTypes';
 // The toolkit slice of the window.nodus contract. NodusApi extends it, so the
 // renderer surface stays flat and every call site is unchanged.
-import type { Presentation, PresenterImportResult, PresenterImportSelection, PresenterLibrary, PptxNotes } from '../presenterTypes';
+import type { Presentation, PresenterImportResult, PresenterImportSelection, PresenterLibrary, PresenterFolderDeleteMode, PptxNotes } from '../presenterTypes';
 import type { PresenterAction, PresenterRuntimeState } from '../presenterState';
 import type { ToolkitJobRequest, ToolkitJobProgress, ToolkitJobResult } from '../toolkitTypes';
 import type { ToolkitAppGenerationRequest, ToolkitAppGenerationProgress, ToolkitAppGenerationResult, ToolkitAppManifest, ToolkitAppJsonValue, ToolkitAppSessionEvent, ToolkitAppSessionInfo, ToolkitAppSessionSnapshot } from '../toolkitApps';
@@ -12,7 +13,16 @@ import type {
   ModelRef,
 } from '../types';
 
-export interface ToolkitApi {
+import type { BackupCatalog, BackupCatalogQuery, BackupCatalogPage, BackupPreset, OpenBackupOptions, OpenBackupPreview, OpenBackupProgress, OpenBackupResult } from '../backups';
+
+export interface ToolkitApi extends SignApi {
+  getBackupCatalog(vaultIds: string[]): Promise<BackupCatalog>;
+  getBackupCatalogRecords(query: BackupCatalogQuery): Promise<BackupCatalogPage>;
+  previewOpenBackup(options: OpenBackupOptions): Promise<OpenBackupPreview>;
+  runOpenBackup(jobId: string, options: OpenBackupOptions, outputDir: string, onProgress: (p: OpenBackupProgress) => void): Promise<OpenBackupResult>;
+  cancelOpenBackup(jobId: string): Promise<void>;
+  saveBackupPreset(preset: BackupPreset): Promise<BackupPreset[]>;
+  deleteBackupPreset(id: string): Promise<BackupPreset[]>;
   // Nodus Toolkit — local, deterministic file conversion. The job runs in main
   // and streams progress back; it survives navigation because the renderer's
   // background-jobs store re-subscribes. Cancellation is by jobId.
@@ -103,6 +113,7 @@ export interface ToolkitApi {
   /** Raw PDF bytes for a presentation, or null if its copy is missing. */
   getPresenterPdfData(id: string): Promise<Uint8Array | null>;
   deletePresenterPresentation(id: string): Promise<void>;
+  deletePresenterFolder(id: string, mode: PresenterFolderDeleteMode): Promise<PresenterLibrary>;
   /** Open a .pptx picker and extract its speaker notes; null when cancelled. */
   importPresenterPptxNotes(): Promise<PptxNotes | null>;
   /** Save every slide's speaker notes in the versioned, re-importable TXT format. */
@@ -121,7 +132,7 @@ export interface ToolkitApi {
   stopPresenter(): Promise<void>;
   getPresenterState(): Promise<PresenterRuntimeState>;
   /** Mobile-remote server info + a QR data URL, or null when not presenting. */
-  getPresenterServerInfo(): Promise<{ ip: string; port: number; pin: string; url: string; qr: string } | null>;
+  getPresenterServerInfo(): Promise<{ ip: string; port: number; pin: string; url: string; qr: string; native?: { url: string; qr: string; name: string; transport?: 'lan' } } | null>;
   /** System output volume 0–100 (macOS; 50 elsewhere). */
   getPresenterVolume(): Promise<number>;
   setPresenterVolume(volume: number): Promise<void>;

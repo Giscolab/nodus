@@ -1,3 +1,4 @@
+import { useLearningArtifact, learningMarkdownRefs } from '../learning/useLearningArtifact';
 import { createPortal } from "react-dom";
 import {
   useCallback,
@@ -41,6 +42,8 @@ import { PROMPT_LANGUAGES } from "@shared/types";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { Markdown, type MarkdownCitation } from "../components/Markdown";
 import { ResearchEffortControl } from '../components/ResearchEffortControl';
+import { ResearchHarnessControl, useResearchHarnessOptions, type ResearchHarnessOptions } from '../components/ResearchHarnessControl';
+import { ResearchHarnessPanel } from '../components/ResearchHarnessPanel';
 import { useResearchEffort } from '../hooks/useResearchEffort';
 import type { ResearchEffort } from '@shared/researchReasoning';
 import type { ResearchWebSearchMode } from '@shared/types';
@@ -56,6 +59,8 @@ import { useFeatureModel } from "../hooks/useFeatureModel";
 import { errorText, getActiveLang, pick, t as appT, tr } from "../i18n";
 import { DICTIONARY_TRANSLATIONS } from "../i18n.dictionary";
 import type { DictionarySnapshot } from "../app/viewSnapshots";
+import { ListenButton } from '../components/narration/Listen';
+import { ReadAlong } from '../components/narration/ReadAlong';
 
 export type DictionaryDetailTab =
   | "overview"
@@ -469,6 +474,7 @@ function ChoiceGrid({
 }
 
 interface DictionaryResearchOptions {
+  harness: ResearchHarnessOptions;
   thinkingEffort: ResearchEffort;
   onThinkingEffort: (effort: ResearchEffort) => void;
   webSearch: ResearchWebSearchMode;
@@ -479,6 +485,7 @@ function DictionaryResearchControls({ model, research, disabled = false }: {
   model: ModelRef | null; research: DictionaryResearchOptions; disabled?: boolean;
 }) {
   return <div className="flex flex-wrap items-center gap-2" data-testid="dictionary-research-controls">
+    <ResearchHarnessControl options={research.harness} disabled={disabled} />
     <ResearchEffortControl model={model} value={research.thinkingEffort} onChange={research.onThinkingEffort}
       disabled={disabled} variant="field" testId="dictionary-thinking" />
     <button type="button" className="btn btn-ghost h-8 gap-1.5 text-xs" aria-pressed={research.webSearch !== 'off'}
@@ -508,7 +515,7 @@ function CreationDialog({
   onOpenExisting: (entry: DictionaryEntrySummary) => void;
   onQueued: (entries: Array<Pick<DictionaryEntry, "id" | "name">>) => void;
 }) {
-  const [input, setInput] = useState(emptyInput);
+  const [input, setInput] = useState(() => ({...emptyInput(), outputLanguage: settings.promptLanguage}));
   const [drafts, setDrafts] = useState<DictionaryCreationDraft[]>(() => [
     emptyCreationDraft(),
   ]);
@@ -610,6 +617,7 @@ function CreationDialog({
               model,
               thinkingEffort: research.thinkingEffort,
               webSearch: research.webSearch,
+              harnessVersion: research.harness.version, explorationMode: research.harness.exploration,
             });
             setQueuedDrafts((current) => new Set(current).add(draft.key));
           }
@@ -1057,7 +1065,8 @@ export function DictionaryView({
   const [model, setModel] = useFeatureModel(settings, "dictionaryModel");
   const [thinkingEffort, onThinkingEffort] = useResearchEffort(settings, model);
   const [webSearch, onWebSearch] = useState<ResearchWebSearchMode>('auto');
-  const research = { thinkingEffort, onThinkingEffort, webSearch, onWebSearch };
+  const harness = useResearchHarnessOptions(settings, 'dictionary');
+  const research = { thinkingEffort, onThinkingEffort, webSearch, onWebSearch, harness };
   const [entries, setEntries] = useState<DictionaryEntrySummary[]>([]);
   const [total, setTotal] = useState(0);
   const [facets, setFacets] = useState<DictionaryFacets>({
@@ -1378,6 +1387,7 @@ export function DictionaryView({
           </button>
         </div>
         <WorkspaceTabStrip
+          className="workspace-tabs-in-header"
           homeLabel={tx("Diccionario ({n})", { n: total })}
           homeIcon="list"
           homeTestId="dictionary-tab-home"
@@ -1394,6 +1404,7 @@ export function DictionaryView({
           onCloseTab={closeEntry}
         />
       </header>
+      <ResearchHarnessPanel mode="dictionary" entryId={activeId} onResumed={() => { void reload(); }} />
       {activeId ? (
         <DictionaryEntryView
           key={activeId}
@@ -1421,7 +1432,6 @@ export function DictionaryView({
               return next;
             })
           }
-          settings={settings}
           model={model}
           research={research}
           catalog={catalog}
@@ -1807,6 +1817,9 @@ function DictionaryGenerationState({
       </span>
     );
   }
+  if (progress.phase === 'paused' || progress.phase === 'cancelled') {
+    return <span className="text-xs text-neutral-500">{appT(progress.phase === 'paused' ? 'En pausa' : 'Cancelada')}</span>;
+  }
   if (progress.phase === "done") {
     return (
       <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
@@ -1847,7 +1860,6 @@ function DictionaryEntryView({
   onTabChange,
   progress,
   onGenerationStarted,
-  settings,
   model,
   research,
   catalog,
@@ -1861,7 +1873,6 @@ function DictionaryEntryView({
   onTabChange: (tab: DictionaryDetailTab) => void;
   progress?: DictionaryProgress;
   onGenerationStarted: (progress: DictionaryProgress) => void;
-  settings: AppSettings;
   model: ModelRef | null;
   research: DictionaryResearchOptions;
   catalog: CatalogData;
@@ -1871,6 +1882,7 @@ function DictionaryEntryView({
   onOpenLibraryWork: OpenCitationLibraryWork;
 }) {
   const [detail, setDetail] = useState<DictionaryEntryDetail | null>(null);
+  const entryScrollRef = useRef<HTMLDivElement | null>(null);
   const [tab, setTab] = useState<DictionaryDetailTab>(
     () => restoredTab ?? "overview",
   );
@@ -1879,6 +1891,7 @@ function DictionaryEntryView({
   const [citation, setCitation] = useState<CitationTarget>(null);
   const [hideBackgroundFailure, setHideBackgroundFailure] = useState(false);
   const choseTab = useRef(restoredTab !== undefined);
+  useLearningArtifact('dictionary', detail?.currentVersion?.id, learningMarkdownRefs(detail?.currentVersion?.contentMarkdown ?? ''));
   const load = useCallback(
     async () => setDetail(await window.nodus.getDictionaryEntry(entryId)),
     [entryId],
@@ -1921,7 +1934,7 @@ function DictionaryEntryView({
   const entry = detail.entry;
   const hasEvidence = detail.coverage.included > 0;
   const backgroundBusy =
-    !!progress && !["done", "degraded", "failed"].includes(progress.phase);
+    !!progress && !["done", "degraded", "failed", "paused", "cancelled"].includes(progress.phase);
   const backgroundFailure =
     progress?.phase === "failed" && !hideBackgroundFailure
       ? progress.error || t("La generación no pudo completarse.")
@@ -1938,6 +1951,7 @@ function DictionaryEntryView({
           model,
           thinkingEffort: research.thinkingEffort,
           webSearch: research.webSearch,
+          harnessVersion: research.harness.version, explorationMode: research.harness.exploration,
       })
       .then((nextProgress) => {
         onGenerationStarted(nextProgress);
@@ -1976,9 +1990,11 @@ function DictionaryEntryView({
     (backgroundBusy && progress?.mode === "update");
   return (
     <div
+      ref={entryScrollRef}
       className="min-h-0 flex-1 overflow-y-auto p-5"
       data-testid="dictionary-entry-detail"
     >
+      <ReadAlong rootRef={entryScrollRef} scrollRef={entryScrollRef} matches={(key) => key === `dictionary_entry:${entry.id}`} />
       <div className="mx-auto max-w-[1480px] space-y-4">
         <section className="rounded-2xl border border-indigo-100 bg-indigo-50/80 p-5 dark:border-neutral-800 dark:bg-neutral-900/35">
           <div className="flex flex-wrap items-start gap-4">
@@ -1999,7 +2015,16 @@ function DictionaryEntryView({
                   </span>
                 )}
               </div>
-              <h2 className="mt-2 text-xl font-semibold">{entry.name}</h2>
+              <div className="mt-2 flex items-center gap-1.5">
+                <h2 className="text-xl font-semibold">{entry.name}</h2>
+                {entry.contentMarkdown?.trim() && (
+                  <ListenButton
+                    testId="dictionary-listen"
+                    size={16}
+                    target={{ kind: 'dictionary_entry', id: entry.id, title: entry.name, markdown: () => `## ${entry.name}\n\n${entry.contentMarkdown}` }}
+                  />
+                )}
+              </div>
               <p className="mt-1 text-xs text-neutral-500">
                 {entry.aliases.length
                   ? entry.aliases.join(" · ")
@@ -2026,24 +2051,11 @@ function DictionaryEntryView({
               </div>
             </div>
             <div className="ml-auto grid w-full max-w-full gap-2 xl:w-[620px]">
-              <div className="flex min-h-9 flex-wrap items-center justify-end gap-3">
-                {progress && (
-                  <div className="min-w-0 flex-1" aria-live="polite">
-                    <DictionaryGenerationState progress={progress} status={entry.status} />
-                  </div>
-                )}
-                <ModelPicker
-                  className="!w-auto max-w-full"
-                  settings={settings}
-                  value={model}
-                  onChange={() => undefined}
-                  compact
-                  disabled
-                  ariaLabel={t("Modelo del Diccionario")}
-                  menu
-                />
-                <DictionaryResearchControls model={model} research={research} disabled={!!busy || backgroundBusy} />
-              </div>
+              {progress && (
+                <div className="flex min-h-9 min-w-0 items-center" aria-live="polite">
+                  <DictionaryGenerationState progress={progress} status={entry.status} />
+                </div>
+              )}
               <div className="grid grid-cols-[minmax(0,1fr)_minmax(118px,0.58fr)_minmax(118px,0.58fr)] gap-2">
                 <button
                   className="btn btn-ghost h-9 min-w-0 justify-center whitespace-nowrap border border-neutral-300 text-xs dark:border-neutral-700"
@@ -2051,7 +2063,7 @@ function DictionaryEntryView({
                   onClick={() =>
                     void run(
                       "scan",
-                      () => window.nodus.scanDictionaryNewEvidence(entryId, { model, thinkingEffort: research.thinkingEffort, webSearch: research.webSearch }),
+                      () => window.nodus.scanDictionaryNewEvidence(entryId, { model, thinkingEffort: research.thinkingEffort, webSearch: research.webSearch, harnessVersion: research.harness.version, explorationMode: research.harness.exploration }),
                       "evidence",
                     )
                   }

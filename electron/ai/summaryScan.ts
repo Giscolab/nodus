@@ -70,10 +70,17 @@ export async function runSummaryScan(work: Work, model?: ModelRef | null, option
   const hash = summaryContentHash(work, model);
   const modelFingerprint = analysisModelFingerprint('summary', { ...settings, summaryModel: scanModel });
 
-  if (!options.force && work.summary_status === 'done' && work.summary_hash === hash
-    && isLocalAnalysisCurrent(work.nodus_id, 'summary', hash, modelFingerprint)) return;
-
   const db = getDb();
+  if (!options.force && work.summary_hash === hash
+    && isLocalAnalysisCurrent(work.nodus_id, 'summary', hash, modelFingerprint)
+    && db.prepare('SELECT 1 FROM work_summaries WHERE nodus_id = ? AND content_hash = ? AND length(trim(summary)) > 0').get(work.nodus_id, hash)) {
+    // The chain marks the summary pending before calling us. The work snapshot can
+    // still say done, and a retry can find an already committed summary. Reusing it
+    // must also settle that pending marker, or the UI shows an unqueueable ghost.
+    setSummaryResult(work.nodus_id, 'done', hash);
+    summaryDone({ status: 'cached' });
+    return;
+  }
   const ideas = db
     .prepare(
       `SELECT i.label, i.statement, io.development, io.role, i.type, io.confidence
@@ -185,6 +192,9 @@ export async function runSummaryScan(work: Work, model?: ModelRef | null, option
       system: coreStructuredPrompt('summary', getSettings().promptLanguage ?? 'es'),
       user: JSON.stringify(input),
       temperature: 0.2,
+      // A two-paragraph orientation summary needs no thinking trace. Without this the call
+      // inherited the chat reasoning setting, so a library scan paid for reasoning on every work.
+      reasoning: 'off' as const,
       task: 'summary' as const,
       requestClass: 'background' as const,
       jobId: `${work.nodus_id}:summary`,
@@ -241,8 +251,8 @@ export async function runSummaryScan(work: Work, model?: ModelRef | null, option
   // embedding provider is temporarily unavailable, keep the committed summary
   // successful and let the reindex flow fill this derived field later.
   try {
-    const embedding = await embed(summary, undefined, { perf, jobId: `${work.nodus_id}:summary-embedding` });
-    if (embedding) updateWorkSummaryEmbedding(work.nodus_id, summary, embedding);
+    const embedding = await embed(summary, undefined, { role: 'document', title: work.title, perf, jobId: `${work.nodus_id}:summary-embedding` });
+    if (embedding) updateWorkSummaryEmbedding(work.nodus_id, summary, embedding, work.title);
     summaryDone({ status: 'ok', embedding: embedding ? 'done' : 'not-configured' });
   } catch (error) {
     console.warn(`[summaryScan] resumen guardado; embedding diferido para ${work.nodus_id}: ${error instanceof Error ? error.message : String(error)}`);

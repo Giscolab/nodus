@@ -1,6 +1,7 @@
 import { getDb, setVectorScanQuery } from './database';
 import { yieldToEventLoop } from '../util/async';
 import { scanSimilarInWorker } from './vectorScanHost';
+import { activeEmbeddingIndex, indexRow } from './embeddingIndexesRepo';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Similarity search that lets the app breathe.
@@ -85,7 +86,12 @@ export async function scanSimilar<T extends ScoredRow>(scan: VectorScan): Promis
   if (!query) return [];
 
   const db = getDb();
-  const background = await scanSimilarInWorker<T>(db.name, scan);
+  const workerStarted = Date.now();
+  const context = activeEmbeddingIndex(db);
+  const background = await scanSimilarInWorker<T>(db.name, { ...scan, indexContext: context ? { indexId: context.indexId, generation: context.generation } : null });
+  if (context) indexRow(db, context.indexId);
+  const workerMs = Date.now() - workerStarted;
+  if (workerMs >= 1000) console.info(`${new Date().toISOString()} [vectorScan] ${scan.table} worker ${background ? 'answered' : 'unavailable'} in ${(workerMs / 1000).toFixed(1)}s`);
   if (background) return background;
   const highest = (db.prepare(`SELECT MAX(rowid) AS top FROM ${scan.table}`).get() as { top: number | null }).top ?? 0;
   if (highest === 0) return [];
@@ -95,6 +101,7 @@ export async function scanSimilar<T extends ScoredRow>(scan: VectorScan): Promis
   const kept: T[] = [];
 
   for (let from = 0; from < highest; from += WINDOW_ROWIDS) {
+    if (context) indexRow(db, context.indexId);
     const to = Math.min(from + WINDOW_ROWIDS, highest);
     // Armed immediately before the synchronous execution and disarmed straight
     // after, never across a yield: that is what makes a shared query vector safe.

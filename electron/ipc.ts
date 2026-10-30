@@ -1,4 +1,5 @@
 import { registerStudyFocusIpc } from './ipc/studyFocus';
+import { synchronizeFocusVault } from './study/focusRuntime';
 import { scheduleManualIndex } from './ai/manualIdeaIndex';
 import { getDocumentVisuals, enrichDocumentVisuals, cancelDocumentVisuals, undoVisualEnrichment, removeDocumentFigure } from './ai/documentVisuals';
 import { dialogTitle } from './dialogTitles';
@@ -34,7 +35,7 @@ import type {
 import { getSettings, updateSettings } from './db/settingsRepo';
 import { getAiConcurrencySnapshot, onAiConcurrencySnapshot, refreshAiConcurrencyPolicy } from './ai/aiClient';
 import * as protect from './protect/protectService';
-import { createIpcContext } from './ipc/context';
+import { createIpcContext, localizedForUi } from './ipc/context';
 import { registerProsopographyIpc } from './ipc/prosopography';
 import { registerTestimoniesIpc } from './ipc/testimonies';
 import { registerToolkitIpc } from './ipc/toolkit';
@@ -56,6 +57,7 @@ import { registerReactionIndexIpc } from './ipc/reactionIndex';
 import { registerCompassIpc } from './ipc/compass';
 import { registerLogsIpc } from './ipc/logs';
 import { registerDriftIpc } from './ipc/drift';
+import { registerTtsIpc } from './ipc/tts';
 import { setBrowserTheme } from './browser/tabs';
 import { browserHistoryRepository } from './browser/history';
 import { applyPipelineLogLimits, initPipelineLogs } from './logging/pipelineLogHost';
@@ -125,7 +127,7 @@ import { reconcileAuthorLayerOnce, reconcileAuthorRolesOnce } from './db/authors
 import { repairGraphIntegrityOnce } from './db/graphIntegrityRepair';
 import { repairDocumentSupportPassagesOnce } from './ai/documentSupportRepair';
 import { getSyncLog } from './db/syncRepo';
-import { fullSync, startRealtimeSync, stopRealtimeSync } from './sync/syncService';
+import { fullSync, getZoteroSyncStatus, onZoteroSyncStatus, startZoteroSync, stopZoteroSync, startRealtimeSync, stopRealtimeSync } from './sync/syncService';
 import {
   restartNodusServerSync,
   startNodusServerSync,
@@ -169,7 +171,7 @@ import {
 } from './ai/passageEmbeddingPipeline';
 import { isSemanticBridgeRunning } from './ai/semanticBridges';
 import { cancelDeepResearchJobsForOtherVaults, isDeepResearchLaneBusy } from './ai/deepResearchQueue';
-import { closeDb, getDb } from './db/database';
+import { closeDb, getDb, withVaultDatabase } from './db/database';
 import {
   createVault,
   createVaultFromDatabaseFile,
@@ -183,7 +185,7 @@ import {
   setVaultType,
 } from './vaults/vaultRegistry';
 import { reuseVaultAnalysisForWorks } from './vaults/vaultAnalysisImport';
-import { initializeVaultModelSelection, validateVaultModelSelection } from './vaults/vaultCreationSettings';
+import { initializeVaultInterfaceProfile, initializeVaultModelSelection, validateVaultModelSelection } from './vaults/vaultCreationSettings';
 import { setPersistentDockIcon } from './dockIcon';
 import { closeCrossVaultConnections } from './db/crossVault';
 import { assertNotBrowserIpcSender } from './ipc/trust';
@@ -192,11 +194,12 @@ import {
   withMigrationRecoverySnapshotsInUtility,
 } from './db/migrationRecoveryUtilityHost';
 import { documentIndexQueue } from './pipeline/documentIndexQueue';
+import {isLearningWorkspace,learningWorkspaceInfo,learningWorkspaceReady,openLearningWorkspace,closeLearningWorkspace} from './learning/learningWorkspace';
 import { ensureDatabaseDeepResearchLane } from './ai/databaseDeepResearchLane';
 
 
 function withVaultKeyProviders(vault: VaultSummary): VaultSummary {
-  return { ...vault, apiKeyProviders: listApiKeyProvidersForVault(vault.id) };
+  return { ...vault, ...(isLearningWorkspace()?{learningWorkspace:true}:{}), apiKeyProviders: listApiKeyProvidersForVault(vault.id) };
 }
 
 function vaultBusyMessage(): string | null {
@@ -267,9 +270,15 @@ export function registerIpc(
   registerTestimoniesIpc(context);
   registerLogsIpc(context);
   registerDriftIpc(context);
+  registerTtsIpc(context);
   // The processing log has to be listening before any pipeline can run: this wires the
   // sink, prunes what the previous session left behind and arms the idle prune timer.
   initPipelineLogs();
+
+  onZoteroSyncStatus(status => {
+    const win = getWindow();
+    if (win && !win.isDestroyed()) win.webContents.send('sync:status', localizedForUi(status));
+  });
 
   const nodiChatAborters = new Map<string, AbortController>();
 
@@ -303,6 +312,7 @@ export function registerIpc(
   });
 
   const emitVaultChanged = () => {
+    synchronizeFocusVault();
     const payload = withVaultKeyProviders(getActiveVault());
     // Broadcast to every window (main + the Nodi overlay) so Nodi's per-vault look
     // updates live wherever it is shown.
@@ -347,7 +357,7 @@ export function registerIpc(
       copiedProviders = copyApiKeysBetweenVaults(sourceVaultId, id);
     }
 
-    stopRealtimeSync();
+    stopZoteroSync();
     stopNodusServerSync();
     stopInboxPolling();
   stopReplicaSync();
@@ -375,7 +385,7 @@ export function registerIpc(
     repairDocumentSupportPassagesOnce();
 
     const settings = getSettings();
-    if (settings.syncMode === 'realtime') startRealtimeSync();
+    startZoteroSync();
     startNodusServerSync();
     // The new vault has its own inbox and its own ledger; the first tick lands within
     // seconds, so switching vaults collects whatever was waiting for that one.
@@ -399,6 +409,7 @@ export function registerIpc(
   h('settings:get', async () => { const settings = getSettings(); if (settings.academicMode === 'manual') scheduleManualIndex(); return settings; });
   h('ai:concurrency:get', async () => getAiConcurrencySnapshot());
   h('settings:update', async (_e, patch: Partial<AppSettings>) => {
+    if(isLearningWorkspace())patch={...patch,autoBackupEnabled:false,autoBackupFolder:path.join(app.getPath('userData'),'storage')};
     const previous = getSettings();
     if (
       patch.browserHistoryRetention !== undefined
@@ -774,13 +785,31 @@ export function registerIpc(
   h('nodi:windowDrag:end', async () => {
     endMascotWindowDrag();
   });
-  h('vaults:list', async () => listVaults().map(withVaultKeyProviders));
+  h('vaults:list', async () => isLearningWorkspace()?[]:listVaults().map(withVaultKeyProviders));
+  h('learning:workspace',async()=>learningWorkspaceInfo());
+  h('learning:workspace:open',async(event,lessonId)=>openLearningWorkspace(lessonId,BrowserWindow.fromWebContents(event.sender)));
+  h('learning:workspace:ready',async()=>learningWorkspaceReady());
+  h('learning:workspace:close',async(_event,discard)=>closeLearningWorkspace(discard===true));
+  h('learning:update', async (_event, vaultId, input) => {
+    const target=getVault(vaultId);
+    if(!target || target.type!=='academic')throw new Error('Invalid learning scope.');
+    const patch: Partial<AppSettings> = {};
+    if (Object.prototype.hasOwnProperty.call(input ?? {}, 'academicLearningProgress')) patch.academicLearningProgress = input.academicLearningProgress;
+    if (Object.prototype.hasOwnProperty.call(input ?? {}, 'academicPracticeSession')) {
+      if (input.academicPracticeSession && input.academicPracticeSession.vaultId !== vaultId) throw new Error('Invalid learning scope.');
+      patch.academicPracticeSession = input.academicPracticeSession;
+    }
+    const next = await withVaultDatabase(vaultId,()=>updateSettings(patch));
+    getWindow()?.webContents.send('settings:changed');
+    return getActiveVault().id===vaultId ? next : null;
+  });
   h('vaults:getActive', async () => withVaultKeyProviders(getActiveVault()));
   h('vaults:create', async (_e, input: CreateVaultInput) => {
     const modelSelection = validateVaultModelSelection(input);
     const vault = createVault(input.name, input.type);
     try {
       if (modelSelection) initializeVaultModelSelection(vault.path, modelSelection);
+      if (vault.type === 'academic') initializeVaultInterfaceProfile(vault.path);
     } catch (cause) {
       deleteVault(vault.id, true);
       throw cause;
@@ -847,7 +876,7 @@ export function registerIpc(
     await documentIndexQueue.pauseVaultAndDrain(id);
     try {
       if (target.active) {
-      stopRealtimeSync();
+      stopZoteroSync();
       stopNodusServerSync();
       stopInboxPolling();
       stopReplicaSync();
@@ -864,7 +893,7 @@ export function registerIpc(
       repairGraphIntegrityOnce();
       repairDocumentSupportPassagesOnce();
       const settings = getSettings();
-      if (settings.syncMode === 'realtime') startRealtimeSync();
+      startZoteroSync();
       startNodusServerSync();
       startInboxPolling();
   startReplicaSync();
@@ -911,6 +940,7 @@ export function registerIpc(
   h('sync:now', async (_e, options?: { catalogOnly?: boolean }) => fullSync('manual', {
     catalogOnly: options?.catalogOnly === true,
   }));
+  h('sync:status', async () => getZoteroSyncStatus());
   h('sync:log', async () => getSyncLog());
   // automatic encrypted backups (master password lives in the OS keychain)
   h('sync:hasPassphrase', async () => hasSyncPassphrase());

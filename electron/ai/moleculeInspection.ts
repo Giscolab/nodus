@@ -3,22 +3,39 @@ import {
   annotateSpeciesSmiles,
   buildNameFeedbackRequest,
   buildRouteReviewRequest,
+  buildPrecedentQueries,
+  blockingReviewProblems,
   buildRouteSteps,
   classifyCoProducts,
   countRouteSteps,
-  declaresRacemic,
+  isBareSmilesName,
+  brokenRouteLinks,
+  isolatedSteps,
+  stepDeclaresRacemic,
+  stepDeclaresRearrangement,
+  stepDeclaresRadical,
   findAnswerSpecies,
+  type StructureDisagreement,
   findSmilesCandidates,
   findStepConditions,
   findStepNamedSpecies,
   findStepProse,
   formatNamedRouteFixPrompts,
+  formatReactionPrecedents,
+  collectStepEvidence,
+  formatEvidenceSources,
   routeStepFailure,
+  routeStepSummaries,
+  findRouteProgram,
   formatRouteAudit,
   formatRouteCheckUnavailable,
+  formatRouteProgramReportFix,
   formatStructureAudit,
   formatUnresolvedNameClarification,
+  implyRacemicTarget,
+  isConditionPhrase,
   normalizeMoleculeDossier,
+  normalizeReactionPrecedent,
   normalizeRouteAudit,
   parseNameFeedback,
   parseRouteReview,
@@ -27,15 +44,31 @@ import {
   type MoleculeDossier,
   type NamedSpecies,
   type NameFeedbackEntry,
+  type PrecedentQuery,
+  type ReactionPrecedent,
   type ResolvedSpecies,
   type RouteAudit,
   type RouteStepAudit,
   type RouteReview,
   type RouteSpeciesLabel,
+  type StepSupport,
   type UnresolvedName,
+  MAX_SPECIES_NAME,
 } from '@shared/moleculeInspection';
+import { routeReviewTokens } from '@shared/researchRetrievalBudget';
+import { compoundAvailability, findStartingSmiles, formatStartingMaterialStock, formatTargetAvailability, relevantExcerpt, routeStartingMaterials, routeTargetSmiles, textbookQueryForClass } from '@shared/synthesisEvidence';
+import { chemistryStockDirectory } from './chemistryStock';
+import { textbookCitations, textbookSchemeDirectory } from './textbookSchemes';
+import { formatTextbookPrecedents, TEXTBOOK_ID } from '@shared/textbookSchemes';
+import { compatibilityFixLines, compatibilityReagentText, formatCompatibility, normalizeCompatibility, type StepCompatibility } from '@shared/stepCompatibility';
+import { invokeDisconnectionsEach, invokeForwardSteps, synthesisEvidenceWorkIds, textbookPassages } from './synthesisEvidence';
+import { opsinDirectory, pubchemMirrorDirectory } from './pubchemMirror';
+import { dumpToolInput } from './routeInputDump';
+import type { ChemistryEvidenceScope } from './chemistryEvidenceScope';
 import { capabilityRegistry, pinCapabilitiesForTurn, type CapabilityProvider } from '../capabilities/registry';
 import { createTrustedCapabilityRunner } from '../capabilities/runner';
+import { routeProgramMode } from '@shared/routeRules';
+import { reactionIndexService } from '../reactionIndex';
 import { completeText } from './aiClient';
 import type { ViewDocumentV1 } from '../../packages/capability-api/src/views';
 
@@ -45,13 +78,15 @@ const CHEMISTRY_CAPABILITY = 'nodus:chemistry';
 const INSPECT_TOOL = 'inspect';
 const ROUTE_TOOL = 'verify-route';
 const COMPILE_TOOL = 'compile';
+const KNOWN_REACTIONS_TOOL = 'known-reactions';
 const MAX_BATCH = 24;
-/** Each step is a full validated compile. The route checker refuses a plan with more than
- *  sixteen steps, so every step it accepted fits; keep the cap aligned so a long route never
- *  drops its tail — the final product step is the last one this could ever drop. */
+/** Each step is a full validated compile, so this bounds a pathological route. The final report
+ *  only runs on a route where every step passed, so this is a backstop rather than a triage rule:
+ *  anything past it is listed as not drawn instead of silently missing. */
 const MAX_ROUTE_DRAWINGS = 16;
 
 interface InspectOptions {
+  evidenceScope?: ChemistryEvidenceScope;
   model?: ModelRef | null;
   locale?: string;
   signal?: AbortSignal;
@@ -65,6 +100,10 @@ interface InspectOptions {
   /** A runner shared across the whole post-answer phase, so the capability worker is opened
    *  once. When absent each phase opens and closes its own. */
   runner?: Runner;
+  /** The conversation's capability scope: every runner opened with it shares one worker per
+   *  capability, so the evidence gather, the checks and the correction rounds of an answer find
+   *  the worker — and the references it already looked up — still running. */
+  scope?: string;
   /** Called with the deterministic report and drawings as soon as they exist, before the
    *  route review lands, so the reply can show them without waiting on the reviewer. */
   onDeterministic?: (text: string) => void;
@@ -80,32 +119,64 @@ export function moleculeInspectionAvailable(): boolean {
   return inspectProvider() !== null;
 }
 
+/** A dossier is a pure function of its SMILES — `inspect` takes nothing else — so the same string
+ *  always yields the same answer and may be remembered.
+ *
+ *  Worth remembering because the cost is superlinear in size and the structure block is rebuilt on
+ *  EVERY turn from the same route. Measured on the 34-step program route (2026-10-20): 54 unique
+ *  species cost 24.0 s to inspect, the 12 species over 300 characters account for 11.2 s of it
+ *  (mean 934 ms, and 1.7 s each past 400), and two passes over the same set cost the same to within
+ *  3%. Across the six turns of one real run that was 133.9 s of repeated identical work — the
+ *  second largest deterministic cost in the run after the drawings.
+ *
+ *  Only successes are kept: a species that failed to inspect is cheap to retry and caching the
+ *  failure would outlive whatever made it fail. */
+const dossierCache = new Map<string, MoleculeDossier>();
+const DOSSIER_CACHE_MAX = 512;
+
 async function inspectCandidates(candidates: string[], options: InspectOptions): Promise<MoleculeDossier[]> {
   if (!candidates.length) return [];
-  const provider = inspectProvider();
-  if (!provider) return [];
-  const { runner, dispose } = chemistryRunner(options);
-  const dossiers: MoleculeDossier[] = [];
-  try {
-    for (let start = 0; start < candidates.length; start += MAX_BATCH) {
-      options.signal?.throwIfAborted();
-      const batch = candidates.slice(start, start + MAX_BATCH);
-      try {
-        const result = await runner.invoke({ provider, toolId: INSPECT_TOOL, input: { smiles: batch } });
-        for (const artifact of result.artifacts ?? []) {
-          const data = artifact.data as Record<string, unknown> | null;
-          const inputSmiles = data && typeof data.inputSmiles === 'string' ? data.inputSmiles : '';
-          const dossier = normalizeMoleculeDossier(data, inputSmiles);
-          if (dossier) dossiers.push(dossier);
+  // Deduplicated here as well as by the package, so the cache sees each string once and the
+  // returned order follows the caller's list rather than the batching. Trimmed because the package
+  // trims before it answers and echoes the trimmed string back as `inputSmiles`: that string is the
+  // cache key, so an untrimmed candidate would be remembered under a key its own lookup misses.
+  const unique = [...new Set(candidates.map((smiles) => smiles.trim()).filter(Boolean))];
+  if (!unique.length) return [];
+  const missing = unique.filter((smiles) => !dossierCache.has(smiles));
+  // No provider is not a reason to discard what is already known: the structure block can still
+  // be built from the remembered dossiers.
+  const provider = missing.length ? inspectProvider() : null;
+  if (provider) {
+    const { runner, dispose } = chemistryRunner(options);
+    try {
+      for (let start = 0; start < missing.length; start += MAX_BATCH) {
+        options.signal?.throwIfAborted();
+        const batch = missing.slice(start, start + MAX_BATCH);
+        try {
+          const result = await runner.invoke({ provider, toolId: INSPECT_TOOL, input: { smiles: batch } });
+          for (const artifact of result.artifacts ?? []) {
+            const data = artifact.data as Record<string, unknown> | null;
+            const inputSmiles = data && typeof data.inputSmiles === 'string' ? data.inputSmiles : '';
+            const dossier = normalizeMoleculeDossier(data, inputSmiles);
+            // Keyed by the string the package says it answered for, not by position: a batch may
+            // return fewer artifacts than it was given.
+            if (dossier && inputSmiles) {
+              if (dossierCache.size >= DOSSIER_CACHE_MAX) {
+                const oldest = dossierCache.keys().next();
+                if (!oldest.done) dossierCache.delete(oldest.value);
+              }
+              dossierCache.set(inputSmiles, dossier);
+            }
+          }
+        } catch {
+          /* one unparseable batch must not block the answer */
         }
-      } catch {
-        /* one unparseable batch must not block the answer */
       }
+    } finally {
+      await dispose();
     }
-  } finally {
-    await dispose();
   }
-  return dossiers;
+  return unique.map((smiles) => dossierCache.get(smiles)).filter((dossier): dossier is MoleculeDossier => dossier !== undefined);
 }
 
 /** Verifies the SMILES in the user's question before the model answers, so the target
@@ -140,6 +211,47 @@ function routeProvider() {
   return provider && provider.tools.some((tool) => tool.id === ROUTE_TOOL) ? provider : null;
 }
 
+/** Program mode's tool. It returns the SAME `route-audit` artifact `verify-route` does, which is
+ *  what lets a program answer reuse the whole report, review and fix-prompt path unchanged. */
+const PROGRAM_TOOL = 'execute-route-program';
+
+function programProvider() {
+  const provider = capabilityRegistry().providers.get(CHEMISTRY_CAPABILITY);
+  return provider && provider.tools.some((tool) => tool.id === PROGRAM_TOOL) ? provider : null;
+}
+
+/** Executes a route program and returns the audit of the equations it generated.
+ *
+ *  Unlike the names-first path there are no steps to count: the program decides how many
+ *  equations there are, so nothing here can check a returned count against an expected one. */
+async function invokeRouteProgram(runner: Runner, provider: CapabilityProvider, program: string, target?: string | null): Promise<{ audit: RouteAudit | null; blocked: string[] }> {
+  const indexDir = await reactionIndexService().localDirectory().catch(() => null);
+  const input = {
+    program,
+    ...(target ? { target } : {}),
+    ...(indexDir ? { indexDir } : {}),
+    ...mirrorInput(provider, PROGRAM_TOOL),
+  };
+  dumpToolInput(PROGRAM_TOOL, input);
+  const result = await runner.invoke({ provider, toolId: PROGRAM_TOOL, input });
+  const artifact = (result.artifacts ?? []).find((entry) => entry.artifactType === 'route-audit');
+  // A program the package REJECTED comes back as an audit with no steps and its complaints in
+  // `blocked` — and normalizeRouteAudit returns null for any audit without steps. Reading only the
+  // normalized value threw those complaints away and reported the check as unavailable, which is
+  // the one thing a failed check must never look like: the model was told nothing had been
+  // checked, when in fact its program had been read and found wanting. Found 2026-10-13.
+  const data = artifact?.data as { blocked?: unknown } | undefined;
+  const blocked = Array.isArray(data?.blocked) ? data.blocked.filter((entry): entry is string => typeof entry === 'string') : [];
+  return { audit: artifact ? normalizeRouteAudit(artifact.data) : null, blocked };
+}
+
+/** Whether the installed package carries the forward-step search, so the contract only offers a
+ *  fence the package can actually answer. An older package simply never hears about it. */
+export function forwardStepsAvailable(): boolean {
+  const provider = capabilityRegistry().providers.get(CHEMISTRY_CAPABILITY);
+  return Boolean(provider && provider.tools.some((tool) => tool.id === 'propose-forward-steps'));
+}
+
 function compileProvider() {
   const provider = capabilityRegistry().providers.get(CHEMISTRY_CAPABILITY);
   return provider && provider.tools.some((tool) => tool.id === COMPILE_TOOL) ? provider : null;
@@ -148,6 +260,11 @@ function compileProvider() {
 /** True when the enabled Chemistry Studio package exposes the read-only route checker. */
 export function routeVerificationAvailable(): boolean {
   return routeProvider() !== null;
+}
+
+function knownReactionsProvider() {
+  const provider = capabilityRegistry().providers.get(CHEMISTRY_CAPABILITY);
+  return provider && provider.tools.some((tool) => tool.id === KNOWN_REACTIONS_TOOL) ? provider : null;
 }
 
 /** A runner lease for one phase. A caller-supplied shared runner is reused and this lease
@@ -162,6 +279,7 @@ export function chemistryRunner(options: InspectOptions): { runner: Runner; disp
     pins: pinCapabilitiesForTurn(),
     signal: options.signal,
     ...(options.owner ? { owner: options.owner } : {}),
+    ...(options.scope ? { scope: options.scope } : {}),
     runCoreStages: async (text) => text,
   });
   return { runner, dispose: async () => { await runner.dispose?.(); } };
@@ -176,17 +294,72 @@ function routeAcceptsLabels(provider: CapabilityProvider): boolean {
   return Boolean(schema?.properties && 'labels' in schema.properties);
 }
 
-async function invokeRoute(runner: Runner, provider: CapabilityProvider, steps: string[], racemic?: boolean, target?: string | null, labels?: RouteSpeciesLabel[][]): Promise<RouteAudit | null> {
+/** The longest species label the installed package declares it will accept. A species given as
+ *  its own structure carries that structure as its label, and cutting one corrupts the molecule
+ *  it is displayed under, so follow the schema rather than a figure fixed here: an older package
+ *  keeps its shorter limit, a newer one is used to the full. */
+function routeLabelNameLimit(provider: CapabilityProvider): number {
+  const schema = provider.tools.find((tool) => tool.id === ROUTE_TOOL)?.inputSchema as
+    { properties?: { labels?: { items?: { items?: { properties?: { name?: { maxLength?: unknown } } } } } } } | undefined;
+  const declared = schema?.properties?.labels?.items?.items?.properties?.name?.maxLength;
+  return typeof declared === 'number' && declared > 0 ? declared : 1000;
+}
+
+function routeAccepts(provider: CapabilityProvider, property: string): boolean {
+  const schema = provider.tools.find((tool) => tool.id === ROUTE_TOOL)?.inputSchema as { properties?: Record<string, unknown> } | undefined;
+  return Boolean(schema?.properties && property in schema.properties);
+}
+
+/** Whether the route check may enumerate stereoisomers in the package's Python runtime: only
+ *  where that runtime is already installed, which the downloaded reaction index implies, so a
+ *  route check never starts an install. */
+async function stereoEnumerationAvailable(provider: CapabilityProvider): Promise<boolean> {
+  if (!routeAccepts(provider, 'enumerateStereo')) return false;
+  try { return Boolean(await reactionIndexService().localDirectory()); } catch { return false; }
+}
+
+/** The package's own words for a step it could not build (chemistryRouteAudit.ts), so a route
+ *  answered here reads exactly like one the package answered. */
+const UNBUILT_STEP = 'This step could not be built: a species it names has no resolved structure.';
+
+async function invokeRoute(runner: Runner, provider: CapabilityProvider, steps: string[], racemic?: boolean | boolean[], target?: string | null, labels?: RouteSpeciesLabel[][], declared: { rearrangement?: boolean[]; radical?: boolean[] } = {}): Promise<RouteAudit | null> {
+  // No step could be built — every one names a species that did not resolve. The package refuses
+  // such a route outright ("Provide at least one reaction SMILES step"), and that refusal used to
+  // end the check: the answer said only that the route check was unavailable, so the model was
+  // told nothing it could fix (B50, measured 2026-10-09 on a 12-step answer). Answer it here in
+  // the package's own shape for an unbuilt step, so the report and its fix prompts name the
+  // unresolved species exactly as they do when only some steps are unbuilt.
+  if (steps.length && !steps.some((step) => step.trim())) {
+    return normalizeRouteAudit({
+      continuous: false, links: [],
+      blocked: steps.map((_, index) => `Step ${index + 1}: ${UNBUILT_STEP}`),
+      steps: steps.map((_, index) => ({ index, reaction: '', ok: false, error: UNBUILT_STEP, balanced: false, chargeBalanced: false,
+        differences: [], unspecifiedStereocentres: 0, reactants: [], agents: [], products: [] })),
+    });
+  }
   // A package that predates `target`/`labels` ignores them, and the audit simply has no
   // target entry or name check. The schema probe keeps a 2.3.0 package from rejecting an
   // input it never declared.
   const named = labels && labels.some((entries) => entries.length);
+  const labelLimit = named ? routeLabelNameLimit(provider) : 0;
   const input = {
     steps,
     ...(racemic ? { racemic } : {}),
+    // Declared rearrangements and radical steps, per step from their own prose: only to a package
+    // whose route tool reads them (the skeleton check), so an older one is never sent them.
+    ...(declared.rearrangement?.some(Boolean) && routeAccepts(provider, 'rearrangement') ? { rearrangement: declared.rearrangement } : {}),
+    ...(declared.radical?.some(Boolean) && routeAccepts(provider, 'radical') ? { radical: declared.radical } : {}),
     ...(target ? { target } : {}),
-    ...(named && routeAcceptsLabels(provider) ? { labels } : {}),
+    // A long species name is still sent, cut to whatever the installed package's schema allows:
+    // one overlong name must not make the package reject the whole route, and a species given as
+    // its own structure carries that structure as its name, so cutting one to a figure fixed
+    // here would corrupt the label it is displayed under.
+    ...(named && routeAcceptsLabels(provider) ? { labels: labels!.map((entries) => entries.map((entry) => ({ ...entry, name: entry.name.slice(0, labelLimit) }))) } : {}),
+    ...(await stereoEnumerationAvailable(provider) ? { enumerateStereo: true } : {}),
+    // The label check resolves every name again: from the local mirror, for a package that reads it.
+    ...mirrorInput(provider, ROUTE_TOOL),
   };
+  dumpToolInput(ROUTE_TOOL, input);
   const result = await runner.invoke({ provider, toolId: ROUTE_TOOL, input });
   const artifact = (result.artifacts ?? []).find((entry) => entry.artifactType === 'route-audit');
   const audit = artifact ? normalizeRouteAudit(artifact.data) : null;
@@ -197,6 +370,61 @@ async function invokeRoute(runner: Runner, provider: CapabilityProvider, steps: 
     throw new Error('The installed chemistry package omitted or renumbered route steps. Update Chemistry Studio before checking this route');
   }
   return audit;
+}
+
+/** Looks the route's reactions and target up in the local Open Reaction Database index, when
+ *  the package exposes the tool and the index has been downloaded and verified. Best-effort:
+ *  an absent index, an older package or a tool failure all return null and change nothing. */
+export async function lookupReactionPrecedent(runner: Runner, steps: string[], options: InspectOptions): Promise<{ precedent: ReactionPrecedent; provider: CapabilityProvider } | null> {
+  options.signal?.throwIfAborted();
+  if (options.evidenceScope?.external === false) return null;
+  const provider = knownReactionsProvider();
+  if (!provider) return null;
+  const indexDir = await reactionIndexService().localDirectory();
+  options.signal?.throwIfAborted();
+  if (!indexDir) return null;
+  try {
+    const result = await runner.invoke({
+      provider,
+      toolId: KNOWN_REACTIONS_TOOL,
+      input: {
+        indexDir,
+        reactions: steps.slice(0, 32),
+        products: options.target ? [options.target] : [],
+        similar: steps.slice(0, 16),
+      },
+    });
+    const artifact = (result.artifacts ?? []).find((entry) => entry.artifactType === 'reaction-precedent');
+    const precedent = artifact ? normalizeReactionPrecedent(artifact.data) : null;
+    return precedent ? { precedent, provider } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The same lookup against the textbook-scheme index (reactions read from the user's own books),
+ *  when it has been built. Best-effort like the ORD lookup: null on any absence or failure. */
+export async function lookupTextbookPrecedent(runner: Runner, steps: string[], options: InspectOptions): Promise<ReactionPrecedent | null> {
+  const provider = knownReactionsProvider();
+  options.signal?.throwIfAborted();
+  const indexDir = provider ? textbookSchemeDirectory(options.evidenceScope) : null;
+  if (!provider || !indexDir) return null;
+  try {
+    const result = await runner.invoke({
+      provider,
+      toolId: KNOWN_REACTIONS_TOOL,
+      input: {
+        indexDir,
+        reactions: steps.slice(0, 32),
+        products: options.target ? [options.target] : [],
+        similar: steps.slice(0, 16),
+      },
+    });
+    const artifact = (result.artifacts ?? []).find((entry) => entry.artifactType === 'reaction-precedent');
+    return artifact ? normalizeReactionPrecedent(artifact.data, TEXTBOOK_ID) : null;
+  } catch {
+    return null;
+  }
 }
 
 async function verifyRouteSteps(steps: string[], options: InspectOptions, racemic?: boolean): Promise<RouteAudit | null> {
@@ -231,7 +459,7 @@ interface SpeciesResolution {
   status: 'resolved' | 'ambiguous' | 'unresolved';
   smiles?: string;
   formula?: string;
-  source?: 'pubchem' | 'opsin';
+  source?: 'pubchem' | 'opsin' | 'builtin';
   feedback?: string;
 }
 
@@ -241,11 +469,19 @@ export interface RouteResolutionOutcome {
   labels: RouteSpeciesLabel[][];
   consistent: boolean;
   clarification?: string;
+  /** Reactant/product names that resolved to no structure, per step; the fix prompts name them. */
+  unresolved?: UnresolvedName[];
   /** One line per name the resolver corrected, e.g. "old → new"; empty when nothing changed. */
   corrections: string[];
   /** Species the model supplied as structures because no name would resolve, as prose, so the
    *  caller discloses that their structure came from the model, not a reference. */
   authorStructures: string[];
+  /** Species whose name and author-written structure are different molecules. Empty on the legacy
+   *  path, which does no name resolution and so has nothing to disagree with. */
+  disagreements?: StructureDisagreement[];
+  /** Every species' resolution status and source, so a run can record where each structure came
+   *  from. The author-supplied ones are the category silent wrongness hides in. */
+  resolutionSources: Array<{ status: string; source?: string }>;
   /** True when the installed package has no resolve-names tool, so the caller falls back to
    *  the legacy reaction-line path. */
   legacy: boolean;
@@ -269,17 +505,31 @@ function normalizeSpeciesResolution(entry: unknown): SpeciesResolution | null {
   const status = value.status;
   if (status !== 'resolved' && status !== 'ambiguous' && status !== 'unresolved') return null;
   return {
-    name: value.name.slice(0, 200),
+    name: value.name.slice(0, MAX_SPECIES_NAME),
     status,
     ...(typeof value.smiles === 'string' && value.smiles ? { smiles: value.smiles.slice(0, 2000) } : {}),
     ...(typeof value.formula === 'string' ? { formula: value.formula.slice(0, 200) } : {}),
-    ...(value.source === 'pubchem' || value.source === 'opsin' ? { source: value.source } : {}),
+    ...(value.source === 'pubchem' || value.source === 'opsin' || value.source === 'builtin' ? { source: value.source } : {}),
     ...(typeof value.feedback === 'string' && value.feedback ? { feedback: value.feedback.slice(0, 400) } : {}),
   };
 }
 
+/** The mirror directory, for a package whose tool declares it: an older package is never sent a
+ *  field its schema refuses. */
+function mirrorInput(provider: CapabilityProvider, toolId: string): { pubchemDir?: string; opsinDir?: string; localOnly?: boolean } {
+  const schema = provider.tools.find((tool) => tool.id === toolId)?.inputSchema as { properties?: Record<string, unknown> } | undefined;
+  if (!schema?.properties) return {};
+  const pubchem = 'pubchemDir' in schema.properties ? pubchemMirrorDirectory() : null;
+  const opsin = 'opsinDir' in schema.properties ? opsinDirectory() : null;
+  // A run that must stay local (a timing trace): the package consults no network for references.
+  const localOnly = process.env.NODUS_REFERENCES_LOCAL_ONLY === '1' && 'localOnly' in schema.properties;
+  return { ...(pubchem ? { pubchemDir: pubchem } : {}), ...(opsin ? { opsinDir: opsin } : {}), ...(localOnly ? { localOnly: true } : {}) };
+}
+
 async function invokeResolveNames(runner: Runner, provider: CapabilityProvider, names: string[]): Promise<SpeciesResolution[]> {
-  const result = await runner.invoke({ provider, toolId: RESOLVE_TOOL, input: { names } });
+  const input = { names, ...mirrorInput(provider, RESOLVE_TOOL) };
+  dumpToolInput(RESOLVE_TOOL, input);
+  const result = await runner.invoke({ provider, toolId: RESOLVE_TOOL, input });
   const artifact = (result.artifacts ?? []).find((entry) => entry.artifactType === 'species-resolution');
   const data = artifact?.data as { results?: unknown } | undefined;
   const list = Array.isArray(data?.results) ? data.results as unknown[] : [];
@@ -313,7 +563,7 @@ function normalizeStructureName(entry: unknown): SpeciesStructureName | null {
     smiles: value.smiles.slice(0, 2000),
     status: value.status === 'named' ? 'named' : 'unnamed',
     ...(Number.isSafeInteger(value.cid) && (value.cid as number) > 0 ? { cid: value.cid as number } : {}),
-    ...(typeof value.name === 'string' && value.name ? { name: value.name.slice(0, 300) } : {}),
+    ...(typeof value.name === 'string' && value.name ? { name: value.name.slice(0, MAX_SPECIES_NAME) } : {}),
     ...(typeof value.formula === 'string' && value.formula ? { formula: value.formula.slice(0, 200) } : {}),
     ...(typeof value.canonicalSmiles === 'string' && value.canonicalSmiles ? { canonicalSmiles: value.canonicalSmiles.slice(0, 2000) } : {}),
     ...(typeof value.feedback === 'string' && value.feedback ? { feedback: value.feedback.slice(0, 400) } : {}),
@@ -321,7 +571,9 @@ function normalizeStructureName(entry: unknown): SpeciesStructureName | null {
 }
 
 async function invokeNameStructures(runner: Runner, provider: CapabilityProvider, smiles: string[]): Promise<SpeciesStructureName[]> {
-  const result = await runner.invoke({ provider, toolId: STRUCTURE_TOOL, input: { smiles } });
+  const input = { smiles, ...mirrorInput(provider, STRUCTURE_TOOL) };
+  dumpToolInput(STRUCTURE_TOOL, input);
+  const result = await runner.invoke({ provider, toolId: STRUCTURE_TOOL, input });
   const artifact = (result.artifacts ?? []).find((entry) => entry.artifactType === 'structure-naming');
   const data = artifact?.data as { results?: unknown } | undefined;
   const list = Array.isArray(data?.results) ? data.results as unknown[] : [];
@@ -345,32 +597,84 @@ function unresolvedNames(speciesByStep: NamedSpecies[][], resolutions: Map<strin
 }
 
 async function requestCorrectedNames(prose: string, unresolved: UnresolvedName[], options: InspectOptions): Promise<NameFeedbackEntry[]> {
+  // One corrected name per unresolved species, so the budget follows the count rather than a flat
+  // figure that happened to fit the routes it was written against.
+  const budget = Math.min(8_000, Math.max(1_600, 400 + 220 * Math.max(1, unresolved.length)));
   try {
     const raw = await completeText({
       system: ROUTE_NAME_FEEDBACK_SYSTEM,
       user: buildNameFeedbackRequest(unresolved, prose),
       temperature: 0,
-      maxTokens: 1600,
+      maxTokens: budget,
+      reasoning: 'off',
+      // The turn's own signal, as the review has: a stop must not wait out this reply.
+      ...(options.signal ? { signal: options.signal } : {}),
     }, options.model ?? null);
-    return parseNameFeedback(raw);
-  } catch {
+    const parsed = parseNameFeedback(raw);
+    if (!parsed.length) {
+      console.warn(`[routeNames] no corrections parsed from ${raw.trim().length} chars`
+        + ` (budget ${budget} tokens, ${unresolved.length} unresolved)`);
+    }
+    return parsed;
+  } catch (error) {
+    // A stopped turn ends the route check (resolveNamedRoute returns nothing on an abort); it is
+    // not a failed call with no corrections.
+    if (options.signal?.aborted) throw error;
+    console.warn(`[routeNames] call failed (budget ${budget} tokens, ${unresolved.length} unresolved): ${error instanceof Error ? error.message : String(error)}`);
     return [];
   }
 }
 
 /** One model review of the route plan: the problems a balance and continuity check cannot
  *  see. Defensive — an unreadable reply yields no review, so it never blocks a route. */
-async function requestRouteReview(question: string, labels: RouteSpeciesLabel[][], audit: RouteAudit, options: InspectOptions, stepProse: string[] = []): Promise<RouteReview | null> {
+/** The per-step evidence summary: the ORD lookup and the answer's own citations, library
+ *  passages named by title and page. Best-effort: a failure leaves the answer without it. */
+async function evidenceSources(modelAnswer: string, stepCount: number, precedentPromise: ReturnType<typeof lookupReactionPrecedent>, queries: PrecedentQuery[], support: Map<number, StepSupport>): Promise<string> {
   try {
-    const raw = await completeText({
+    const result = await precedentPromise.catch(() => null);
+    const evidence = collectStepEvidence(modelAnswer, stepCount, result?.precedent ?? null, queries, support);
+    const { getPassageDetail } = await import('../db/passagesRepo');
+    const sourceFor = (passageId: string): string | null => {
+      if (passageId.startsWith('scoped:')) return null;
+      const detail = getPassageDetail(passageId);
+      if (!detail) return null;
+      const page = detail.page_label ?? (detail.page_number != null ? String(detail.page_number) : null);
+      return page ? `${detail.work.title}, ${/^\d/.test(page) ? `p. ${page}` : page}` : detail.work.title;
+    };
+    return formatEvidenceSources(evidence, sourceFor);
+  } catch {
+    return '';
+  }
+}
+
+async function requestRouteReview(question: string, labels: RouteSpeciesLabel[][], audit: RouteAudit, options: InspectOptions, stepProse: string[] = []): Promise<RouteReview | null> {
+  const budget = routeReviewTokens(audit.steps.length);
+  const started = Date.now();
+  let raw = '';
+  try {
+    raw = await completeText({
       system: ROUTE_REVIEW_SYSTEM,
       user: buildRouteReviewRequest(question, labels, audit, stepProse),
       temperature: 0,
-      maxTokens: 2000,
+      maxTokens: budget,
+      // Explicit, so this call does not inherit whatever reasoning the profile happens to carry:
+      // the budget above is for the review, and a model that spends it thinking returns nothing.
+      reasoning: 'off',
       ...(options.signal ? { signal: options.signal } : {}),
     }, options.model ?? null);
-    return parseRouteReview(raw);
-  } catch {
+    const review = parseRouteReview(raw, audit.steps.length);
+    // A review that produced nothing readable is indistinguishable, in the report, from a review
+    // that found nothing wrong — and that is how a dead check looked healthy for two sessions.
+    // Say it out loud instead.
+    if (!review) {
+      console.warn(`[routeReview] no review parsed: ${raw.trim().length} chars from ${options.model?.model ?? 'the configured model'}`
+        + ` after ${((Date.now() - started) / 1000).toFixed(1)}s, budget ${budget} tokens, ${audit.steps.length} steps`
+        + (raw.trim() ? `; reply began ${JSON.stringify(raw.trim().slice(0, 120))}` : '; the reply was empty'));
+    }
+    return review;
+  } catch (error) {
+    console.warn(`[routeReview] call failed after ${((Date.now() - started) / 1000).toFixed(1)}s`
+      + ` (budget ${budget} tokens, ${audit.steps.length} steps): ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
 }
@@ -385,7 +689,7 @@ export async function resolveNamedRoute(
   modelAnswer: string,
   options: InspectOptions = {},
 ): Promise<RouteResolutionOutcome> {
-  const legacy: RouteResolutionOutcome = { answer: finalAnswer, steps: [], labels: [], consistent: true, corrections: [], authorStructures: [], legacy: true };
+  const legacy: RouteResolutionOutcome = { answer: finalAnswer, steps: [], labels: [], consistent: true, corrections: [], resolutionSources: [], authorStructures: [], legacy: true };
   if (options.enabled === false) return legacy;
   const provider = resolveProvider();
   if (!provider) return legacy;
@@ -409,7 +713,9 @@ export async function resolveNamedRoute(
       }
       for (const name of missing) if (!resolutions.has(name)) resolutions.set(name, { name, status: 'unresolved', feedback: 'No resolution was returned.' });
     };
-    await resolveAll(speciesByStep.flatMap((step) => step.map((entry) => entry.name)));
+    // A condition under Agents ("110 °C", "reflux") is no substance: it stays unresolved, as it
+    // would after the lookup, without spending a turn of the PubChem pacer on it.
+    await resolveAll(speciesByStep.flatMap((step) => step.filter((entry) => !(entry.role === 'agent' && isConditionPhrase(entry.name))).map((entry) => entry.name)));
 
     for (let attempt = 0; attempt < NAME_FEEDBACK_ATTEMPTS; attempt += 1) {
       const unresolved = unresolvedNames(speciesByStep, resolutions);
@@ -435,6 +741,19 @@ export async function resolveNamedRoute(
       }
     }
 
+    // A species written as a bare SMILES where a name belongs — the contract asks for a name, or
+    // a name with the structure in backticks, and under load the model gives the structure alone.
+    // The reference services then report "no exact match for this name" for a molecule that is
+    // perfectly well defined, and the whole step is discarded over the formatting. The structure
+    // is what the route is checked against, so take it: only for a name that has already failed
+    // to resolve (a real systematic name resolves and never reaches here), and through the same
+    // declared-structure path, so it is named back from PubChem below where possible and
+    // disclosed as author-supplied where not. Some species have no resolvable name at all — a
+    // protected intermediate, or one on a solid support — so this is a normal case, not an edge one.
+    speciesByStep = speciesByStep.map((step) => step.map((entry) => (!entry.declaredSmiles
+      && resolutions.get(entry.name)?.status !== 'resolved' && isBareSmilesName(entry.name)
+      ? { ...entry, declaredSmiles: entry.name.trim() } : entry)));
+
     // A species the model could only give as a structure: try to read a name back from PubChem,
     // so the route uses a real name where one exists. An unnamed structure keeps the author's
     // SMILES and is disclosed as author-supplied.
@@ -450,12 +769,22 @@ export async function resolveNamedRoute(
       } catch { /* naming is best effort; the declared structure stands */ }
     }
 
+    // A name that resolved to a DIFFERENT MOLECULE than the author's own structure. Not the same
+    // thing as a different writing of one molecule, which is why the comparison is canonical on
+    // both sides: `nameByStructure` already holds RDKit's canonical form of every declared
+    // structure, and the resolver returns canonical isomeric SMILES.
+    const disagreements: StructureDisagreement[] = [];
     const resolvedByStep: ResolvedSpecies[][] = speciesByStep.map((step) => classifyCoProducts(step.map((entry): ResolvedSpecies => {
       const resolution = resolutions.get(entry.name);
       if (resolution?.status === 'resolved' && resolution.smiles) {
-        // The name is authoritative in the names-first path, and the resolver now returns the
-        // canonical isomeric SMILES, so a model-declared writing is not compared here: an
-        // equivalent SMILES written differently would otherwise look like a correction.
+        // The name stays authoritative in the names-first path — an equivalent SMILES written
+        // differently must not look like a correction, which is why the canonical forms are
+        // compared and not the strings. But when the two are genuinely different molecules the
+        // model's structure is silently discarded, and THAT is disclosed: measured on chainL-6,
+        // four Fmoc amino acids written as D enantiomers and named "Fmoc-L-X" verified at turn 0
+        // with nothing said to anyone.
+        const declared = entry.declaredSmiles ? nameByStructure.get(entry.declaredSmiles)?.canonicalSmiles : undefined;
+        if (declared && declared !== resolution.smiles) disagreements.push({ name: entry.name, declared, resolved: resolution.smiles });
         return { ...entry, status: 'resolved' as const, smiles: resolution.smiles, source: resolution.source ?? 'pubchem', ...(resolution.formula ? { formula: resolution.formula } : {}) };
       }
       if (entry.declaredSmiles) {
@@ -477,6 +806,7 @@ export async function resolveNamedRoute(
     const steps = buildRouteSteps(resolvedByStep);
     const labels: RouteSpeciesLabel[][] = resolvedByStep.map((step) => step.filter((entry) => entry.smiles).map((entry) => ({ role: entry.role, byproduct: entry.byproduct, name: entry.name, smiles: entry.smiles! })));
     const authorStructures = resolvedByStep.flat().filter((entry) => entry.status === 'fallback' && entry.smiles).map((entry) => `${entry.name} — \`${entry.smiles}\``);
+    const resolutionSources = resolvedByStep.flat().map((entry) => ({ status: entry.status, ...(entry.source ? { source: entry.source } : {}) }));
     const annotated = `${annotateSpeciesSmiles(finalAnswer, resolvedByStep).trimEnd()}\n`;
     return {
       answer: annotated,
@@ -485,7 +815,9 @@ export async function resolveNamedRoute(
       consistent: critical.length === 0,
       corrections,
       authorStructures,
-      ...(critical.length ? { clarification: formatUnresolvedNameClarification(critical, options.target) } : {}),
+      disagreements,
+      resolutionSources,
+      ...(critical.length ? { clarification: formatUnresolvedNameClarification(critical, options.target), unresolved: critical } : {}),
       legacy: false,
     };
   } catch (error) {
@@ -500,36 +832,181 @@ export async function resolveNamedRoute(
  *  small pool hides the RDKit load without thrashing the machine. */
 const DRAW_CONCURRENCY = 2;
 
+/** The final report's opening claim, and what replaces it when the model review, which the drawing
+ *  gate does not wait for, comes back with a blocking problem. Left as it was, the answer said
+ *  "Route check failed" in its header and "every step passed the check" under it, about one route. */
+const FINAL_REPORT_PASSED = 'Every step of this route passed the check, so the route is drawn.';
+const FINAL_REPORT_REVIEW_HELD = 'Every step passed the RDKit check, so the route is drawn, but the model review above found a named structure wrong for its step: the route is not verified until that is corrected.';
+
 /** One reaction scheme from the compile tool, rendered for the answer, or null when the tool
  *  produced no view. A stored reference and its inline view would each render the same
  *  drawing, so only the view is kept. */
 async function drawReaction(runner: Runner, provider: CapabilityProvider, reactionSmiles: string, extra: { conditions?: string; racemic?: boolean } = {}): Promise<string | null> {
   const plan = JSON.stringify({ version: 2, kind: 'reaction', depiction: 'skeletal', reactionSmiles, openStereo: true, ...extra });
-  const result = await runner.invoke({ provider, toolId: COMPILE_TOOL, input: { plan, question: reactionSmiles } });
+  const result = await runner.invoke({ provider, toolId: COMPILE_TOOL, input: { plan, question: reactionSmiles, ...mirrorInput(provider, COMPILE_TOOL) } });
   const artifact = (result.artifacts ?? []).find((entry) => entry.artifactType === 'chemistry-document');
   return artifact?.view ? runner.renderView({ provider, view: artifact.view as ViewDocumentV1 }) : null;
 }
 
-/** Draws every step the checker accepted, in order, on the runner already opened for the
- *  route check. A step the checker refused is never auto-drawn: the verified lane abstains
- *  for it and its fallback picture is unchecked, so it gets a deterministic note instead. */
-async function drawRouteSteps(
+/** Steps whose product is worth other ways to make: a step the checker refused, or one with no
+ *  recorded precedent. At most this many, so the lookup stays one short call. */
+const MAX_ALTERNATIVE_STEPS = 6;
+const EXCERPT_CHARS = 220;
+
+/** Textbook support for each step's reaction class, and ORD alternatives for each step that
+ *  failed or has no precedent. Best-effort: each half returns nothing on failure. */
+async function buildStepSupport(
+  runner: Runner,
+  precedent: ReactionPrecedent,
+  queries: PrecedentQuery[],
+  labels: RouteSpeciesLabel[][],
+  audit: RouteAudit,
+  options: InspectOptions,
+): Promise<Map<number, StepSupport>> {
+  const support = new Map<number, StepSupport>();
+  const entryFor = new Map(precedent.reactions.map((entry, position) => [queries[position]?.step ?? position, entry]));
+
+  const byClass = new Map<string, number[]>();
+  for (const [step, entry] of entryFor) {
+    const name = entry.classes?.find((item) => textbookQueryForClass(item));
+    if (name) byClass.set(name, [...(byClass.get(name) ?? []), step]);
+  }
+  const passagesPromise = (async () => {
+    if (!byClass.size) return;
+    const names = [...byClass.keys()];
+    const found = await textbookPassages(names.map((name) => textbookQueryForClass(name)!), synthesisEvidenceWorkIds(options.evidenceScope), options.signal, 1);
+    for (const passage of found) {
+      const name = names.find((item) => textbookQueryForClass(item) === passage.retrievedFor);
+      if (!name) continue;
+      const excerpt = relevantExcerpt(name, passage.text, EXCERPT_CHARS);
+      for (const step of byClass.get(name) ?? []) {
+        support.set(step, { ...support.get(step), passage: { title: passage.work.title, location: passage.location, citation: passage.citation, excerpt, about: name, ...(passage.scanned ? { scanned: true } : {}) } });
+      }
+    }
+  })().catch((error) => { console.warn('[route] textbook support unavailable:', error instanceof Error ? error.message : String(error)); });
+
+  const alternativesPromise = (async () => {
+    const products = new Map<number, string>();
+    for (const step of audit.steps) {
+      const entry = entryFor.get(step.index);
+      const needs = routeStepFailure(step) !== null || (entry ? entry.count === 0 && !entry.unchanged : false);
+      const product = (labels[step.index] ?? []).find((label) => label.role === 'product' && !label.byproduct && /[Cc]/.test(label.smiles))?.smiles;
+      if (needs && product && products.size < MAX_ALTERNATIVE_STEPS) products.set(step.index, product);
+    }
+    if (!products.size) return;
+    const starting = findStartingSmiles(options.question ?? '', options.target);
+    // One process per product, side by side: one call worked through up to six large products in
+    // turn on one core (49 s of step support on a long route, 2026-10-09).
+    const briefs = await invokeDisconnectionsEach(runner, [...new Set(products.values())], starting, 4, options);
+    if (!briefs) return;
+    for (const [step, product] of products) {
+      const brief = briefs.find((item) => item.input === product);
+      const reactants = new Set((labels[step] ?? []).filter((label) => label.role === 'reactant').map((label) => label.smiles));
+      const proposals = (brief?.proposals ?? [])
+        .filter((proposal) => proposal.recorded > 0 || proposal.classes.length)
+        .filter((proposal) => !proposal.precursors.split('.').every((molecule) => reactants.has(molecule)))
+        .map(({ precursors, classes, recorded }) => ({ precursors, classes, recorded }));
+      if (proposals.length) support.set(step, { ...support.get(step), alternatives: { product: brief!.target, proposals } });
+    }
+  })().catch((error) => { console.warn('[route] ORD alternatives unavailable:', error instanceof Error ? error.message : String(error)); });
+
+  // The forward view on the same steps, from the other end. `alternatives` asks what else makes
+  // the product; this asks what the record supports doing to the reactant the step already has,
+  // which is the question a step with no precedent needs answered. Run for the carried reactant of
+  // each step that needs help, serially and capped, because each call is an index scan and the
+  // gather step is already the slow half of a turn.
+  const forwardPromise = (async () => {
+    const wanted: Array<[number, string, string[]]> = [];
+    for (const step of audit.steps) {
+      const entry = entryFor.get(step.index);
+      const needs = routeStepFailure(step) !== null || (entry ? entry.count === 0 && !entry.unchanged : false);
+      if (!needs || wanted.length >= MAX_ALTERNATIVE_STEPS) continue;
+      const reactants = (labels[step.index] ?? []).filter((label) => label.role === 'reactant' && /[Cc]/.test(label.smiles));
+      if (!reactants.length) continue;
+      // The carried molecule is the biggest reactant; the rest are the partners the search needs
+      // to offer any two-component transformation at all.
+      const sorted = [...reactants].sort((a, b) => b.smiles.length - a.smiles.length);
+      wanted.push([step.index, sorted[0].smiles, sorted.slice(1).map((label) => label.smiles)]);
+    }
+    for (const [step, reactant, partners] of wanted) {
+      options.signal?.throwIfAborted();
+      const steps = await invokeForwardSteps(runner, reactant, partners, 6, options);
+      if (steps && steps.length) support.set(step, { ...support.get(step), forward: { reactant, steps } });
+    }
+  })().catch((error) => { console.warn('[route] forward-step support unavailable:', error instanceof Error ? error.message : String(error)); });
+
+  await Promise.all([passagesPromise, alternativesPromise, forwardPromise]);
+  return support;
+}
+
+/** The target's name from the route labels: the main product of the step that formed it, or a
+ *  product labelled with exactly the target SMILES. */
+function targetName(labels: RouteSpeciesLabel[][], audit: RouteAudit, target: string | null | undefined): string | undefined {
+  const formedAt = audit.target?.formedAt;
+  if (formedAt !== null && formedAt !== undefined) {
+    const main = (labels[formedAt] ?? []).filter((entry) => entry.role === 'product' && !entry.byproduct && entry.name);
+    if (main.length === 1) return main[0].name;
+  }
+  return target ? labels.flat().find((entry) => entry.role === 'product' && entry.smiles === target && entry.name)?.name : undefined;
+}
+
+
+/** Does the whole synthesis pass? Every step passes, nothing is disconnected, and the target is
+ *  formed with the stereochemistry that was asked for.
+ *
+ *  Deliberately deterministic: it does not consult the model route review, so the final report
+ *  does not wait on a model call to decide whether to draw. A review problem is advice about a
+ *  route that balances, and it is printed in the check block either way. */
+function routePasses(audit: RouteAudit): boolean {
+  return audit.steps.length > 0
+    && audit.steps.every((step) => !routeStepFailure(step))
+    && !isolatedSteps(audit).length
+    && !brokenRouteLinks(audit).length
+    && audit.target?.reason !== 'not-formed'
+    && audit.target?.reason !== 'stereo-mismatch';
+}
+
+/** THE ONLY PLACE A ROUTE IS DRAWN. One block, printed once, when the whole synthesis passes:
+ *  a summary of every step and the reaction diagram for every step.
+ *
+ *  Nothing else in the route lane draws. Before this, three paths could each put a picture in a
+ *  route answer — these step diagrams, the recorded-reaction pictures beside the ORD precedent,
+ *  and whatever the model asked for in its own `chemistry-plan` fence — and the last of those ran
+ *  on every fix round whatever the verdict, which is how a route with a failing step still came
+ *  back with structures drawn. Drawing is also the most expensive thing the report does, so doing
+ *  it only on a route that passed is both the clearer answer and the cheaper one.
+ *
+ *  The gate is deterministic and does not wait for the model review: every step passes, no step is
+ *  disconnected, every intermediate is carried as the same structure, and the target is formed
+ *  with the stereochemistry asked for. */
+async function printFinalReport(
   runner: Runner,
   provider: CapabilityProvider,
   steps: string[],
   conditions: string[],
   audit: RouteAudit,
+  labels: RouteSpeciesLabel[][],
   options: InspectOptions,
 ): Promise<string> {
+  // Checked here as well as at the call site, because this function's contract is the gate: it
+  // must be impossible to get a drawing out of it for a route that did not pass.
+  if (!routePasses(audit)) return '';
   const drawable: RouteStepAudit[] = [];
   const skipped: string[] = [];
+  const passing: RouteStepAudit[] = [];
   for (const step of audit.steps) {
     // The same verdict as the route report, so a step the report marks FAIL (an assembly
     // problem included) is never drawn.
     const reason = routeStepFailure(step) ?? '';
     if (reason) { skipped.push(`- Step ${step.index + 1} — ${reason}`); continue; }
-    if (drawable.length >= MAX_ROUTE_DRAWINGS) { skipped.push(`- Step ${step.index + 1} — not drawn (limit of ${MAX_ROUTE_DRAWINGS} reached)`); continue; }
-    drawable.push(step);
+    passing.push(step);
+  }
+  // Every step gets a diagram: the gate above means every step passed, so there is no partial
+  // route to triage here. The ceiling stays only to bound a pathological route; a real one that
+  // passes end to end is a handful of steps, and the longest in the 30-target suite was 14.
+  for (const step of passing) {
+    if (drawable.length < MAX_ROUTE_DRAWINGS) drawable.push(step);
+    else skipped.push(`- Step ${step.index + 1} — not drawn (at most ${MAX_ROUTE_DRAWINGS} diagrams per report)`);
   }
   const figures: Array<{ index: number; view: string } | null> = new Array(drawable.length).fill(null);
   let cursor = 0;
@@ -559,55 +1036,244 @@ async function drawRouteSteps(
   };
   await Promise.all(Array.from({ length: Math.min(DRAW_CONCURRENCY, drawable.length) }, run));
   const ordered = figures.filter((figure): figure is { index: number; view: string } => figure !== null);
-  // Nothing drawable is not a drawings section; the route report already says why each
-  // step was refused.
+  // Nothing drawable is not a report. The route check block above already stands on its own.
   if (!ordered.length) return '';
-  // Label each scheme with the step it is, so the drawings line up with the report and the
-  // "Fix step N" chips instead of floating unlabelled under the route.
-  const lines = ['### Route drawings (RDKit)', '', ...ordered.flatMap((figure) => [`**Step ${figure.index + 1}**`, '', figure.view, ''])];
+  // Each step reads as its own entry: the equation the checker accepted, then the picture of it.
+  // The summary comes from the same helpers as the route check block, so the two cannot disagree.
+  const summaries = new Map(routeStepSummaries(audit, labels).map((entry) => [entry.index, entry.summary]));
+  const lines = [
+    '### Final report',
+    '',
+    `${FINAL_REPORT_PASSED} ${ordered.length} step(s), one diagram each. This is still bookkeeping: conditions, selectivity, yields and safety are not checked.`,
+    '',
+    ...ordered.flatMap((figure) => [
+      `**Step ${figure.index + 1}** — ${summaries.get(figure.index) ?? ''}`,
+      '',
+      figure.view,
+      '',
+    ]),
+  ];
   if (skipped.length) lines.push('Not drawn:', ...skipped);
   return `\n${lines.join('\n')}\n`;
 }
 
+const STOCK_TOOL = 'check-stock';
+
+/** The stock lines for a route: whether the target itself can be bought, then its starting
+ *  materials; '' without stock lists, with stock switched off, or without the tool. */
+async function startingMaterialStockLine(runner: Runner, labels: RouteSpeciesLabel[][]): Promise<string> {
+  const stockDir = chemistryStockDirectory();
+  const provider = capabilityRegistry().providers.get(CHEMISTRY_CAPABILITY);
+  if (!stockDir || !provider?.tools.some((tool) => tool.id === STOCK_TOOL)) return '';
+  const starting = routeStartingMaterials(labels);
+  const target = routeTargetSmiles(labels);
+  const molecules = [...new Set([...(target ? [target.smiles] : []), ...starting.map((entry) => entry.smiles)])].slice(0, 64);
+  if (!molecules.length) return '';
+  const result = await runner.invoke({ provider, toolId: STOCK_TOOL, input: { stockDir, molecules } });
+  const data = (result.artifacts ?? []).find((entry) => entry.artifactType === 'stock-availability')?.data as
+    ({ stock?: Record<string, string[]>; lists?: string[]; orderable?: Record<string, string[]>; orderLists?: string[] } & Parameters<typeof compoundAvailability>[1]) | undefined;
+  if (!data) return '';
+  const targetLine = target ? formatTargetAvailability(target.name, compoundAvailability(target.smiles, data)) : '';
+  const startingLine = starting.length ? formatStartingMaterialStock(starting, data.stock ?? {}, data.lists ?? [], data.orderable ?? {}, data.orderLists ?? []) : '';
+  return [targetLine && `**Target:** ${targetLine}`, startingLine].filter(Boolean).join('\n\n');
+}
+
+const COMPATIBILITY_TOOL = 'check-compatibility';
+
+/** Functional-group compatibility of each step: its reactants and products from the resolved
+ *  labels, its reagents from the step's conditions line and its named agents. Empty when the
+ *  package has no such tool; textbook examples of protecting groups when the textbook index is
+ *  there. */
+async function checkStepCompatibility(runner: Runner, labels: RouteSpeciesLabel[][], conditions: string[], options: InspectOptions): Promise<StepCompatibility[]> {
+  options.signal?.throwIfAborted();
+  const provider = capabilityRegistry().providers.get(CHEMISTRY_CAPABILITY);
+  if (!provider?.tools.some((tool) => tool.id === COMPATIBILITY_TOOL)) return [];
+  const steps = labels.map((entries, index) => {
+    const smiles = (role: RouteSpeciesLabel['role'], keepByproducts: boolean) => entries
+      .filter((entry) => entry.role === role && (keepByproducts || !entry.byproduct) && entry.smiles)
+      .map((entry) => entry.smiles).slice(0, 12);
+    return { reactants: smiles('reactant', true), products: smiles('product', false), reagents: compatibilityReagentText(conditions[index], entries) };
+  });
+  if (!steps.some((step) => step.reactants.length && step.products.length && step.reagents)) return [];
+  const textbookDir = textbookSchemeDirectory(options.evidenceScope);
+  const result = await runner.invoke({ provider, toolId: COMPATIBILITY_TOOL, input: { steps: steps.slice(0, 24), ...(textbookDir ? { textbookDir } : {}) } });
+  const artifact = (result.artifacts ?? []).find((entry) => entry.artifactType === 'step-compatibility');
+  return artifact ? normalizeCompatibility(artifact.data) : [];
+}
+
 /** The post-answer route check, then one drawing per verified step. Neither rewrites the
  *  answer nor asks the model again; a step the checker refused is reported, not drawn. */
+/** A program-mode answer's report. The program IS the route, so there are no resolved names, no
+ *  stock lines and no per-species drawings to assemble: the application executed the operations
+ *  and the audit it gets back is already the verdict. That is the point of the mode — the model
+ *  never wrote a structure, so none of it can be mis-declared. */
+async function appendRouteProgramReport(finalAnswer: string, program: string, options: InspectOptions): Promise<string> {
+  const provider = programProvider();
+  if (!provider) return `${finalAnswer.trimEnd()}\n\n${formatRouteCheckUnavailable('the installed chemistry package has no route-program tool')}\n`;
+  const { runner, dispose } = chemistryRunner(options);
+  try {
+    const { audit, blocked } = await invokeRouteProgram(runner, provider, program, options.target);
+    // The audit is the report; the fix chip is what makes a failure recoverable. Appending it here
+    // is the only place it can happen for a program: this function returns before the names-first
+    // builder that used to be the sole caller of any fix-prompt code, which is why every program
+    // failure on record took exactly one turn with its fix rounds unspent.
+    if (audit) {
+      const fix = formatRouteProgramReportFix(audit, blocked);
+      return `${finalAnswer.trimEnd()}\n\n${formatRouteAudit(audit)}\n${fix ? `\n${fix}\n` : ''}`;
+    }
+    // Rejected, not unchecked: the package read the program and said what is wrong with it, so the
+    // model is given those lines to act on rather than a note that nothing happened.
+    if (blocked.length) {
+      const fix = formatRouteProgramReportFix(null, blocked);
+      return [finalAnswer.trimEnd(), '', '### Route check (RDKit)', '',
+        '**The route program could not be executed** — it was read and refused, so no equation was checked.',
+        ...blocked.map((entry) => `- ${entry}`), ...(fix ? ['', fix] : []), ''].join('\n');
+    }
+    return `${finalAnswer.trimEnd()}\n\n${formatRouteCheckUnavailable('the chemistry package returned no route audit for the program')}\n`;
+  } catch (error) {
+    // A program that will not parse or an operation that cannot apply is a result, not a crash:
+    // the message is the checker's and goes back to the model as the fix.
+    return `${finalAnswer.trimEnd()}\n\n${formatRouteCheckUnavailable(error instanceof Error ? error.message : 'the route program could not be executed')}\n`;
+  } finally {
+    dispose();
+  }
+}
+
 export async function appendRouteReportAndDrawings(
   finalAnswer: string,
   modelAnswer: string,
   options: InspectOptions = {},
-  overrides: { steps?: string[]; labels?: RouteSpeciesLabel[][] } = {},
+  overrides: { steps?: string[]; labels?: RouteSpeciesLabel[][]; unresolved?: UnresolvedName[] } = {},
 ): Promise<string> {
+  options.signal?.throwIfAborted();
   if (options.enabled === false || !routeVerificationAvailable()) return finalAnswer;
+  // Program mode answers with a program, not labelled steps, so the names-first guard below would
+  // see no steps and hand back the bare answer. Branch before it. An answer that carries no
+  // program falls through, which is what a refusal or a prose-only reply should do.
+  if (routeProgramMode()) {
+    const program = findRouteProgram(modelAnswer);
+    if (program) return appendRouteProgramReport(finalAnswer, program, options);
+  }
   // The names-first path derives the equations from the resolved names and passes them in.
   const steps = overrides.steps ?? [];
   const labels = overrides.labels ?? [];
-  if (!steps.length || !labels.some((entries) => entries.length)) return finalAnswer;
+  // A route where NOTHING resolved still has something to report when names failed: which ones,
+  // by step. Returning the bare answer there told the model nothing (B50).
+  if (!steps.length || (!labels.some((entries) => entries.length) && !overrides.unresolved?.length)) return finalAnswer;
   const conditions = findStepConditions(modelAnswer, steps.length);
   const stepProse = findStepProse(modelAnswer, steps.length);
-  const racemic = declaresRacemic(modelAnswer);
+  // Racemic is decided per step, from that step's own prose, as the rules ask: a sentence
+  // elsewhere ("benzocaine is achiral", a note on the target) no longer excuses every step.
+  const racemic = stepDeclaresRacemic(modelAnswer, steps.length);
+  // A step that names a rearrangement or a radical step is reported, not refused, when its bond
+  // changes need one; read the same way, from the step's own section.
+  const declared = { rearrangement: stepDeclaresRearrangement(modelAnswer, steps.length), radical: stepDeclaresRadical(modelAnswer, steps.length) };
   const provider = routeProvider();
   if (!provider) return finalAnswer;
   const compile = compileProvider();
   const { runner, dispose } = chemistryRunner(options);
+  // How long each part of the report takes, one line per answer (route reports run several
+  // chemistry tools; this says which one an answer waited on).
+  const started = Date.now();
+  const timings: string[] = [];
+  const timed = <T,>(label: string, promise: Promise<T>): Promise<T> => {
+    const t0 = Date.now();
+    return promise.finally(() => timings.push(`${label} ${((Date.now() - t0) / 1000).toFixed(1)}s`));
+  };
   try {
-    const audit = await invokeRoute(runner, provider, steps, racemic, options.target, labels);
+    // The index lookups, the compatibility check and the stock lines read the resolved labels and
+    // nothing of the audit, so they start beside it rather than after it: the audit is the longest
+    // single call in the report, and each of these used to wait for it before it began. Each is
+    // caught here so a failed audit, which returns at once, leaves nothing unhandled behind it.
+    // The index lookup is skipped entirely when the package has no such tool or the index has not
+    // been downloaded.
+    const queries = buildPrecedentQueries(labels);
+    const precedentPromise = timed('ORD precedent', lookupReactionPrecedent(runner, queries.map((query) => query.query), options));
+    precedentPromise.catch(() => undefined);
+    const textbookPromise = timed('textbook precedent', lookupTextbookPrecedent(runner, queries.map((query) => query.query), options).catch(() => null));
+    // Groups a step's reagents would attack (an ester through LiAlH4, a free OH beside a Grignard).
+    const compatibilityPromise = timed('compatibility', checkStepCompatibility(runner, labels, conditions, options).catch(() => [] as StepCompatibility[]));
+    // Which starting materials the user's vendor stock lists hold (no lists: nothing is said).
+    const stockPromise = timed('stock', options.evidenceScope?.external === false ? Promise.resolve('') : startingMaterialStockLine(runner, labels).catch(() => ''));
+    const checked = await timed('audit', invokeRoute(runner, provider, steps, racemic, options.target, labels, declared));
+    const audit = checked ? implyRacemicTarget(checked, options.target) : checked;
     if (!audit) return `${finalAnswer.trimEnd()}\n\n${formatRouteCheckUnavailable('the chemistry package returned no route audit')}\n`;
     // One model review looks for plan problems the checker cannot see (prose vs names, a
     // product that is a different compound, a step that cannot work, a redundant step). It is
     // blocking: a finding marks the route not verified. An unreadable reply never blocks. It
     // runs while the drawings compile, so the reviewer and the drawings overlap.
-    const reviewPromise = requestRouteReview(options.question ?? '', labels, audit, options, stepProse);
-    const drawings = compile ? await drawRouteSteps(runner, compile, steps, conditions, audit, options) : '';
+    const reviewPromise = timed('review', requestRouteReview(options.question ?? '', labels, audit, options, stepProse));
+    // The step support needs the precedent lookup's classes and nothing else — in particular not
+    // the drawings. It used to be started after the drawings were awaited, which put the two
+    // largest costs in the report end to end. Measured on one route: drawings 52.9s then step
+    // support 41.0s inside a 96.7s report, where the lookup they both wait on took 6.4s. Started
+    // here it overlaps the drawings instead, and the report's floor becomes the larger of the two
+    // rather than their sum. Concurrent invokes are safe on one worker: the handle keys pending
+    // calls by callId, which is what lets the evidence gather run three tools at once already.
+    const supportPromise = timed('step support', precedentPromise
+      .then((result) => (result ? buildStepSupport(runner, result.precedent, queries, labels, audit, options) : new Map<number, StepSupport>()))
+      .catch(() => new Map<number, StepSupport>()));
+    // Nothing is drawn until every step passes. A route with a failing step is about to be
+    // rewritten and each picture made for it is discarded with it: measured on one long route,
+    // ~200,000 characters of SVG per turn, three turns running, none of it ever read, while the
+    // package's runtime budget was being exhausted elsewhere in the same turn. The report, the
+    // precedent text and the review are unaffected — those are what a correction is written
+    // from, and they cost nothing to render.
+    // Nothing is drawn while any step still fails, and the report says so rather than leaving a
+    // gap: a route with a failing step is about to be rewritten, and every picture made for it is
+    // discarded with it. Route-level refusals count too — a route whose steps do not join up is
+    // equally about to change.
+    const routeIsRight = routePasses(audit);
+    const drawings = !compile ? ''
+      : routeIsRight ? await timed('final report', printFinalReport(runner, compile, steps, conditions, audit, labels, options))
+      : 'Not drawn: the route has a step that does not pass yet. Every step is summarised and drawn in one final report, once the whole route passes.';
     // Paint the deterministic report and drawings before the reviewer returns. The transport
     // replaces the provisional stream with this returned answer, so the route only waits on
     // the reviewer when the reviewer is the last thing outstanding.
-    if (options.onDeterministic) options.onDeterministic(`${finalAnswer.trimEnd()}\n\n${formatRouteAudit(audit, labels, null, true)}\n${drawings}`);
+    if (options.onDeterministic) options.onDeterministic(`${finalAnswer.trimEnd()}\n\n${formatRouteAudit(audit, labels, null, true, overrides.unresolved ?? [])}\n${drawings}`);
+    // The lookup already carries its drawings; this only formats. Best-effort throughout. The
+    // step support (textbook passage per reaction class, ORD alternatives for a failed or
+    // unprecedented step) was started above, beside the review and the drawings.
+    // Pictures of the recorded reactions wait for the same gate: they are the largest of the lot.
+    const precedentSection = Promise.all([precedentPromise, supportPromise]).then(([result, support]) => {
+      if (!result) return '';
+      const target = options.target ? { smiles: options.target, name: targetName(labels, audit, options.target) } : null;
+      // No pictures here any more. The recorded reaction is cited by id and similarity, which is
+      // what makes it evidence; drawing it put a second set of structures in the answer that was
+      // easily read as this route's own. Every diagram now comes from the final report.
+      const drawings = undefined;
+      return formatReactionPrecedents(result.precedent, { queries, labels, target, drawings, support });
+    }).catch(() => '');
+    // The same steps in the reaction schemes of the user's own textbooks, cited by book and page.
+    const textbookSection = textbookPromise.then((precedent) => {
+      if (!precedent) return '';
+      const target = options.target ? { smiles: options.target, name: targetName(labels, audit, options.target) } : null;
+      return formatTextbookPrecedents(precedent, (ids) => textbookCitations(ids, undefined, options.evidenceScope), { queries, target });
+    }).catch(() => '');
     const review = await reviewPromise;
-    const report = formatRouteAudit(audit, labels, review);
+    // A review that failed or returned nothing readable is null; one that found nothing is `ok`.
+    // The verdict stands on the deterministic checks either way, but the reader is told which, as
+    // the interim report told them the verdict was waiting for it.
+    const report = `${formatRouteAudit(audit, labels, review, false, overrides.unresolved ?? []).trimEnd()}${review ? '' : '\n\n_The model review did not run (its call failed or its reply could not be read), so this verdict rests on the balance and continuity checks alone._'}`;
+    const finalReport = blockingReviewProblems(review).length ? drawings.replace(FINAL_REPORT_PASSED, FINAL_REPORT_REVIEW_HELD) : drawings;
+    const precedentText = await precedentSection;
+    const support = await supportPromise;
+    // A step's high-severity clashes ride along in its fix prompt, as evidence.
+    const compatibility = await compatibilityPromise;
+    for (const step of compatibility) {
+      const clashes = compatibilityFixLines(step);
+      if (clashes.length) support.set(step.step - 1, { ...(support.get(step.step - 1) ?? {}), compatibility: clashes });
+    }
+    const compatibilityText = formatCompatibility(compatibility, (ids) => textbookCitations(ids, undefined, options.evidenceScope));
     // A refusal the checker can name and the app cannot fix is offered back to the model as one
-    // click: names and roles only — the model never authored the derived SMILES.
-    const fix = formatNamedRouteFixPrompts(labels, audit, review);
-    return `${finalAnswer.trimEnd()}\n\n${report}\n${drawings}${fix ? `\n${fix}\n` : ''}`;
+    // click: names and roles only — the model never authored the derived SMILES. The index's
+    // alternatives and a textbook passage ride along as evidence.
+    const fix = formatNamedRouteFixPrompts(labels, audit, review, support, overrides.unresolved ?? []);
+    const sources = await evidenceSources(modelAnswer, steps.length, precedentPromise, queries, support);
+    const stockLine = await stockPromise;
+    const textbookText = await textbookSection;
+    console.info(`${new Date().toISOString()} [routeReport] ${((Date.now() - started) / 1000).toFixed(1)}s · ${timings.join(' · ')}`);
+    return `${finalAnswer.trimEnd()}\n\n${report}\n${stockLine ? `${stockLine}\n\n` : ''}${finalReport}${precedentText}${textbookText}${compatibilityText}${sources}${fix ? `\n${fix}\n` : ''}`;
   } catch (error) {
     if (options.signal?.aborted) return finalAnswer;
     return `${finalAnswer.trimEnd()}\n\n${formatRouteCheckUnavailable(error instanceof Error ? error.message : 'the route check failed')}\n`;

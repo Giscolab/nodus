@@ -1,4 +1,6 @@
 import { ResearchEffortControl } from '../components/ResearchEffortControl';
+import { ResearchHarnessControl, useResearchHarnessOptions, type ResearchHarnessOptions } from '../components/ResearchHarnessControl';
+import { ResearchHarnessPanel } from '../components/ResearchHarnessPanel';
 import { useResearchEffort } from '../hooks/useResearchEffort';
 import type { ResearchEffort } from '@shared/researchReasoning';
 import { DocumentVisualScope, DocumentVisualActions, DocumentVisualFigures } from '../components/DocumentVisualScope';
@@ -43,8 +45,12 @@ import { useListPlacement } from '../listPlacement';
 import { Badge, Icon, RestoringPane, TypeDot } from '../components/ui';
 import { WorkspaceTabStrip } from '../components/library/LibraryWorkspaceTabs';
 import { SectionHeader } from '../components/SectionHeader';
+import { GalleryFilterMenu, GalleryFilterReset, GallerySortMenu, passesFilter, type GalleryFilterOption } from '../components/GalleryFilters';
+import { PROMPT_LANGUAGE_OPTIONS } from '@shared/promptLanguageOptions';
 import { ModelPicker } from '../components/ModelPicker';
-import { Markdown, type MarkdownCitation } from '../components/Markdown';
+import type { MarkdownCitation } from '../components/Markdown';
+import { ResearchMarkdown as Markdown } from '../components/ResearchSourceNotice';
+import { researchSourcePresentation } from '@shared/researchSourceNotices';
 import { StudyMarkdown, StudyMarkdownInline } from '../components/StudyMarkdown';
 import { SourceCitationModal, type CitationTarget, type OpenCitationLibraryWork } from '../components/SourceCitationModal';
 import { SaveToNotesModal } from '../components/SaveToNotesModal';
@@ -68,7 +74,8 @@ import {
 } from '../backgroundJobs';
 import { useFeatureModel } from '../hooks/useFeatureModel';
 import { DecorativeImageCard } from '../components/DecorativeImageCard';
-import { AudioPanel } from '../components/AudioPanel';
+import { ListenButton } from '../components/narration/Listen';
+import { ReadAlong, type ReadAlongControls } from '../components/narration/ReadAlong';
 import { FindInPage } from '../components/FindInPage';
 import { NodiViewContextSource } from '../components/NodiViewContextSource';
 import {
@@ -100,6 +107,16 @@ function playerSteps(session: ImmersionSession): PlayerStep[] {
     { kind: 'frontiers' },
     { kind: 'exam' },
   ];
+}
+
+/** Step that shows a narrated segment, from the label `immersionSegments` gives it
+ *  ("Panorama", "Estación 2 · …"); -1 when none does. */
+function immersionStepForNarration(steps: readonly PlayerStep[], label: string): number {
+  if (/^Panorama\b/.test(label)) return steps.findIndex((step) => step.kind === 'panorama');
+  const station = /^Estación (\d+)/.exec(label);
+  if (!station) return -1;
+  const index = Number(station[1]) - 1;
+  return steps.findIndex((step) => step.kind === 'station' && step.index === index);
 }
 
 function stepMeta(step: PlayerStep, session: ImmersionSession): { icon: string; title: string; minutes: number } {
@@ -198,6 +215,7 @@ export function ImmersionView({
   const [model, setModel] = useFeatureModel(settings, 'immersionModel');
   // The thinking level for that model, shared with the Research chat's memory.
   const [thinkingEffort, setThinkingEffort] = useResearchEffort(settings, model ?? null);
+  const harnessOptions = useResearchHarnessOptions(settings, 'immersion');
 
   const [scope, setScope] = useState<ImmersionScope | null>(null);
   const [scoping, setScoping] = useState(false);
@@ -311,6 +329,8 @@ export function ImmersionView({
       scope,
       request: {
         topic: scope.topic,
+        harnessVersion: harnessOptions.version, explorationMode: harnessOptions.exploration,
+        webSearch: harnessOptions.web,
         documentSkills: documentSkills.policy,
         language,
         minutes,
@@ -431,6 +451,7 @@ export function ImmersionView({
 
   return (
     <div className="theme-workspace-surface h-full flex flex-col min-h-0">
+      <ResearchHarnessPanel mode="immersion" onResumed={() => void refreshSessions()} />
       {mode !== 'scope' && <WorkspaceTabStrip
         homeLabel={t('Inmersión')}
         homeIcon="target"
@@ -476,6 +497,7 @@ export function ImmersionView({
               model={model}
               thinkingEffort={thinkingEffort}
               onThinkingEffort={setThinkingEffort}
+              harnessOptions={harnessOptions}
               hasModel={hasModel}
               scoping={scoping}
               error={error}
@@ -596,6 +618,8 @@ function ImmersionHome({
   // Restored as initial values only, never as a reactive prop.
   const [search, setSearch] = useState(() => snapshot?.search ?? '');
   const [sortKey, setSortKey] = useState<ImmersionSortKey>(() => snapshot?.sortKey ?? 'recent');
+  const [progressFilter, setProgressFilter] = useState<ImmersionProgressState[]>([]);
+  const [languageFilter, setLanguageFilter] = useState<Array<'es' | 'en'>>([]);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => snapshot?.viewMode ?? 'grid');
   const [anchorId, setAnchorId] = useState<string | null>(() => snapshot?.placement?.anchorId ?? null);
   const [selecting, setSelecting] = useState(false);
@@ -619,17 +643,49 @@ function ImmersionHome({
     }
     setAnchorId(null);
     report.current?.({ placement: null });
-  }, [search, sortKey]);
+  }, [search, sortKey, progressFilter, languageFilter]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const filtered = q ? sessions.filter((s) => (s.title ?? '').toLowerCase().includes(q)) : sessions;
+    const filtered = sessions.filter((s) =>
+      (!q || (s.title ?? '').toLowerCase().includes(q))
+      && passesFilter(progressFilter, immersionProgressState(s))
+      && passesFilter(languageFilter, s.language));
     const sorted = [...filtered];
     if (sortKey === 'title') sorted.sort((a, b) => (a.title ?? '').localeCompare(b.title ?? ''));
     else if (sortKey === 'oldest') sorted.sort((a, b) => (a.updatedAt ?? '').localeCompare(b.updatedAt ?? ''));
     else sorted.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
     return sorted;
-  }, [sessions, search, sortKey]);
+  }, [sessions, search, sortKey, progressFilter, languageFilter]);
+
+  // Counted over every session, so a number does not vanish when another filter is on.
+  // The language menu only appears once the gallery holds both languages.
+  const filterOptions = useMemo(() => {
+    const progress = new Map<ImmersionProgressState, number>();
+    const languages = new Map<string, number>();
+    for (const s of sessions) {
+      const state = immersionProgressState(s);
+      progress.set(state, (progress.get(state) ?? 0) + 1);
+      languages.set(s.language, (languages.get(s.language) ?? 0) + 1);
+    }
+    const progressOptions: GalleryFilterOption<ImmersionProgressState>[] = [
+      { value: 'new', label: t('Sin empezar'), count: progress.get('new') ?? 0 },
+      { value: 'active', label: t('En curso'), count: progress.get('active') ?? 0 },
+      { value: 'finished', label: t('Terminadas'), count: progress.get('finished') ?? 0 },
+    ];
+    const languageOptions: GalleryFilterOption<'es' | 'en'>[] = PROMPT_LANGUAGE_OPTIONS
+      .filter((option): option is typeof option & { id: 'es' | 'en' } =>
+        (option.id === 'es' || option.id === 'en')
+        && (languages.has(option.id) || languageFilter.includes(option.id)))
+      .map((option) => ({ value: option.id, label: option.label, count: languages.get(option.id) ?? 0 }));
+    return { progress: progressOptions, language: languageOptions };
+  }, [sessions, languageFilter]);
+
+  const activeFilterCount = progressFilter.length + languageFilter.length;
+  const clearFilters = () => {
+    setProgressFilter([]);
+    setLanguageFilter([]);
+  };
 
   const toggle = (id: string) =>
     setSelected((prev) => {
@@ -690,11 +746,35 @@ function ImmersionHome({
             placeholder={t('Buscar entre tus inmersiones…')}
           />
         </div>
-        <select className="input !py-1.5 text-xs" value={sortKey} onChange={(e) => setSortKey(e.target.value as ImmersionSortKey)}>
-          <option value="recent">{t('Más recientes')}</option>
-          <option value="oldest">{t('Más antiguos')}</option>
-          <option value="title">{t('Por título (A–Z)')}</option>
-        </select>
+        <GalleryFilterMenu
+          label={t('Progreso')}
+          icon="target"
+          options={filterOptions.progress}
+          selected={progressFilter}
+          onChange={setProgressFilter}
+          testId="immersion-progress-filter"
+        />
+        {(filterOptions.language.length > 1 || languageFilter.length > 0) && (
+          <GalleryFilterMenu
+            label={t('Idioma')}
+            icon="languages"
+            options={filterOptions.language}
+            selected={languageFilter}
+            onChange={setLanguageFilter}
+            testId="immersion-language-filter"
+          />
+        )}
+        <GalleryFilterReset count={activeFilterCount} onClear={clearFilters} />
+        <GallerySortMenu
+          options={[
+            { value: 'recent', label: t('Más recientes') },
+            { value: 'oldest', label: t('Más antiguos') },
+            { value: 'title', label: t('Por título (A–Z)') },
+          ]}
+          value={sortKey}
+          onChange={setSortKey}
+          testId="immersion-sort"
+        />
         <div className="flex overflow-hidden rounded-lg border border-neutral-700">
           <button
             className={`px-2.5 py-1.5 text-xs ${viewMode === 'grid' ? 'bg-indigo-900/40 text-indigo-200' : 'text-neutral-400 hover:bg-neutral-900'}`}
@@ -745,11 +825,13 @@ function ImmersionHome({
             <div className="max-w-md text-sm text-neutral-500">
               {loadingSessions
                 ? t('Cargando inmersiones…')
-                : search.trim()
+                : activeFilterCount > 0
+                  ? t('No hay elementos con estos filtros.')
+                  : search.trim()
                   ? t('Ninguna inmersión coincide con tu búsqueda.')
                   : t('Aún no hay inmersiones. Crea la primera y quedará aquí, con su progreso, lista para retomarla.')}
             </div>
-            {!search.trim() && !loadingSessions && (
+            {!search.trim() && activeFilterCount === 0 && !loadingSessions && (
               <button className="btn btn-primary gap-1.5" onClick={onNew}>
                 <Icon name="plus" /> {t('Nueva inmersión')}
               </button>
@@ -948,6 +1030,7 @@ function SessionListRow({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function ImmersionComposerModal({
+  harnessOptions,
   documentSkills,
   settings,
   topic,
@@ -972,6 +1055,7 @@ export function ImmersionComposerModal({
   onExplore,
   onClose,
 }: {
+  harnessOptions?: ResearchHarnessOptions;
   documentSkills: ReturnType<typeof useDocumentSkills>;
   settings: AppSettings;
   topic: string;
@@ -1098,6 +1182,7 @@ export function ImmersionComposerModal({
             </div>
           </div>
 
+          {harnessOptions && <ResearchHarnessControl options={harnessOptions} web disabled={scoping} />}
           <DocumentSkillsControl value={documentSkills.policy} onChange={documentSkills.setPolicy} onValidityChange={documentSkills.setValid} />
 
           {error && (
@@ -1122,6 +1207,14 @@ export function ImmersionComposerModal({
       </section>
     </div>
   );
+}
+
+/** Where a session stands, as the gallery's progress filter groups it. */
+type ImmersionProgressState = 'new' | 'active' | 'finished';
+
+function immersionProgressState(s: ImmersionSessionSummary): ImmersionProgressState {
+  if (s.finished) return 'finished';
+  return s.progressPct > 0 ? 'active' : 'new';
 }
 
 function ProgressRing({ pct, finished, size = 48 }: { pct: number; finished: boolean; size?: number }) {
@@ -1393,6 +1486,8 @@ function ImmersionPlayer({
   const current = Math.min(progress.currentStep, steps.length - 1);
   const [direction, setDirection] = useState(1);
   const mainRef = useRef<HTMLDivElement | null>(null);
+  const readAlongControls = useRef<ReadAlongControls | null>(null);
+  const followingNarration = useRef(false);
   const markActionsRef = useRef<ReaderSelectionActionsHandle | null>(null);
   const annotationDocumentId = immersionAnnotationDocumentId(session.id);
 
@@ -1436,6 +1531,8 @@ function ImmersionPlayer({
     (index: number, markDone = false) => {
       const clamped = Math.max(0, Math.min(steps.length - 1, index));
       if (clamped === current && !markDone) return;
+      // Moving to another step by hand stops the view from following the narration.
+      if (!followingNarration.current) readAlongControls.current?.pauseFollow();
       setDirection(clamped >= current ? 1 : -1);
       const completed = new Set(progress.completedSteps);
       if (markDone) completed.add(current);
@@ -1578,8 +1675,9 @@ function ImmersionPlayer({
                 onChange={(image) => onSession({ ...session, image })}
               />
             </div>
-            <div className="mt-5">
-              <AudioPanel entityKind="immersion" entityId={session.id} />
+            <div className="mt-5 flex items-center justify-center gap-2 text-xs text-neutral-500">
+              <span className="rounded-lg border border-neutral-700 p-1"><ListenButton testId="immersion-listen-cover" size={15} target={{ kind: 'immersion', id: session.id, title: session.plan.title }} /></span>
+              {t('Escuchar la inmersión')}
             </div>
             <div className="mt-7 flex flex-col items-center">
               <button
@@ -1621,6 +1719,9 @@ function ImmersionPlayer({
           </div>
         </div>
         <div className="flex-1" />
+        <span className="flex h-9 items-center rounded-lg border border-neutral-700 px-1">
+          <ListenButton testId="immersion-listen" size={15} target={{ kind: 'immersion', id: session.id, title: appliedTranslation?.title ?? session.plan.title }} />
+        </span>
         <DocumentVisualActions />
         <button className="btn btn-ghost gap-1.5 border border-neutral-700 text-xs" disabled={exportingPdf} onClick={() => void exportPdf()}>
           <Icon name={exportingPdf ? 'sync' : 'download'} size={13} className={exportingPdf ? 'animate-spin' : ''} />
@@ -1752,6 +1853,19 @@ function ImmersionPlayer({
           onDeleteAnnotation={deleteAnnotation}
           onAnnotationError={setAnnotationError}
           onMarkChange={setHasReaderMark}
+        />
+        <ReadAlong
+          rootRef={mainRef}
+          scrollRef={mainRef}
+          controlsRef={readAlongControls}
+          matches={(key) => key === `immersion:${session.id}`}
+          onSegment={(_segment, label) => {
+            const target = immersionStepForNarration(steps, label);
+            if (target < 0) return;
+            followingNarration.current = true;
+            goTo(target);
+            followingNarration.current = false;
+          }}
         />
       </div>
 
@@ -2606,5 +2720,5 @@ function sessionMarkdown(session: ImmersionSession): string {
     lines.push('');
   }
   lines.push(`## ${t('Cierre Feynman')}`, '', plan.exam.feynman, '');
-  return lines.join('\n');
+  return researchSourcePresentation(lines.join('\n')).content;
 }

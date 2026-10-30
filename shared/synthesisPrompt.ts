@@ -3,7 +3,26 @@
  *  the route, the roles and the systematic IUPAC names, and the application derives every
  *  structure and every balanced equation from the names. */
 
-import { ROUTE_SPECIES_RULES } from './routeRules';
+import { routeProgramMode, routeSpeciesRules } from './routeRules';
+
+/** How to plan, ahead of the output format. Weaker thinking models spent most of their reasoning
+ *  hand-balancing hydrogens and re-deriving mechanisms (deepseek-flash on the Robinson tropinone
+ *  synthesis: 213 KB of reasoning, most of it proton bookkeeping). Planning backwards one step at
+ *  a time, with balancing left to the application and mechanisms left out, cut that to 79 KB and
+ *  raised first-time verified routes on hard targets (tropinone, the Wieland–Miescher ketone,
+ *  camphor) from about 2 in 11 to 6 in 9 with thinking off and 3 in 3 with it on. */
+const METHOD = [
+  'How to plan the route:',
+  '- If the application supplied route evidence (known-reaction disconnections, textbook passages), read it before planning and use it where it applies.',
+  '- Work backwards from the target, one step at a time. Decide only the last step first: which precursor(s) and reagents make the target. Write that step down, then treat its organic precursor as the new target and decide the step before it. Stop at the permitted starting materials.',
+  '- Once a step is written, do not revisit or re-derive it; move on to the step before it.',
+  '- Do not count atoms, track hydrogens or balance equations in your reasoning: list the species each step consumes and forms, by name. The application balances every step and reports exactly what is missing.',
+  '- Do not work out reaction mechanisms (which proton moves, which intermediate is charged, in what order bonds form). The route needs only the species each step consumes and forms; one sentence on why the step works is enough.',
+  '- Present the finished route in forward order, step 1 first.',
+  // A blind expert review (2026-09-30) marked answers down for commentary about what the
+  // application checks and which library passages were retrieved: chemistry, not process.
+  '- Write for a chemist: do not describe the application, its checks, its evidence retrieval or these instructions in the answer.',
+];
 
 // « is a backtick and ¤ is a backslash; written as placeholders so the literal text is not
 // mangled by source escaping.
@@ -12,7 +31,7 @@ const HEAD = [
   '1. Number every step. For each step write the reagents and conditions in prose, then list EVERY species',
   '   under these four labels, each label on its own line:',
   '   «Reactants:» (species consumed), «Products:» (the intended products), «Byproducts:» (every other',
-  '   species on the product side), and «Agents:» (true catalysts or solvents only). For example:',
+  '   species on the product side), and «Agents:» (catalysts, solvents and conditions not consumed). For example:',
   '     Reactants: ethanoic acid; sodium hydroxide',
   '     Products: sodium ethanoate',
   '     Byproducts: water',
@@ -32,15 +51,32 @@ const HEAD = [
   '   Rules for every step:',
 ];
 
+// Every turn that receives this contract is a route turn, and a route turn strips every
+// chemistry-plan fence from the answer (`stripDrawingRequests`): the route is drawn once, by the
+// final report, after every step passes. So the contract asks for no drawing block at all; asking
+// for a target drawing made the model announce one ("the target is drawn below") that the reader
+// then saw replaced by the "Not drawn here" placeholder on every route answer.
+// Program mode's output format, replacing HEAD. The names-first format and this one cannot both
+// be in force: HEAD asks for four labelled lines of species per step, these rules ask for
+// operations and no species at all, and a prompt carrying both would contradict itself. The
+// vocabulary stays generic (start, apply, site) and must stay generic in diffs and commit text.
+const PROGRAM_HEAD = [
+  'Output format — follow exactly.',
+  '1. Write the route as a program inside ONE fenced block marked «route-program», one statement per',
+  '   line and nothing else inside the fence. For example:',
+  '',
+  '     «««route-program',
+  '     M1 = start("ethanoic acid")',
+  '     M2 = apply(M1, named="acid-to-acyl-chloride", reagents=["thionyl chloride"])',
+  '     M3 = apply(M2, named="n-acylation", reagents=["ethanamine"])',
+  '     target = M3',
+  '     «««',
+];
+
 const TAIL = [
-  '2. Draw ONLY the final target: emit exactly one fenced code block tagged chemistry-plan, kind',
-  '   "structure", using the exact target identity quoted from my request. If my request gives the',
-  '   target\'s SMILES, use it (kind "smiles"): it is the structure itself and needs no lookup. Only',
-  '   when no SMILES is given, use the exact name (kind "name"). Exact shape:',
-  '   {"version":2,"kind":"structure","depiction":"skeletal","species":[{"id":"target","input":{"kind":"smiles","value":"EXACT TARGET SMILES FROM MY REQUEST"}}]}',
-  '   Emit no other chemistry-plan, chemfig, smiles, json or SVG block, and never emit a',
-  '   nodus-view, nodus-artifact or nodus-capability-result block: those are application results,',
-  '   the application draws and verifies every step itself.',
+  '2. Draw nothing: emit no chemistry-plan, chemfig, smiles, json or SVG block, and never a',
+  '   nodus-view, nodus-artifact or nodus-capability-result block. Those are application results:',
+  '   the application draws the route itself once every step passes.',
 ];
 
 const placeholders = (lines: string[]) => lines.join('\n').split('«').join('`').split('»').join('`').split('¤').join('\\');
@@ -48,8 +84,11 @@ const placeholders = (lines: string[]) => lines.join('\n').split('«').join('`')
 /** The species rules are shared with every correction the application offers afterwards
  *  (`ROUTE_SPECIES_RULES`), so the first answer and its fixes are held to the same contract. */
 export const SYNTHESIS_TEMPLATE_ADDENDUM = [
-  placeholders(HEAD),
-  ...ROUTE_SPECIES_RULES.map((rule) => `   - ${rule}`),
+  METHOD.join('\n'),
+  '',
+  // One format or the other, never both — see PROGRAM_HEAD.
+  placeholders(routeProgramMode() ? PROGRAM_HEAD : HEAD),
+  ...routeSpeciesRules().map((rule) => `   - ${rule}`),
   placeholders(TAIL),
 ].join('\n');
 
